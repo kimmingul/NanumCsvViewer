@@ -17,10 +17,11 @@ namespace NanumCsvViewer
         public Form1()
         {
             InitializeComponent();
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             this.Text = programName;
             this.toolStripStatusLabel1.Text = "";
 
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 
             //openFileDialog1.Filter = "All File (*.*)|*.*|All Data File (*.xls;*.xlsx,*.csv,*.txt)|*.xls;*.xlsx;*.csv;*.txt|All Excel File (*.xls;*.xlsx)|*.xls;*.xlsx|Microsoft Excel 97-2003 Workbook (*.xls)|*.xls|Microsoft Excel Workbook (*.xlsx)|*.xlsx|Comma Separated Value File (*.csv)|*.csv|Text File (*.txt)|*.txt";
             openFileDialog1.Filter = "All File (*.*)|*.*|Comma Separated Value File (*.csv)|*.csv";
@@ -50,7 +51,7 @@ namespace NanumCsvViewer
                     var elapsed_time = stopwatch.ElapsedMilliseconds;
 
                     // Grid View
-                    string message = string.Format("The file '{0}' has been loaded. \n (Elapsed time is {1} milliseconds)", fileName, elapsed_time);
+                    string message = string.Format("The file '{0}' has been loaded. \n (Loading time is {1} milliseconds)", fileName, elapsed_time);
                     MessageBox.Show(message, "Information", MessageBoxButtons.OK);
                     advancedDataGridView1.DataSource = dt;
                     advancedDataGridView1.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Sunken;
@@ -58,7 +59,7 @@ namespace NanumCsvViewer
                     advancedDataGridViewSearchToolBar1.SetColumns(advancedDataGridView1.Columns);
 
                     this.Text = programName + "  :  " + fileName;
-                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString();
+                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString() + "   (Loading Time : " + elapsed_time + " milliseconds)";
 
                 }
                 catch (Exception ex)
@@ -88,7 +89,7 @@ namespace NanumCsvViewer
                     var elapsed_time = stopwatch.ElapsedMilliseconds;
 
                     // Grid View
-                    string message = string.Format("The file '{0}' has been loaded. \n (Elapsed time is {1} milliseconds)", fileName, elapsed_time);
+                    string message = string.Format("The file '{0}' has been loaded. \n (Loading time is {1} milliseconds)", fileName, elapsed_time);
                     MessageBox.Show(message, "Information", MessageBoxButtons.OK);
                     advancedDataGridView1.DataSource = dt;
                     advancedDataGridView1.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Sunken;
@@ -96,7 +97,7 @@ namespace NanumCsvViewer
                     advancedDataGridViewSearchToolBar1.SetColumns(advancedDataGridView1.Columns);
 
                     this.Text = programName + "  :  " + fileName;
-                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString();
+                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString() + "   (Loading Time : " + elapsed_time + " milliseconds)";
                 }
                 catch (Exception ex)
                 {
@@ -128,7 +129,7 @@ namespace NanumCsvViewer
                     var elapsed_time = stopwatch.ElapsedMilliseconds;
 
                     // Grid View
-                    string message = string.Format("The file '{0}' has been loaded. \n (Elapsed time is {1} milliseconds)", fileName, elapsed_time);
+                    string message = string.Format("The file '{0}' has been loaded. \n (Loading time is {1} milliseconds)", fileName, elapsed_time);
                     MessageBox.Show(message, "Information", MessageBoxButtons.OK);
                     advancedDataGridView1.DataSource = dt;
                     advancedDataGridView1.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Sunken;
@@ -136,7 +137,7 @@ namespace NanumCsvViewer
                     advancedDataGridViewSearchToolBar1.SetColumns(advancedDataGridView1.Columns);
 
                     this.Text = programName + "  :  " + fileName;
-                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString();
+                    this.toolStripStatusLabel1.Text = "Rows : " + dt.Rows.Count.ToString() + ", Columns : " + dt.Columns.Count.ToString() + "   (Loading Time : " + elapsed_time + " milliseconds)";
                 }
                 catch (Exception ex)
                 {

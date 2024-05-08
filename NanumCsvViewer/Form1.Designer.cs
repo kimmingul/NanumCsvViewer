@@ -243,6 +243,7 @@
             // advancedDataGridViewSearchToolBar1
             // 
             advancedDataGridViewSearchToolBar1.AllowMerge = false;
+            advancedDataGridViewSearchToolBar1.BackColor = Color.Transparent;
             advancedDataGridViewSearchToolBar1.GripStyle = ToolStripGripStyle.Hidden;
             advancedDataGridViewSearchToolBar1.Location = new Point(0, 49);
             advancedDataGridViewSearchToolBar1.MaximumSize = new Size(0, 27);
@@ -251,7 +252,8 @@
             advancedDataGridViewSearchToolBar1.RenderMode = ToolStripRenderMode.Professional;
             advancedDataGridViewSearchToolBar1.Size = new Size(1008, 27);
             advancedDataGridViewSearchToolBar1.TabIndex = 2;
-            advancedDataGridViewSearchToolBar1.Text = "advancedDataGridViewSearchToolBar1";
+            advancedDataGridViewSearchToolBar1.Text = "SearchToolBar";
+            advancedDataGridViewSearchToolBar1.Search += advancedDataGridViewSearchToolBar1_Search;
             // 
             // advancedDataGridView1
             // 
