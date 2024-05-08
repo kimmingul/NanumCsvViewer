@@ -2,6 +2,7 @@ using System.ComponentModel.Design.Serialization;
 using System.Data;
 using System.Diagnostics;
 using System.Text;
+using System.Windows.Forms;
 using MiniExcelLibs;
 using Newtonsoft.Json;
 
@@ -20,6 +21,7 @@ namespace NanumCsvViewer
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             this.Text = programName;
             this.toolStripStatusLabel1.Text = "";
+            this.toolStripComboBox1.SelectedIndex = 1;
 
 
 
@@ -207,6 +209,13 @@ namespace NanumCsvViewer
             About modalForm = new About();
             modalForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             modalForm.ShowDialog();
+        }
+
+        private void toolStripComboBox1_TextChanged(object sender, EventArgs e)
+        {
+            // Font Size 변경하기. Size 변경을 위한 Set 이 안됨.
+            //advancedDataGridView1.ForeColor = Color.Red;
+            //advancedDataGridView1.RowsDefaultCellStyle.Font.Size = toolStripComboBox1.SelectedItem;
         }
     }
 }

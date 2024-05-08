@@ -39,6 +39,7 @@
             toolStripButton6 = new ToolStripButton();
             toolStripSeparator3 = new ToolStripSeparator();
             toolStripButton7 = new ToolStripButton();
+            toolStripComboBox1 = new ToolStripComboBox();
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
             newToolStripMenuItem = new ToolStripMenuItem();
@@ -57,15 +58,17 @@
             statusStrip1 = new StatusStrip();
             toolStripStatusLabel1 = new ToolStripStatusLabel();
             openFileDialog1 = new OpenFileDialog();
+            panel1 = new Panel();
             toolStrip1.SuspendLayout();
             menuStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)advancedDataGridView1).BeginInit();
             statusStrip1.SuspendLayout();
+            panel1.SuspendLayout();
             SuspendLayout();
             // 
             // toolStrip1
             // 
-            toolStrip1.Items.AddRange(new ToolStripItem[] { toolStripButton1, toolStripButton2, toolStripButton3, toolStripButton4, toolStripSeparator2, toolStripButton5, toolStripButton6, toolStripSeparator3, toolStripButton7 });
+            toolStrip1.Items.AddRange(new ToolStripItem[] { toolStripButton1, toolStripButton2, toolStripButton3, toolStripButton4, toolStripSeparator2, toolStripButton5, toolStripButton6, toolStripSeparator3, toolStripButton7, toolStripComboBox1 });
             toolStrip1.Location = new Point(0, 24);
             toolStrip1.Name = "toolStrip1";
             toolStrip1.Size = new Size(1008, 25);
@@ -149,6 +152,14 @@
             toolStripButton7.Name = "toolStripButton7";
             toolStripButton7.Size = new Size(23, 22);
             toolStripButton7.Text = "About";
+            // 
+            // toolStripComboBox1
+            // 
+            toolStripComboBox1.AutoCompleteCustomSource.AddRange(new string[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48" });
+            toolStripComboBox1.Items.AddRange(new object[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36" });
+            toolStripComboBox1.Name = "toolStripComboBox1";
+            toolStripComboBox1.Size = new Size(121, 25);
+            toolStripComboBox1.TextChanged += toolStripComboBox1_TextChanged;
             // 
             // menuStrip1
             // 
@@ -257,16 +268,19 @@
             // 
             // advancedDataGridView1
             // 
+            advancedDataGridView1.AllowUserToAddRows = false;
+            advancedDataGridView1.AllowUserToDeleteRows = false;
             advancedDataGridView1.BackgroundColor = SystemColors.Window;
             advancedDataGridView1.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             advancedDataGridView1.Dock = DockStyle.Fill;
             advancedDataGridView1.FilterAndSortEnabled = true;
             advancedDataGridView1.FilterStringChangedInvokeBeforeDatasourceUpdate = true;
-            advancedDataGridView1.Location = new Point(0, 76);
+            advancedDataGridView1.Location = new Point(0, 0);
             advancedDataGridView1.MaxFilterButtonImageHeight = 23;
             advancedDataGridView1.Name = "advancedDataGridView1";
+            advancedDataGridView1.ReadOnly = true;
             advancedDataGridView1.RightToLeft = RightToLeft.No;
-            advancedDataGridView1.Size = new Size(1008, 653);
+            advancedDataGridView1.Size = new Size(1008, 631);
             advancedDataGridView1.SortStringChangedInvokeBeforeDatasourceUpdate = true;
             advancedDataGridView1.TabIndex = 3;
             // 
@@ -290,14 +304,23 @@
             // 
             openFileDialog1.FileName = "openFileDialog1";
             // 
+            // panel1
+            // 
+            panel1.Controls.Add(advancedDataGridView1);
+            panel1.Dock = DockStyle.Fill;
+            panel1.Location = new Point(0, 76);
+            panel1.Name = "panel1";
+            panel1.Size = new Size(1008, 631);
+            panel1.TabIndex = 5;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             BackColor = SystemColors.Window;
             ClientSize = new Size(1008, 729);
+            Controls.Add(panel1);
             Controls.Add(statusStrip1);
-            Controls.Add(advancedDataGridView1);
             Controls.Add(advancedDataGridViewSearchToolBar1);
             Controls.Add(toolStrip1);
             Controls.Add(menuStrip1);
@@ -312,6 +335,7 @@
             ((System.ComponentModel.ISupportInitialize)advancedDataGridView1).EndInit();
             statusStrip1.ResumeLayout(false);
             statusStrip1.PerformLayout();
+            panel1.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
         }
@@ -346,5 +370,7 @@
         private ToolStripButton toolStripButton7;
         private ToolStripMenuItem aboutToolStripMenuItem;
         private ToolStripStatusLabel toolStripStatusLabel1;
+        private ToolStripComboBox toolStripComboBox1;
+        private Panel panel1;
     }
 }
