@@ -1,16 +1,9 @@
-﻿namespace NanumCsvViewer
+namespace NanumCsvViewer
 {
     partial class Form1
     {
-        /// <summary>
-        ///  Required designer variable.
-        /// </summary>
         private System.ComponentModel.IContainer components = null;
 
-        /// <summary>
-        ///  Clean up any resources being used.
-        /// </summary>
-        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
             if (disposing && (components != null))
@@ -22,355 +15,378 @@
 
         #region Windows Form Designer generated code
 
-        /// <summary>
-        ///  Required method for Designer support - do not modify
-        ///  the contents of this method with the code editor.
-        /// </summary>
         private void InitializeComponent()
         {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
-            toolStrip1 = new ToolStrip();
-            toolStripButton1 = new ToolStripButton();
-            toolStripButton2 = new ToolStripButton();
-            toolStripButton3 = new ToolStripButton();
-            toolStripButton4 = new ToolStripButton();
-            toolStripSeparator2 = new ToolStripSeparator();
-            toolStripButton5 = new ToolStripButton();
-            toolStripButton6 = new ToolStripButton();
-            toolStripSeparator3 = new ToolStripSeparator();
-            toolStripButton7 = new ToolStripButton();
-            toolStripComboBox1 = new ToolStripComboBox();
+            components = new System.ComponentModel.Container();
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
-            newToolStripMenuItem = new ToolStripMenuItem();
             openToolStripMenuItem = new ToolStripMenuItem();
-            openfastToolStripMenuItem = new ToolStripMenuItem();
-            openminiExcelToolStripMenuItem = new ToolStripMenuItem();
-            toolStripSeparator1 = new ToolStripSeparator();
             quitToolStripMenuItem = new ToolStripMenuItem();
             viewToolStripMenuItem = new ToolStripMenuItem();
             clearFilterToolStripMenuItem = new ToolStripMenuItem();
             clearSortToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
-            advancedDataGridViewSearchToolBar1 = new Zuby.ADGV.AdvancedDataGridViewSearchToolBar();
-            advancedDataGridView1 = new Zuby.ADGV.AdvancedDataGridView();
+
+            toolStrip1 = new ToolStrip();
+            openToolStripButton = new ToolStripButton();
+            toolStripSeparatorA = new ToolStripSeparator();
+            encodingLabel = new ToolStripLabel();
+            encodingCombo = new ToolStripComboBox();
+            toolStripSeparatorB = new ToolStripSeparator();
+            findLabel = new ToolStripLabel();
+            findTextBox = new ToolStripTextBox();
+            findNextButton = new ToolStripButton();
+            toolStripSeparatorC = new ToolStripSeparator();
+            filterColumnLabel = new ToolStripLabel();
+            filterColumnCombo = new ToolStripComboBox();
+            filterTextBox = new ToolStripTextBox();
+            applyFilterButton = new ToolStripButton();
+            clearFilterButton = new ToolStripButton();
+
+            outerSplit = new SplitContainer();
+            splitContainer1 = new SplitContainer();
+            cellAddressLabel = new Label();
+            cellValueTextBox = new TextBox();
+            detailHeaderLabel = new Label();
+            detailRichText = new RichTextBox();
+            detailToggleButton = new ToolStripButton();
+            toolStripSeparatorD = new ToolStripSeparator();
+            detailPanelMenuItem = new ToolStripMenuItem();
+            grid = new DataGridView();
             statusStrip1 = new StatusStrip();
-            toolStripStatusLabel1 = new ToolStripStatusLabel();
+            statusLabel = new ToolStripStatusLabel();
+            progressLabel = new ToolStripStatusLabel();
+            progressBar = new ToolStripProgressBar();
             openFileDialog1 = new OpenFileDialog();
-            panel1 = new Panel();
-            toolStrip1.SuspendLayout();
+
             menuStrip1.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)advancedDataGridView1).BeginInit();
+            toolStrip1.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)outerSplit).BeginInit();
+            outerSplit.Panel1.SuspendLayout();
+            outerSplit.Panel2.SuspendLayout();
+            outerSplit.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)splitContainer1).BeginInit();
+            splitContainer1.Panel1.SuspendLayout();
+            splitContainer1.Panel2.SuspendLayout();
+            splitContainer1.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)grid).BeginInit();
             statusStrip1.SuspendLayout();
-            panel1.SuspendLayout();
             SuspendLayout();
-            // 
-            // toolStrip1
-            // 
-            toolStrip1.Items.AddRange(new ToolStripItem[] { toolStripButton1, toolStripButton2, toolStripButton3, toolStripButton4, toolStripSeparator2, toolStripButton5, toolStripButton6, toolStripSeparator3, toolStripButton7, toolStripComboBox1 });
-            toolStrip1.Location = new Point(0, 24);
-            toolStrip1.Name = "toolStrip1";
-            toolStrip1.Size = new Size(1008, 25);
-            toolStrip1.TabIndex = 0;
-            toolStrip1.Text = "toolStrip1";
-            // 
-            // toolStripButton1
-            // 
-            toolStripButton1.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton1.Image = (Image)resources.GetObject("toolStripButton1.Image");
-            toolStripButton1.ImageTransparentColor = Color.Magenta;
-            toolStripButton1.Name = "toolStripButton1";
-            toolStripButton1.Size = new Size(23, 22);
-            toolStripButton1.Text = "New";
-            // 
-            // toolStripButton2
-            // 
-            toolStripButton2.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton2.Image = (Image)resources.GetObject("toolStripButton2.Image");
-            toolStripButton2.ImageTransparentColor = Color.Magenta;
-            toolStripButton2.Name = "toolStripButton2";
-            toolStripButton2.Size = new Size(23, 22);
-            toolStripButton2.Text = "Open";
-            toolStripButton2.Click += openToolStripMenuItem_Click;
-            // 
-            // toolStripButton3
-            // 
-            toolStripButton3.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton3.Image = (Image)resources.GetObject("toolStripButton3.Image");
-            toolStripButton3.ImageTransparentColor = Color.Magenta;
-            toolStripButton3.Name = "toolStripButton3";
-            toolStripButton3.Size = new Size(23, 22);
-            toolStripButton3.Text = "Open (fast)";
-            toolStripButton3.Click += openfastToolStripMenuItem_Click;
-            // 
-            // toolStripButton4
-            // 
-            toolStripButton4.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton4.Image = (Image)resources.GetObject("toolStripButton4.Image");
-            toolStripButton4.ImageTransparentColor = Color.Magenta;
-            toolStripButton4.Name = "toolStripButton4";
-            toolStripButton4.Size = new Size(23, 22);
-            toolStripButton4.Text = "Open (miniExcel)";
-            toolStripButton4.Click += openminiExcelToolStripMenuItem_Click;
-            // 
-            // toolStripSeparator2
-            // 
-            toolStripSeparator2.Name = "toolStripSeparator2";
-            toolStripSeparator2.Size = new Size(6, 25);
-            // 
-            // toolStripButton5
-            // 
-            toolStripButton5.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton5.Image = (Image)resources.GetObject("toolStripButton5.Image");
-            toolStripButton5.ImageTransparentColor = Color.Magenta;
-            toolStripButton5.Name = "toolStripButton5";
-            toolStripButton5.Size = new Size(23, 22);
-            toolStripButton5.Text = "Clear Filter";
-            toolStripButton5.Click += clearFilterToolStripMenuItem_Click;
-            // 
-            // toolStripButton6
-            // 
-            toolStripButton6.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton6.Image = (Image)resources.GetObject("toolStripButton6.Image");
-            toolStripButton6.ImageTransparentColor = Color.Magenta;
-            toolStripButton6.Name = "toolStripButton6";
-            toolStripButton6.Size = new Size(23, 22);
-            toolStripButton6.Text = "Clear Sort";
-            toolStripButton6.Click += clearSortToolStripMenuItem_Click;
-            // 
-            // toolStripSeparator3
-            // 
-            toolStripSeparator3.Name = "toolStripSeparator3";
-            toolStripSeparator3.Size = new Size(6, 25);
-            // 
-            // toolStripButton7
-            // 
-            toolStripButton7.DisplayStyle = ToolStripItemDisplayStyle.Image;
-            toolStripButton7.Image = (Image)resources.GetObject("toolStripButton7.Image");
-            toolStripButton7.ImageTransparentColor = Color.Magenta;
-            toolStripButton7.Name = "toolStripButton7";
-            toolStripButton7.Size = new Size(23, 22);
-            toolStripButton7.Text = "About";
-            // 
-            // toolStripComboBox1
-            // 
-            toolStripComboBox1.AutoCompleteCustomSource.AddRange(new string[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48" });
-            toolStripComboBox1.Items.AddRange(new object[] { "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36" });
-            toolStripComboBox1.Name = "toolStripComboBox1";
-            toolStripComboBox1.Size = new Size(121, 25);
-            toolStripComboBox1.TextChanged += toolStripComboBox1_TextChanged;
-            // 
+
             // menuStrip1
-            // 
             menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, viewToolStripMenuItem, helpToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
             menuStrip1.Size = new Size(1008, 24);
-            menuStrip1.TabIndex = 1;
             menuStrip1.Text = "menuStrip1";
-            // 
-            // fileToolStripMenuItem
-            // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { newToolStripMenuItem, openToolStripMenuItem, openfastToolStripMenuItem, openminiExcelToolStripMenuItem, toolStripSeparator1, quitToolStripMenuItem });
+            // File
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openToolStripMenuItem, quitToolStripMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "File";
-            // 
-            // newToolStripMenuItem
-            // 
-            newToolStripMenuItem.Name = "newToolStripMenuItem";
-            newToolStripMenuItem.Size = new Size(166, 22);
-            newToolStripMenuItem.Text = "New";
-            // 
-            // openToolStripMenuItem
-            // 
             openToolStripMenuItem.Name = "openToolStripMenuItem";
-            openToolStripMenuItem.Size = new Size(166, 22);
-            openToolStripMenuItem.Text = "Open";
-            openToolStripMenuItem.Click += openToolStripMenuItem_Click;
-            // 
-            // openfastToolStripMenuItem
-            // 
-            openfastToolStripMenuItem.Name = "openfastToolStripMenuItem";
-            openfastToolStripMenuItem.Size = new Size(166, 22);
-            openfastToolStripMenuItem.Text = "Open (fast)";
-            openfastToolStripMenuItem.Click += openfastToolStripMenuItem_Click;
-            // 
-            // openminiExcelToolStripMenuItem
-            // 
-            openminiExcelToolStripMenuItem.Name = "openminiExcelToolStripMenuItem";
-            openminiExcelToolStripMenuItem.Size = new Size(166, 22);
-            openminiExcelToolStripMenuItem.Text = "Open (miniExcel)";
-            openminiExcelToolStripMenuItem.Click += openminiExcelToolStripMenuItem_Click;
-            // 
-            // toolStripSeparator1
-            // 
-            toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(163, 6);
-            // 
-            // quitToolStripMenuItem
-            // 
+            openToolStripMenuItem.Size = new Size(180, 22);
+            openToolStripMenuItem.Text = "Open...";
+            openToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
+            openToolStripMenuItem.Click += OnOpenClick;
             quitToolStripMenuItem.Name = "quitToolStripMenuItem";
-            quitToolStripMenuItem.Size = new Size(166, 22);
+            quitToolStripMenuItem.Size = new Size(180, 22);
             quitToolStripMenuItem.Text = "Quit";
-            quitToolStripMenuItem.Click += quitToolStripMenuItem_Click;
-            // 
-            // viewToolStripMenuItem
-            // 
-            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clearFilterToolStripMenuItem, clearSortToolStripMenuItem });
+            quitToolStripMenuItem.Click += OnQuitClick;
+            // View
+            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { detailPanelMenuItem, clearFilterToolStripMenuItem, clearSortToolStripMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(45, 20);
             viewToolStripMenuItem.Text = "View";
-            // 
-            // clearFilterToolStripMenuItem
-            // 
+            detailPanelMenuItem.Name = "detailPanelMenuItem";
+            detailPanelMenuItem.Size = new Size(180, 22);
+            detailPanelMenuItem.Text = "상세 패널";
+            detailPanelMenuItem.CheckOnClick = true;
+            detailPanelMenuItem.ShortcutKeys = Keys.F4;
+            detailPanelMenuItem.CheckedChanged += OnDetailMenuChanged;
             clearFilterToolStripMenuItem.Name = "clearFilterToolStripMenuItem";
-            clearFilterToolStripMenuItem.Size = new Size(131, 22);
+            clearFilterToolStripMenuItem.Size = new Size(180, 22);
             clearFilterToolStripMenuItem.Text = "Clear Filter";
-            clearFilterToolStripMenuItem.Click += clearFilterToolStripMenuItem_Click;
-            // 
-            // clearSortToolStripMenuItem
-            // 
+            clearFilterToolStripMenuItem.Click += OnClearFilterClick;
             clearSortToolStripMenuItem.Name = "clearSortToolStripMenuItem";
-            clearSortToolStripMenuItem.Size = new Size(131, 22);
+            clearSortToolStripMenuItem.Size = new Size(180, 22);
             clearSortToolStripMenuItem.Text = "Clear Sort";
-            clearSortToolStripMenuItem.Click += clearSortToolStripMenuItem_Click;
-            // 
-            // helpToolStripMenuItem
-            // 
+            clearSortToolStripMenuItem.Click += OnClearSortClick;
+            // Help
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "Help";
-            // 
-            // aboutToolStripMenuItem
-            // 
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
-            aboutToolStripMenuItem.Size = new Size(107, 22);
+            aboutToolStripMenuItem.Size = new Size(180, 22);
             aboutToolStripMenuItem.Text = "About";
-            aboutToolStripMenuItem.Click += aboutToolStripMenuItem_Click;
-            // 
-            // advancedDataGridViewSearchToolBar1
-            // 
-            advancedDataGridViewSearchToolBar1.AllowMerge = false;
-            advancedDataGridViewSearchToolBar1.BackColor = Color.Transparent;
-            advancedDataGridViewSearchToolBar1.GripStyle = ToolStripGripStyle.Hidden;
-            advancedDataGridViewSearchToolBar1.Location = new Point(0, 49);
-            advancedDataGridViewSearchToolBar1.MaximumSize = new Size(0, 27);
-            advancedDataGridViewSearchToolBar1.MinimumSize = new Size(0, 27);
-            advancedDataGridViewSearchToolBar1.Name = "advancedDataGridViewSearchToolBar1";
-            advancedDataGridViewSearchToolBar1.RenderMode = ToolStripRenderMode.Professional;
-            advancedDataGridViewSearchToolBar1.Size = new Size(1008, 27);
-            advancedDataGridViewSearchToolBar1.TabIndex = 2;
-            advancedDataGridViewSearchToolBar1.Text = "SearchToolBar";
-            advancedDataGridViewSearchToolBar1.Search += advancedDataGridViewSearchToolBar1_Search;
-            // 
-            // advancedDataGridView1
-            // 
-            advancedDataGridView1.AllowUserToAddRows = false;
-            advancedDataGridView1.AllowUserToDeleteRows = false;
-            advancedDataGridView1.BackgroundColor = SystemColors.Window;
-            advancedDataGridView1.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            advancedDataGridView1.Dock = DockStyle.Fill;
-            advancedDataGridView1.FilterAndSortEnabled = true;
-            advancedDataGridView1.FilterStringChangedInvokeBeforeDatasourceUpdate = true;
-            advancedDataGridView1.Location = new Point(0, 0);
-            advancedDataGridView1.MaxFilterButtonImageHeight = 23;
-            advancedDataGridView1.Name = "advancedDataGridView1";
-            advancedDataGridView1.ReadOnly = true;
-            advancedDataGridView1.RightToLeft = RightToLeft.No;
-            advancedDataGridView1.Size = new Size(1008, 631);
-            advancedDataGridView1.SortStringChangedInvokeBeforeDatasourceUpdate = true;
-            advancedDataGridView1.TabIndex = 3;
-            // 
+            aboutToolStripMenuItem.Click += OnAboutClick;
+
+            // toolStrip1
+            toolStrip1.Items.AddRange(new ToolStripItem[]
+            {
+                openToolStripButton, toolStripSeparatorA,
+                encodingLabel, encodingCombo, toolStripSeparatorB,
+                findLabel, findTextBox, findNextButton, toolStripSeparatorC,
+                filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
+                toolStripSeparatorD, detailToggleButton
+            });
+            toolStrip1.Location = new Point(0, 24);
+            toolStrip1.Name = "toolStrip1";
+            toolStrip1.Size = new Size(1008, 25);
+            toolStrip1.GripStyle = ToolStripGripStyle.Hidden;
+
+            openToolStripButton.Name = "openToolStripButton";
+            openToolStripButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            openToolStripButton.Text = "Open";
+            openToolStripButton.Click += OnOpenClick;
+
+            toolStripSeparatorA.Name = "toolStripSeparatorA";
+
+            encodingLabel.Name = "encodingLabel";
+            encodingLabel.Text = "Encoding:";
+
+            encodingCombo.Name = "encodingCombo";
+            encodingCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            encodingCombo.Size = new Size(140, 25);
+            encodingCombo.SelectedIndexChanged += OnEncodingChanged;
+
+            toolStripSeparatorB.Name = "toolStripSeparatorB";
+
+            findLabel.Name = "findLabel";
+            findLabel.Text = "Find:";
+
+            findTextBox.Name = "findTextBox";
+            findTextBox.Size = new Size(140, 25);
+            findTextBox.KeyDown += OnFindKeyDown;
+
+            findNextButton.Name = "findNextButton";
+            findNextButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            findNextButton.Text = "Find Next";
+            findNextButton.Click += OnFindNextClick;
+
+            toolStripSeparatorC.Name = "toolStripSeparatorC";
+
+            filterColumnLabel.Name = "filterColumnLabel";
+            filterColumnLabel.Text = "Filter:";
+
+            filterColumnCombo.Name = "filterColumnCombo";
+            filterColumnCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            filterColumnCombo.Size = new Size(130, 25);
+
+            filterTextBox.Name = "filterTextBox";
+            filterTextBox.Size = new Size(140, 25);
+            filterTextBox.KeyDown += OnFilterKeyDown;
+
+            applyFilterButton.Name = "applyFilterButton";
+            applyFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            applyFilterButton.Text = "Apply";
+            applyFilterButton.Click += OnApplyFilterClick;
+
+            clearFilterButton.Name = "clearFilterButton";
+            clearFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            clearFilterButton.Text = "Clear";
+            clearFilterButton.Click += OnClearFilterClick;
+
+            toolStripSeparatorD.Name = "toolStripSeparatorD";
+
+            detailToggleButton.Name = "detailToggleButton";
+            detailToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            detailToggleButton.Text = "⊟ 상세 패널 (F4)";
+            detailToggleButton.CheckOnClick = true;
+            detailToggleButton.ToolTipText = "선택한 행의 전체 내용을 우측 패널에 표시";
+            detailToggleButton.CheckedChanged += OnDetailToggleChanged;
+
+            // outerSplit (좌: 기존 화면 / 우: 상세 패널) — 세로 분할, 폭 확장, 기본 숨김
+            outerSplit.Name = "outerSplit";
+            outerSplit.Dock = DockStyle.Fill;
+            outerSplit.Orientation = Orientation.Vertical;
+            outerSplit.SplitterWidth = 4;
+            outerSplit.Panel1MinSize = 200;
+            outerSplit.Panel2MinSize = 150;
+            outerSplit.Panel1.Controls.Add(splitContainer1);
+            outerSplit.Panel2.Controls.Add(detailRichText);
+            outerSplit.Panel2.Controls.Add(detailHeaderLabel);
+            outerSplit.Panel2Collapsed = true;
+
+            // detailHeaderLabel (패널 머리글: 행 번호)
+            detailHeaderLabel.Name = "detailHeaderLabel";
+            detailHeaderLabel.Dock = DockStyle.Top;
+            detailHeaderLabel.Height = 22;
+            detailHeaderLabel.TextAlign = ContentAlignment.MiddleLeft;
+            detailHeaderLabel.Padding = new Padding(5, 0, 0, 0);
+            detailHeaderLabel.BackColor = SystemColors.Control;
+            detailHeaderLabel.BorderStyle = BorderStyle.FixedSingle;
+            detailHeaderLabel.Text = "행 상세";
+
+            // detailRichText (선택 행 전체: 컬럼명 + 값, 멀티라인 읽기 전용)
+            detailRichText.Name = "detailRichText";
+            detailRichText.Dock = DockStyle.Fill;
+            detailRichText.ReadOnly = true;
+            detailRichText.BorderStyle = BorderStyle.None;
+            detailRichText.BackColor = SystemColors.Window;
+            detailRichText.WordWrap = true;
+            detailRichText.ScrollBars = RichTextBoxScrollBars.Both;
+            detailRichText.DetectUrls = false;
+
+            // splitContainer1 (위: 선택 셀 값 표시줄 / 아래: 그리드) — 가로 분할, 스플리터로 높이 확장
+            splitContainer1.Name = "splitContainer1";
+            splitContainer1.Dock = DockStyle.Fill;
+            splitContainer1.Orientation = Orientation.Horizontal;
+            splitContainer1.SplitterWidth = 4;
+            splitContainer1.Panel1MinSize = 22;
+            splitContainer1.Panel2MinSize = 60;
+            splitContainer1.Panel1.Controls.Add(cellValueTextBox);
+            splitContainer1.Panel1.Controls.Add(cellAddressLabel);
+            splitContainer1.Panel2.Controls.Add(grid);
+
+            // cellAddressLabel (Excel 이름 상자 느낌)
+            cellAddressLabel.Name = "cellAddressLabel";
+            cellAddressLabel.Dock = DockStyle.Left;
+            cellAddressLabel.Width = 150;
+            cellAddressLabel.AutoSize = false;
+            cellAddressLabel.TextAlign = ContentAlignment.MiddleLeft;
+            cellAddressLabel.BorderStyle = BorderStyle.Fixed3D;
+            cellAddressLabel.Padding = new Padding(5, 0, 0, 0);
+            cellAddressLabel.BackColor = SystemColors.Control;
+
+            // cellValueTextBox (선택 셀 전체 값, 읽기 전용, 여러 줄)
+            cellValueTextBox.Name = "cellValueTextBox";
+            cellValueTextBox.Dock = DockStyle.Fill;
+            cellValueTextBox.Multiline = true;
+            cellValueTextBox.ReadOnly = true;
+            cellValueTextBox.WordWrap = true;
+            cellValueTextBox.ScrollBars = ScrollBars.Vertical;
+            cellValueTextBox.BorderStyle = BorderStyle.FixedSingle;
+            cellValueTextBox.BackColor = SystemColors.Window;
+
+            // grid
+            grid.Name = "grid";
+            grid.Dock = DockStyle.Fill;
+            grid.VirtualMode = true;
+            grid.ReadOnly = true;
+            grid.AllowUserToAddRows = false;
+            grid.AllowUserToDeleteRows = false;
+            grid.AllowUserToResizeRows = false;
+            grid.RowHeadersVisible = true;
+            grid.RowHeadersWidth = 70;
+            grid.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            grid.EditMode = DataGridViewEditMode.EditProgrammatically;
+            grid.BackgroundColor = SystemColors.Window;
+            grid.CellValueNeeded += OnCellValueNeeded;
+            grid.RowHeightInfoNeeded += OnRowHeightInfoNeeded;
+            grid.RowPostPaint += OnRowPostPaint;
+            grid.CurrentCellChanged += OnCurrentCellChanged;
+            grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
+
             // statusStrip1
-            // 
-            statusStrip1.Items.AddRange(new ToolStripItem[] { toolStripStatusLabel1 });
+            statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar });
             statusStrip1.Location = new Point(0, 707);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new Size(1008, 22);
-            statusStrip1.TabIndex = 4;
-            statusStrip1.Text = "Status";
-            // 
-            // toolStripStatusLabel1
-            // 
-            toolStripStatusLabel1.BackColor = Color.Transparent;
-            toolStripStatusLabel1.Name = "toolStripStatusLabel1";
-            toolStripStatusLabel1.Size = new Size(78, 17);
-            toolStripStatusLabel1.Text = "Row Number";
-            // 
+            statusStrip1.Text = "statusStrip1";
+
+            statusLabel.Name = "statusLabel";
+            statusLabel.Spring = true;
+            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            statusLabel.Text = "Ready.";
+
+            progressLabel.Name = "progressLabel";
+            progressLabel.AutoSize = false;
+            progressLabel.Size = new Size(50, 17);
+            progressLabel.TextAlign = ContentAlignment.MiddleRight;
+            progressLabel.Visible = false;
+
+            progressBar.Name = "progressBar";
+            progressBar.Size = new Size(200, 16);
+            progressBar.Visible = false;
+
             // openFileDialog1
-            // 
-            openFileDialog1.FileName = "openFileDialog1";
-            // 
-            // panel1
-            // 
-            panel1.Controls.Add(advancedDataGridView1);
-            panel1.Dock = DockStyle.Fill;
-            panel1.Location = new Point(0, 76);
-            panel1.Name = "panel1";
-            panel1.Size = new Size(1008, 631);
-            panel1.TabIndex = 5;
-            // 
+            openFileDialog1.Filter = "CSV / Text File (*.csv;*.txt)|*.csv;*.txt|All Files (*.*)|*.*";
+            openFileDialog1.FilterIndex = 1;
+            openFileDialog1.RestoreDirectory = true;
+
             // Form1
-            // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            BackColor = SystemColors.Window;
             ClientSize = new Size(1008, 729);
-            Controls.Add(panel1);
+            Controls.Add(outerSplit);
             Controls.Add(statusStrip1);
-            Controls.Add(advancedDataGridViewSearchToolBar1);
             Controls.Add(toolStrip1);
             Controls.Add(menuStrip1);
             MainMenuStrip = menuStrip1;
             Name = "Form1";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Nanum CSV Viewer";
-            toolStrip1.ResumeLayout(false);
-            toolStrip1.PerformLayout();
+
             menuStrip1.ResumeLayout(false);
             menuStrip1.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)advancedDataGridView1).EndInit();
+            toolStrip1.ResumeLayout(false);
+            toolStrip1.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)grid).EndInit();
+            splitContainer1.Panel1.ResumeLayout(false);
+            splitContainer1.Panel1.PerformLayout();
+            splitContainer1.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)splitContainer1).EndInit();
+            splitContainer1.ResumeLayout(false);
+            outerSplit.Panel1.ResumeLayout(false);
+            outerSplit.Panel2.ResumeLayout(false);
+            outerSplit.Panel2.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)outerSplit).EndInit();
+            outerSplit.ResumeLayout(false);
             statusStrip1.ResumeLayout(false);
             statusStrip1.PerformLayout();
-            panel1.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
         }
 
         #endregion
 
-        private ToolStrip toolStrip1;
         private MenuStrip menuStrip1;
         private ToolStripMenuItem fileToolStripMenuItem;
-        private ToolStripMenuItem newToolStripMenuItem;
         private ToolStripMenuItem openToolStripMenuItem;
-        private ToolStripMenuItem openfastToolStripMenuItem;
-        private ToolStripSeparator toolStripSeparator1;
         private ToolStripMenuItem quitToolStripMenuItem;
         private ToolStripMenuItem viewToolStripMenuItem;
-        private ToolStripMenuItem helpToolStripMenuItem;
-        private Zuby.ADGV.AdvancedDataGridViewSearchToolBar advancedDataGridViewSearchToolBar1;
-        private Zuby.ADGV.AdvancedDataGridView advancedDataGridView1;
-        private ToolStripButton toolStripButton1;
-        private StatusStrip statusStrip1;
-        private OpenFileDialog openFileDialog1;
-        private ToolStripMenuItem openminiExcelToolStripMenuItem;
         private ToolStripMenuItem clearFilterToolStripMenuItem;
         private ToolStripMenuItem clearSortToolStripMenuItem;
-        private ToolStripButton toolStripButton2;
-        private ToolStripButton toolStripButton3;
-        private ToolStripButton toolStripButton4;
-        private ToolStripSeparator toolStripSeparator2;
-        private ToolStripButton toolStripButton5;
-        private ToolStripButton toolStripButton6;
-        private ToolStripSeparator toolStripSeparator3;
-        private ToolStripButton toolStripButton7;
+        private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
-        private ToolStripStatusLabel toolStripStatusLabel1;
-        private ToolStripComboBox toolStripComboBox1;
-        private Panel panel1;
+
+        private ToolStrip toolStrip1;
+        private ToolStripButton openToolStripButton;
+        private ToolStripSeparator toolStripSeparatorA;
+        private ToolStripLabel encodingLabel;
+        private ToolStripComboBox encodingCombo;
+        private ToolStripSeparator toolStripSeparatorB;
+        private ToolStripLabel findLabel;
+        private ToolStripTextBox findTextBox;
+        private ToolStripButton findNextButton;
+        private ToolStripSeparator toolStripSeparatorC;
+        private ToolStripLabel filterColumnLabel;
+        private ToolStripComboBox filterColumnCombo;
+        private ToolStripTextBox filterTextBox;
+        private ToolStripButton applyFilterButton;
+        private ToolStripButton clearFilterButton;
+
+        private SplitContainer outerSplit;
+        private SplitContainer splitContainer1;
+        private Label cellAddressLabel;
+        private TextBox cellValueTextBox;
+        private Label detailHeaderLabel;
+        private RichTextBox detailRichText;
+        private ToolStripButton detailToggleButton;
+        private ToolStripSeparator toolStripSeparatorD;
+        private ToolStripMenuItem detailPanelMenuItem;
+        private DataGridView grid;
+        private StatusStrip statusStrip1;
+        private ToolStripStatusLabel statusLabel;
+        private ToolStripStatusLabel progressLabel;
+        private ToolStripProgressBar progressBar;
+        private OpenFileDialog openFileDialog1;
     }
 }
