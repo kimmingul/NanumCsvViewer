@@ -16,6 +16,8 @@ namespace NanumCsvViewer
         private bool _suppressEncodingEvent;
         private bool _busy;
         private bool _indexing;
+        private bool _userResizedRowHeader;   // 사용자가 행번호 칸 폭을 직접 조절하면 자동 조정 중단
+        private bool _settingRowHeaderWidth;   // 프로그램이 폭을 설정하는 중(사용자 조작과 구분)
 
         // 뷰 상태 — 다중 조건 필터(모두 AND) : 텍스트 조건 1개 + 셀값 조건 N개
         private Func<string[], bool>? _textCondition;
@@ -75,6 +77,7 @@ namespace NanumCsvViewer
                 old?.Dispose();
 
                 ResetView();
+                _userResizedRowHeader = false; // 새 파일에서는 자동 폭 조정 재개
                 _doc = VirtualCsvDocument.Open(path);
 
                 BuildColumns(_doc.Header);
@@ -200,14 +203,23 @@ namespace NanumCsvViewer
 
         private void UpdateRowHeaderWidth()
         {
-            if (_doc is null) return;
-            // 콤마 없는 자릿수 기준, 폭을 종전의 약 절반으로
-            int digits = Math.Max(2, _doc.DataRowsAvailable.ToString().Length);
-            int w = Math.Max(28, 10 + digits * 4);
+            // 사용자가 직접 폭을 조절했으면 더 이상 자동 조정하지 않음(사용자 설정 보존)
+            if (_doc is null || _userResizedRowHeader) return;
+            // 행번호 자릿수에 맞춰 넉넉히(예: 100,000=6자리도 잘 보이게). 사용자는 경계를 끌어 조절 가능.
+            int digits = Math.Max(3, _doc.DataRowsAvailable.ToString().Length);
+            int w = Math.Max(64, 22 + digits * 9);
             if (grid.RowHeadersWidth != w)
             {
+                _settingRowHeaderWidth = true;
                 try { grid.RowHeadersWidth = w; } catch { }
+                _settingRowHeaderWidth = false;
             }
+        }
+
+        private void OnRowHeadersWidthChanged(object? sender, EventArgs e)
+        {
+            // 프로그램이 설정한 경우가 아니라면(=사용자가 드래그) 자동 조정 중단
+            if (!_settingRowHeaderWidth) _userResizedRowHeader = true;
         }
 
         // ---------------------------------------------------------------- Virtual mode
@@ -483,20 +495,35 @@ namespace NanumCsvViewer
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
             string term = filterTextBox.Text;
+            bool hadText = _textCondition is not null;
+
             if (string.IsNullOrEmpty(term))
             {
+                if (!hadText) { UpdateFilterStatus(); return; }   // 변화 없음
                 _textCondition = null;
                 _textConditionDesc = "";
+                await RebuildFilterAsync("필터 갱신 중...");        // 조건 제거 → 넓어짐 → 전체 재스캔
+                return;
+            }
+
+            int sel = filterColumnCombo.SelectedIndex;   // 0 = 모든 컬럼
+            int col = sel - 1;
+            var pred = BuildContainsPredicate(term, col);
+            string colName = col < 0 ? "전체" : (col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}");
+            _textCondition = pred;
+            _textConditionDesc = $"{colName}⊇\"{Trunc(term)}\"";
+
+            if (hadText)
+            {
+                // 기존 텍스트 조건 교체 → 결과가 넓어질 수 있어 전체 재스캔
+                await RebuildFilterAsync("필터 적용 중...");
             }
             else
             {
-                int sel = filterColumnCombo.SelectedIndex;   // 0 = 모든 컬럼
-                int col = sel - 1;
-                _textCondition = BuildContainsPredicate(term, col);
-                string colName = col < 0 ? "전체" : (col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}");
-                _textConditionDesc = $"{colName}⊇\"{Trunc(term)}\"";
+                // 첫 텍스트 조건 = 순수 AND 추가(좁힘) → 증분(현재 뷰만)
+                await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), "필터 적용 중...");
+                UpdateFilterStatus();
             }
-            await RebuildFilterAsync("필터 적용 중...");
         }
 
         // 셀값으로 필터(AND 누적): 선택 셀의 열 = 그 값(정확 일치) 조건을 추가.
@@ -519,10 +546,12 @@ namespace NanumCsvViewer
 
             int capCol = col;
             string capVal = value;
-            _valueConditions.Add(($"{colName}=\"{Trunc(value)}\"",
-                r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal)));
+            Func<string[], bool> pred = r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal);
+            _valueConditions.Add(($"{colName}=\"{Trunc(value)}\"", pred));
 
-            await RebuildFilterAsync("셀값 필터 적용 중...");
+            // 증분: 현재 뷰만 새 조건으로 좁힘(전체 재스캔 안 함). 정렬 순서 유지.
+            await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), "셀값 필터 적용 중...");
+            UpdateFilterStatus();
         }
 
         // 모든 활성 조건(텍스트 + 셀값들)을 AND로 합쳐 뷰를 다시 구성. 필터 변경 시 정렬은 초기화.
@@ -647,10 +676,12 @@ namespace NanumCsvViewer
             if (_doc is null || _busy) return;
             _sortColumn = -1;
             ClearSortGlyphs();
-            // 정렬만 해제: 필터가 있으면 필터 뷰를 다시 구성(정렬 없이), 없으면 전체 보기.
+            // 정렬만 해제: 필터가 있으면 결과를 파일 순서로 즉시 복원(재필터 없음), 없으면 전체 보기.
             if (HasAnyFilter)
             {
-                _ = RebuildFilterAsync("정렬 해제 중...");
+                _doc.ResetViewOrder();
+                grid.Invalidate();
+                UpdateFilterStatus();
             }
             else
             {
@@ -800,6 +831,9 @@ namespace NanumCsvViewer
                 }
             }
             catch { }
+
+            // 상세 패널을 기본으로 표시
+            SetDetailPanelVisible(true);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

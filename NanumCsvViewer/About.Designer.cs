@@ -117,7 +117,7 @@
             label7.Name = "label7";
             label7.Size = new Size(138, 15);
             label7.TabIndex = 8;
-            label7.Text = "on Parents' Day in 2024";
+            label7.Text = "2026-06-22, Happy day !";
             // 
             // pictureBox1
             // 

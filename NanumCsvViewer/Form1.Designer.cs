@@ -133,8 +133,8 @@ namespace NanumCsvViewer
                 openToolStripButton, toolStripSeparatorA,
                 encodingLabel, encodingCombo, toolStripSeparatorB,
                 findLabel, findTextBox, findNextButton, toolStripSeparatorC,
-                filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton, filterByCellButton,
-                toolStripSeparatorD, detailToggleButton
+                filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
+                detailToggleButton
             });
             toolStrip1.Location = new Point(0, 24);
             toolStrip1.Name = "toolStrip1";
@@ -195,7 +195,7 @@ namespace NanumCsvViewer
 
             filterByCellButton.Name = "filterByCellButton";
             filterByCellButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            filterByCellButton.Text = "= 셀값 필터";
+            filterByCellButton.Text = "Filter by Cell";
             filterByCellButton.ToolTipText = "선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)";
             filterByCellButton.Click += OnFilterByCellClick;
 
@@ -203,7 +203,8 @@ namespace NanumCsvViewer
 
             detailToggleButton.Name = "detailToggleButton";
             detailToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            detailToggleButton.Text = "⊟ 상세 패널 (F4)";
+            detailToggleButton.Text = "Detail Panel (F4)";
+            detailToggleButton.Alignment = ToolStripItemAlignment.Right;
             detailToggleButton.CheckOnClick = true;
             detailToggleButton.ToolTipText = "선택한 행의 전체 내용을 우측 패널에 표시";
             detailToggleButton.CheckedChanged += OnDetailToggleChanged;
@@ -280,8 +281,8 @@ namespace NanumCsvViewer
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
             grid.RowHeadersVisible = true;
-            grid.RowHeadersWidth = 70;
-            grid.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
+            grid.RowHeadersWidth = 80;
+            grid.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.EnableResizing;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
             grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
@@ -289,12 +290,14 @@ namespace NanumCsvViewer
             grid.MultiSelect = false;
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.BackgroundColor = SystemColors.Window;
+            grid.BorderStyle = BorderStyle.None;
             grid.ContextMenuStrip = gridContextMenu;
             grid.CellValueNeeded += OnCellValueNeeded;
             grid.RowHeightInfoNeeded += OnRowHeightInfoNeeded;
             grid.RowPostPaint += OnRowPostPaint;
             grid.CurrentCellChanged += OnCurrentCellChanged;
             grid.CellMouseDown += OnGridCellMouseDown;
+            grid.RowHeadersWidthChanged += OnRowHeadersWidthChanged;
             grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
 
             // gridContextMenu (우클릭)

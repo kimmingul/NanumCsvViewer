@@ -255,6 +255,35 @@ namespace NanumCsvViewer.Csv
             }, ct);
         }
 
+        /// <summary>
+        /// 현재 뷰(이미 필터된 결과, 없으면 전체)만 새 조건으로 더 좁힘(증분 AND).
+        /// 전체 데이터를 다시 스캔하지 않고 현재 표시 행만 평가하므로 2중·3중 필터가 빠름. 정렬 순서는 유지.
+        /// </summary>
+        public Task FilterWithinViewAsync(Func<string[], bool> predicate, IProgress<int>? progress, CancellationToken ct)
+        {
+            return Task.Run(() =>
+            {
+                int[] baseMap = _viewMap ?? CreateIdentity(DataRowsAvailable);
+                var result = new List<int>(Math.Min(baseMap.Length, 1 << 16));
+                for (int i = 0; i < baseMap.Length; i++)
+                {
+                    if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                    int dataRow = baseMap[i];
+                    if (predicate(GetDataRow(dataRow))) result.Add(dataRow);
+                    if (progress is not null && (i & 0x3FFFF) == 0 && baseMap.Length > 0)
+                        progress.Report((int)(i * 100L / baseMap.Length));
+                }
+                _viewMap = result.ToArray();
+                progress?.Report(100);
+            }, ct);
+        }
+
+        /// <summary>현재 뷰를 원래(파일) 순서로 즉시 되돌림(행 재읽기 없음). 필터 결과는 유지.</summary>
+        public void ResetViewOrder()
+        {
+            if (_viewMap is { } map) Array.Sort(map); // 데이터 행 인덱스 오름차순 = 파일 순서
+        }
+
         /// <summary>현재 뷰(필터 결과 또는 전체)를 지정 컬럼 기준으로 정렬한 뷰맵 구성.</summary>
         public Task SortAsync(int column, bool ascending, IProgress<int>? progress, CancellationToken ct)
         {
