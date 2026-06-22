@@ -181,6 +181,13 @@ namespace NanumCsvViewer.Csv
             return dataRow + 1L;
         }
 
+        /// <summary>이미 캐시에 있을 때만 행을 반환(디스크/파싱 트리거 없음). 행 높이 계산 등 핫 패스용.</summary>
+        public bool TryGetCachedDisplayRow(int viewIndex, out string[] fields)
+        {
+            int dataRow = _viewMap is { } map ? map[viewIndex] : viewIndex;
+            return _cache.TryGet(dataRow, out fields);
+        }
+
         public string[] GetDataRow(int dataRow)
         {
             if (_cache.TryGet(dataRow, out var cached)) return cached;

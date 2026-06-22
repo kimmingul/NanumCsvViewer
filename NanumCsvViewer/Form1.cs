@@ -11,14 +11,20 @@ namespace NanumCsvViewer
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _opCts;
         private readonly System.Windows.Forms.Timer _rowCountTimer;
+        private readonly System.Windows.Forms.Timer _detailTimer;
 
         private bool _suppressEncodingEvent;
         private bool _busy;
+        private bool _indexing;
 
-        // 뷰 상태(필터/정렬 합성)
-        private Func<string[], bool>? _activeFilter;
+        // 뷰 상태 — 다중 조건 필터(모두 AND) : 텍스트 조건 1개 + 셀값 조건 N개
+        private Func<string[], bool>? _textCondition;
+        private string _textConditionDesc = "";
+        private readonly List<(string desc, Func<string[], bool> pred)> _valueConditions = new();
         private int _sortColumn = -1;
         private bool _sortAscending = true;
+
+        private bool HasAnyFilter => _textCondition is not null || _valueConditions.Count > 0;
 
         // 멀티라인 셀 행 높이 계산용
         private int _singleLineHeight = 22;
@@ -42,7 +48,12 @@ namespace NanumCsvViewer
             _rowCountTimer = new System.Windows.Forms.Timer { Interval = 100 };
             _rowCountTimer.Tick += (_, _) => RefreshRowCount();
 
+            // 상세 패널 갱신 디바운스(빠른 셀 이동 시 RichTextBox 재구성 폭주 방지)
+            _detailTimer = new System.Windows.Forms.Timer { Interval = 40 };
+            _detailTimer.Tick += (_, _) => { _detailTimer.Stop(); UpdateDetailPanel(); };
+
             UpdateFeatureState();
+            RefreshSignal();
             statusLabel.Text = "파일을 여세요 (File ▸ Open).";
         }
 
@@ -112,12 +123,14 @@ namespace NanumCsvViewer
         private void StartIndexing()
         {
             _indexCts = new CancellationTokenSource();
+            _indexing = true;
             progressBar.Visible = true;
             progressBar.Value = 0;
             progressLabel.Visible = true;
             progressLabel.Text = "0%";
             statusLabel.Text = "불러오는 중...";
             _rowCountTimer.Start();
+            UpdateFeatureState();
 
             var progress = new Progress<IndexProgress>(OnIndexProgress);
             _ = RunIndexingAsync(progress);
@@ -131,18 +144,23 @@ namespace NanumCsvViewer
                 await _doc!.RunIndexingAsync(progress, _indexCts!.Token);
                 sw.Stop();
                 _rowCountTimer.Stop();
+                _indexing = false;
                 RefreshRowCount();
                 OnIndexingComplete(sw.ElapsedMilliseconds);
             }
             catch (OperationCanceledException)
             {
                 _rowCountTimer.Stop();
+                _indexing = false;
+                UpdateFeatureState();
             }
             catch (Exception ex)
             {
                 _rowCountTimer.Stop();
+                _indexing = false;
                 progressBar.Visible = false;
                 progressLabel.Visible = false;
+                UpdateFeatureState();
                 MessageBox.Show(ex.Message, "인덱싱 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -226,18 +244,36 @@ namespace NanumCsvViewer
         private void OnRowHeightInfoNeeded(object? sender, DataGridViewRowHeightInfoNeededEventArgs e)
         {
             if (_doc is null || e.RowIndex < 0 || e.RowIndex >= _doc.DisplayRowCount) return;
+
+            // 프리징 방지: DataGridView가 스크롤/선택 계산을 위해 광범위한 행 높이를 질의할 때
+            // 화면 밖 행까지 파싱하면 수백만 건 파싱 폭주가 발생한다.
+            // → 뷰포트 인근 행만 파싱하고, 그 밖은 캐시된 것만(없으면 기본 1줄 높이) 사용한다.
             int lines = 1;
+            string[]? row = null;
             try
             {
-                foreach (string f in _doc.GetDisplayRow(e.RowIndex))
+                int first = grid.FirstDisplayedScrollingRowIndex;
+                if (first >= 0)
+                {
+                    int disp = grid.DisplayedRowCount(false);
+                    bool near = e.RowIndex >= first - 60 && e.RowIndex <= first + disp + 60;
+                    if (near) row = _doc.GetDisplayRow(e.RowIndex);
+                }
+                if (row is null && _doc.TryGetCachedDisplayRow(e.RowIndex, out var cached)) row = cached;
+            }
+            catch { }
+
+            if (row is not null)
+            {
+                foreach (string f in row)
                 {
                     int c = 1;
                     foreach (char ch in f) if (ch == '\n') c++;
                     if (c > lines) lines = c;
                 }
+                if (lines > MaxCellLines) lines = MaxCellLines;
             }
-            catch { }
-            if (lines > MaxCellLines) lines = MaxCellLines;
+
             e.Height = lines <= 1 ? _singleLineHeight : _singleLineHeight + (lines - 1) * _lineHeight;
             e.MinimumHeight = 3;
         }
@@ -264,7 +300,7 @@ namespace NanumCsvViewer
             }
             catch { }
 
-            if (!outerSplit.Panel2Collapsed) UpdateDetailPanel();
+            if (!outerSplit.Panel2Collapsed) { _detailTimer.Stop(); _detailTimer.Start(); }
         }
 
         // ---------------------------------------------------------------- Detail panel (선택 행 전체)
@@ -437,35 +473,94 @@ namespace NanumCsvViewer
 
         private void OnFilterKeyDown(object? sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _ = ApplyFilterAsync(); }
+            if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _ = ApplyTextFilterAsync(); }
         }
 
-        private void OnApplyFilterClick(object? sender, EventArgs e) => _ = ApplyFilterAsync();
+        private void OnApplyFilterClick(object? sender, EventArgs e) => _ = ApplyTextFilterAsync();
 
-        private async Task ApplyFilterAsync()
+        // 텍스트 필터 = 조건 1개 슬롯(적용 시 교체, 빈 값이면 해제). 셀값 조건들과 AND로 합쳐짐.
+        private async Task ApplyTextFilterAsync()
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
-
             string term = filterTextBox.Text;
             if (string.IsNullOrEmpty(term))
             {
-                OnClearFilterClick(this, EventArgs.Empty);
+                _textCondition = null;
+                _textConditionDesc = "";
+            }
+            else
+            {
+                int sel = filterColumnCombo.SelectedIndex;   // 0 = 모든 컬럼
+                int col = sel - 1;
+                _textCondition = BuildContainsPredicate(term, col);
+                string colName = col < 0 ? "전체" : (col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}");
+                _textConditionDesc = $"{colName}⊇\"{Trunc(term)}\"";
+            }
+            await RebuildFilterAsync("필터 적용 중...");
+        }
+
+        // 셀값으로 필터(AND 누적): 선택 셀의 열 = 그 값(정확 일치) 조건을 추가.
+        private void OnFilterByCellClick(object? sender, EventArgs e) => _ = FilterBySelectedCellAsync();
+
+        private async Task FilterBySelectedCellAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var cell = grid.CurrentCell;
+            if (cell is null || cell.RowIndex < 0 || cell.ColumnIndex < 0)
+            {
+                statusLabel.Text = "먼저 셀을 선택하세요.";
                 return;
             }
+            int viewRow = cell.RowIndex, col = cell.ColumnIndex;
+            string[] row;
+            try { row = _doc.GetDisplayRow(viewRow); } catch { return; }
+            string value = col < row.Length ? row[col] : "";
+            string colName = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}";
 
-            int sel = filterColumnCombo.SelectedIndex;       // 0 = 모든 컬럼
-            int col = sel - 1;                                // 특정 컬럼 인덱스(-1이면 전체)
-            _activeFilter = BuildPredicate(term, col);
+            int capCol = col;
+            string capVal = value;
+            _valueConditions.Add(($"{colName}=\"{Trunc(value)}\"",
+                r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal)));
 
-            // 새 필터는 정렬을 초기화
+            await RebuildFilterAsync("셀값 필터 적용 중...");
+        }
+
+        // 모든 활성 조건(텍스트 + 셀값들)을 AND로 합쳐 뷰를 다시 구성. 필터 변경 시 정렬은 초기화.
+        private async Task RebuildFilterAsync(string busyText)
+        {
+            if (_doc is null) return;
             _sortColumn = -1;
             ClearSortGlyphs();
 
-            await RunViewOpAsync(p => _doc.ApplyFilterAsync(_activeFilter!, p, _opCts!.Token), "필터 적용 중...");
-            statusLabel.Text = $"필터 적용: {_doc.DisplayRowCount:N0} / {_doc.DataRowsAvailable:N0} 행";
+            if (!HasAnyFilter)
+            {
+                _doc.ClearView();
+                grid.RowCount = 0;
+                RefreshRowCount();
+                grid.Invalidate();
+                UpdateFilterStatus();
+                return;
+            }
+
+            var combined = BuildCombinedPredicate();
+            await RunViewOpAsync(p => _doc.ApplyFilterAsync(combined, p, _opCts!.Token), busyText);
+            UpdateFilterStatus();
         }
 
-        private static Func<string[], bool> BuildPredicate(string term, int col)
+        private Func<string[], bool> BuildCombinedPredicate()
+        {
+            var text = _textCondition;
+            var preds = _valueConditions.Select(v => v.pred).ToArray();
+            return row =>
+            {
+                if (text is not null && !text(row)) return false;
+                for (int i = 0; i < preds.Length; i++)
+                    if (!preds[i](row)) return false;
+                return true;
+            };
+        }
+
+        private static Func<string[], bool> BuildContainsPredicate(string term, int col)
         {
             if (col < 0)
                 return row =>
@@ -477,10 +572,41 @@ namespace NanumCsvViewer
             return row => col < row.Length && row[col].Contains(term, StringComparison.OrdinalIgnoreCase);
         }
 
+        private void UpdateFilterStatus()
+        {
+            if (_doc is null) return;
+            if (!HasAnyFilter)
+            {
+                statusLabel.Text = $"필터 없음 · {_doc.DataRowsAvailable:N0} 행";
+                return;
+            }
+            var parts = new List<string>();
+            if (_textCondition is not null) parts.Add(_textConditionDesc);
+            parts.AddRange(_valueConditions.Select(v => v.desc));
+            statusLabel.Text = $"필터({parts.Count}): {string.Join(" AND ", parts)}  →  {_doc.DisplayRowCount:N0} / {_doc.DataRowsAvailable:N0} 행";
+        }
+
+        private static string Trunc(string s)
+        {
+            s = s.Replace("\r", " ").Replace("\n", " ");
+            return s.Length <= 20 ? s : s.Substring(0, 20) + "…";
+        }
+
+        private void OnGridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            // 우클릭 시 해당 셀을 현재 셀로 선택(컨텍스트 메뉴의 '이 셀 값으로 필터'가 그 셀에 적용되도록)
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                try { grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex]; } catch { }
+            }
+        }
+
         private void OnClearFilterClick(object? sender, EventArgs e)
         {
             if (_doc is null) return;
-            _activeFilter = null;
+            _textCondition = null;
+            _textConditionDesc = "";
+            _valueConditions.Clear();
             _sortColumn = -1;
             ClearSortGlyphs();
             _doc.ClearView();
@@ -521,10 +647,10 @@ namespace NanumCsvViewer
             if (_doc is null || _busy) return;
             _sortColumn = -1;
             ClearSortGlyphs();
-            // 정렬만 해제: 필터가 있으면 필터 뷰를 다시 구성, 없으면 전체 보기.
-            if (_activeFilter is not null)
+            // 정렬만 해제: 필터가 있으면 필터 뷰를 다시 구성(정렬 없이), 없으면 전체 보기.
+            if (HasAnyFilter)
             {
-                _ = RunViewOpAsync(p => _doc.ApplyFilterAsync(_activeFilter!, p, _opCts!.Token), "정렬 해제 중...");
+                _ = RebuildFilterAsync("정렬 해제 중...");
             }
             else
             {
@@ -532,8 +658,8 @@ namespace NanumCsvViewer
                 grid.RowCount = 0;
                 RefreshRowCount();
                 grid.Invalidate();
+                statusLabel.Text = "정렬 해제.";
             }
-            statusLabel.Text = "정렬 해제.";
         }
 
         private void ClearSortGlyphs()
@@ -605,20 +731,40 @@ namespace NanumCsvViewer
             filterTextBox.Enabled = ready;
             applyFilterButton.Enabled = ready;
             clearFilterButton.Enabled = ready;
+            filterByCellButton.Enabled = ready;
+            filterByCellMenuItem.Enabled = ready;
             clearFilterToolStripMenuItem.Enabled = ready;
             clearSortToolStripMenuItem.Enabled = ready;
+
+            RefreshSignal();
+        }
+
+        // 상태바 우측 신호등(단일 점): 대기/로딩/작업중/준비완료
+        private void RefreshSignal()
+        {
+            Color c; string t;
+            if (_doc is null) { c = Color.Gray; t = "대기"; }
+            else if (_indexing) { c = Color.Goldenrod; t = "불러오는 중"; }
+            else if (_busy) { c = Color.DarkOrange; t = "작업 중"; }
+            else { c = Color.ForestGreen; t = "준비완료"; }
+            signalLabel.ForeColor = c;
+            signalLabel.Text = "● " + t;
         }
 
         private void ResetView()
         {
-            _activeFilter = null;
+            _textCondition = null;
+            _textConditionDesc = "";
+            _valueConditions.Clear();
             _sortColumn = -1;
             ClearSortGlyphs();
         }
 
         private void ResetViewMapOnly()
         {
-            _activeFilter = null;
+            _textCondition = null;
+            _textConditionDesc = "";
+            _valueConditions.Clear();
             _sortColumn = -1;
             ClearSortGlyphs();
             _doc?.ClearView();
@@ -661,6 +807,8 @@ namespace NanumCsvViewer
             CancelAll();
             _doc?.Dispose();
             _detailBoldFont?.Dispose();
+            _detailTimer?.Dispose();
+            _rowCountTimer?.Dispose();
             base.OnFormClosed(e);
         }
     }

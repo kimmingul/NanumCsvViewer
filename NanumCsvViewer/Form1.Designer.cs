@@ -43,6 +43,9 @@ namespace NanumCsvViewer
             filterTextBox = new ToolStripTextBox();
             applyFilterButton = new ToolStripButton();
             clearFilterButton = new ToolStripButton();
+            filterByCellButton = new ToolStripButton();
+            gridContextMenu = new ContextMenuStrip(components);
+            filterByCellMenuItem = new ToolStripMenuItem();
 
             outerSplit = new SplitContainer();
             splitContainer1 = new SplitContainer();
@@ -58,6 +61,7 @@ namespace NanumCsvViewer
             statusLabel = new ToolStripStatusLabel();
             progressLabel = new ToolStripStatusLabel();
             progressBar = new ToolStripProgressBar();
+            signalLabel = new ToolStripStatusLabel();
             openFileDialog1 = new OpenFileDialog();
 
             menuStrip1.SuspendLayout();
@@ -129,7 +133,7 @@ namespace NanumCsvViewer
                 openToolStripButton, toolStripSeparatorA,
                 encodingLabel, encodingCombo, toolStripSeparatorB,
                 findLabel, findTextBox, findNextButton, toolStripSeparatorC,
-                filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
+                filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton, filterByCellButton,
                 toolStripSeparatorD, detailToggleButton
             });
             toolStrip1.Location = new Point(0, 24);
@@ -188,6 +192,12 @@ namespace NanumCsvViewer
             clearFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
             clearFilterButton.Text = "Clear";
             clearFilterButton.Click += OnClearFilterClick;
+
+            filterByCellButton.Name = "filterByCellButton";
+            filterByCellButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            filterByCellButton.Text = "= 셀값 필터";
+            filterByCellButton.ToolTipText = "선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)";
+            filterByCellButton.Click += OnFilterByCellClick;
 
             toolStripSeparatorD.Name = "toolStripSeparatorD";
 
@@ -276,16 +286,26 @@ namespace NanumCsvViewer
             grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
             grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            grid.MultiSelect = false;
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.BackgroundColor = SystemColors.Window;
+            grid.ContextMenuStrip = gridContextMenu;
             grid.CellValueNeeded += OnCellValueNeeded;
             grid.RowHeightInfoNeeded += OnRowHeightInfoNeeded;
             grid.RowPostPaint += OnRowPostPaint;
             grid.CurrentCellChanged += OnCurrentCellChanged;
+            grid.CellMouseDown += OnGridCellMouseDown;
             grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
 
+            // gridContextMenu (우클릭)
+            gridContextMenu.Name = "gridContextMenu";
+            gridContextMenu.Items.Add(filterByCellMenuItem);
+            filterByCellMenuItem.Name = "filterByCellMenuItem";
+            filterByCellMenuItem.Text = "이 셀 값으로 필터";
+            filterByCellMenuItem.Click += OnFilterByCellClick;
+
             // statusStrip1
-            statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar });
+            statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar, signalLabel });
             statusStrip1.Location = new Point(0, 707);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new Size(1008, 22);
@@ -305,6 +325,13 @@ namespace NanumCsvViewer
             progressBar.Name = "progressBar";
             progressBar.Size = new Size(200, 16);
             progressBar.Visible = false;
+
+            signalLabel.Name = "signalLabel";
+            signalLabel.AutoSize = false;
+            signalLabel.Size = new Size(120, 17);
+            signalLabel.TextAlign = ContentAlignment.MiddleRight;
+            signalLabel.Text = "● 대기";
+            signalLabel.ForeColor = Color.Gray;
 
             // openFileDialog1
             openFileDialog1.Filter = "CSV / Text File (*.csv;*.txt)|*.csv;*.txt|All Files (*.*)|*.*";
@@ -372,6 +399,9 @@ namespace NanumCsvViewer
         private ToolStripTextBox filterTextBox;
         private ToolStripButton applyFilterButton;
         private ToolStripButton clearFilterButton;
+        private ToolStripButton filterByCellButton;
+        private ContextMenuStrip gridContextMenu;
+        private ToolStripMenuItem filterByCellMenuItem;
 
         private SplitContainer outerSplit;
         private SplitContainer splitContainer1;
@@ -387,6 +417,7 @@ namespace NanumCsvViewer
         private ToolStripStatusLabel statusLabel;
         private ToolStripStatusLabel progressLabel;
         private ToolStripProgressBar progressBar;
+        private ToolStripStatusLabel signalLabel;
         private OpenFileDialog openFileDialog1;
     }
 }
