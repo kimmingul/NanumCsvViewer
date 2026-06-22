@@ -84,6 +84,35 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public async Task Multi_column_sort_orders_by_priority()
+        {
+            // 1차: dept 오름차순, 2차: age 내림차순
+            using var doc = await OpenIndexedAsync(
+                "dept,age\nB,30\nA,40\nB,20\nA,25\n");
+            await doc.SortAsync(
+                new[] { new SortKey(0, true), new SortKey(1, false) }, null, CancellationToken.None);
+
+            // A40, A25, B30, B20 순서여야 함
+            Assert.Equal(new[] { "A", "A", "B", "B" },
+                new[] { doc.GetDisplayRow(0)[0], doc.GetDisplayRow(1)[0], doc.GetDisplayRow(2)[0], doc.GetDisplayRow(3)[0] });
+            Assert.Equal(new[] { "40", "25", "30", "20" },
+                new[] { doc.GetDisplayRow(0)[1], doc.GetDisplayRow(1)[1], doc.GetDisplayRow(2)[1], doc.GetDisplayRow(3)[1] });
+        }
+
+        [Fact]
+        public async Task Secondary_key_only_breaks_primary_ties()
+        {
+            // 1차 dept 오름차순, 2차 name 오름차순 — 1차가 다르면 2차는 영향 없음
+            using var doc = await OpenIndexedAsync(
+                "dept,name\nB,zoe\nA,tom\nA,amy\n");
+            await doc.SortAsync(
+                new[] { new SortKey(0, true), new SortKey(1, true) }, null, CancellationToken.None);
+
+            Assert.Equal(new[] { "amy", "tom", "zoe" },
+                new[] { doc.GetDisplayRow(0)[1], doc.GetDisplayRow(1)[1], doc.GetDisplayRow(2)[1] });
+        }
+
+        [Fact]
         public async Task ResetViewOrder_restores_file_order_after_sort()
         {
             using var doc = await OpenIndexedAsync("n\n3\n1\n2\n");

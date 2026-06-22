@@ -10,6 +10,9 @@ namespace NanumCsvViewer.Csv
         public int Percent => FileLength <= 0 ? 100 : (int)Math.Min(100, BytesProcessed * 100 / FileLength);
     }
 
+    /// <summary>정렬 기준 한 단계: 컬럼 인덱스 + 오름차순 여부. 다중 컬럼 정렬은 이 목록의 순서대로 우선순위를 가짐.</summary>
+    public readonly record struct SortKey(int Column, bool Ascending);
+
     /// <summary>
     /// 대용량 CSV의 가상 뷰 문서. 첫 페이지는 즉시 제공하고, 백그라운드 단일 디스크 패스로
     /// 레코드 오프셋을 인덱싱하면서(적응형이면 동시에) RAM 버퍼를 채웁니다. 행은 요청 시 디코드·파싱하여
@@ -306,45 +309,67 @@ namespace NanumCsvViewer.Csv
             if (_viewMap is { } map) Array.Sort(map); // 데이터 행 인덱스 오름차순 = 파일 순서
         }
 
-        /// <summary>현재 뷰(필터 결과 또는 전체)를 지정 컬럼 기준으로 정렬한 뷰맵 구성.</summary>
+        /// <summary>현재 뷰(필터 결과 또는 전체)를 단일 컬럼 기준으로 정렬(다중 키 버전의 편의 오버로드).</summary>
         public Task SortAsync(int column, bool ascending, IProgress<int>? progress, CancellationToken ct)
+            => SortAsync(new[] { new SortKey(column, ascending) }, progress, ct);
+
+        /// <summary>
+        /// 현재 뷰를 여러 컬럼 기준으로 정렬한 뷰맵 구성. sortKeys 순서가 우선순위(앞이 1차).
+        /// 각 컬럼 키는 1회만 추출하고 숫자 여부도 미리 판정하며, 동률은 파일 순서로 안정화한다.
+        /// </summary>
+        public Task SortAsync(IReadOnlyList<SortKey> sortKeys, IProgress<int>? progress, CancellationToken ct)
         {
+            // 호출 스레드에서 스냅샷(공유 컬렉션 변경과 분리).
+            int k = sortKeys.Count;
+            var cols = new int[k];
+            var asc = new bool[k];
+            for (int j = 0; j < k; j++) { cols[j] = sortKeys[j].Column; asc[j] = sortKeys[j].Ascending; }
+
             return Task.Run(() =>
             {
                 int total = DataRowsAvailable;
                 int[] baseMap = _viewMap ?? CreateIdentity(total);
                 int n = baseMap.Length;
+                if (k == 0) { progress?.Report(100); return; }
 
-                // 키를 한 번만 추출(캐시 우회) + 숫자 파싱을 미리 1회 수행(비교마다 재파싱 방지).
-                var keys = new string[n];
-                var num = new double[n];
-                bool allNumeric = n > 0;
+                // 컬럼별 키/숫자값을 한 번만 추출(캐시 우회) + 숫자 여부 1회 판정.
+                var keys = new string[k][];
+                var num = new double[k][];
+                var allNumeric = new bool[k];
+                for (int j = 0; j < k; j++) { keys[j] = new string[n]; num[j] = new double[n]; allNumeric[j] = n > 0; }
+
                 for (int i = 0; i < n; i++)
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                     string[] row = GetDataRowUncached(baseMap[i]);
-                    string key = column < row.Length ? row[column] : string.Empty;
-                    keys[i] = key;
-                    if (allNumeric)
+                    for (int j = 0; j < k; j++)
                     {
-                        if (double.TryParse(key, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) num[i] = d;
-                        else if (key.Length == 0) num[i] = double.NegativeInfinity; // 빈 값은 맨 앞
-                        else allNumeric = false; // 숫자 아님 → 전체를 문자열 비교로
+                        int col = cols[j];
+                        string key = (col >= 0 && col < row.Length) ? row[col] : string.Empty;
+                        keys[j][i] = key;
+                        if (allNumeric[j])
+                        {
+                            if (double.TryParse(key, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) num[j][i] = d;
+                            else if (key.Length == 0) num[j][i] = double.NegativeInfinity; // 빈 값은 맨 앞
+                            else allNumeric[j] = false; // 숫자 아님 → 해당 컬럼은 문자열 비교
+                        }
                     }
                     if (progress is not null && (i & 0x3FFFF) == 0 && n > 0)
                         progress.Report((int)(i * 100L / n));
                 }
 
-                // idx를 키 기준으로 정렬 후 baseMap을 재배열. 동률은 파일 순서(baseMap)로 안정화.
+                // idx를 다중 키 우선순위로 정렬 후 baseMap을 재배열. 모든 키가 같으면 파일 순서로 안정화.
                 int[] idx = CreateIdentity(n);
-                int dir = ascending ? 1 : -1;
                 Array.Sort(idx, (x, y) =>
                 {
-                    int c = allNumeric
-                        ? num[x].CompareTo(num[y])
-                        : string.Compare(keys[x], keys[y], StringComparison.OrdinalIgnoreCase);
-                    if (c != 0) return dir * c;
-                    return baseMap[x].CompareTo(baseMap[y]); // 안정 정렬 tie-break(방향 무관 파일 순서)
+                    for (int j = 0; j < k; j++)
+                    {
+                        int c = allNumeric[j]
+                            ? num[j][x].CompareTo(num[j][y])
+                            : string.Compare(keys[j][x], keys[j][y], StringComparison.OrdinalIgnoreCase);
+                        if (c != 0) return asc[j] ? c : -c;
+                    }
+                    return baseMap[x].CompareTo(baseMap[y]); // 안정 정렬 tie-break
                 });
                 var result = new int[n];
                 for (int i = 0; i < n; i++) result[i] = baseMap[idx[i]];

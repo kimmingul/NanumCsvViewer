@@ -377,6 +377,7 @@ namespace NanumCsvViewer
             grid.CellMouseDown += OnGridCellMouseDown;
             grid.RowHeadersWidthChanged += OnRowHeadersWidthChanged;
             grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
+            grid.CellPainting += OnGridCellPainting;
 
             // gridContextMenu (우클릭)
             gridContextMenu.Name = "gridContextMenu";

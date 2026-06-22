@@ -28,8 +28,8 @@ namespace NanumCsvViewer
         private Func<string[], bool>? _textCondition;
         private string _textConditionDesc = "";
         private readonly List<(string desc, Func<string[], bool> pred)> _valueConditions = new();
-        private int _sortColumn = -1;
-        private bool _sortAscending = true;
+        // 다중 컬럼 정렬: 순서가 우선순위(앞이 1차). 헤더 클릭=단일 교체, Shift+클릭=차수 추가.
+        private readonly List<SortKey> _sortKeys = new();
 
         private bool HasAnyFilter => _textCondition is not null || _valueConditions.Count > 0;
 
@@ -669,7 +669,7 @@ namespace NanumCsvViewer
         private async Task RebuildFilterAsync(string busyText)
         {
             if (_doc is null) return;
-            _sortColumn = -1;
+            _sortKeys.Clear();
             ClearSortGlyphs();
 
             if (!HasAnyFilter)
@@ -747,7 +747,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
-            _sortColumn = -1;
+            _sortKeys.Clear();
             ClearSortGlyphs();
             _doc.ClearView();
             grid.RowCount = 0;
@@ -761,14 +761,30 @@ namespace NanumCsvViewer
         private void OnColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy || e.ColumnIndex < 0) return;
+            bool additive = (ModifierKeys & Keys.Shift) == Keys.Shift;
+            ToggleSortColumn(e.ColumnIndex, additive);
+        }
 
-            if (_sortColumn == e.ColumnIndex) _sortAscending = !_sortAscending;
-            else { _sortColumn = e.ColumnIndex; _sortAscending = true; }
-
+        // 헤더 클릭=단일 기준으로 교체(같은 단일 컬럼 재클릭이면 방향 토글),
+        // Shift+클릭=정렬 차수로 추가(이미 포함된 컬럼이면 방향 토글).
+        private void ToggleSortColumn(int col, bool additive)
+        {
+            int existing = _sortKeys.FindIndex(s => s.Column == col);
+            if (additive)
+            {
+                if (existing >= 0) _sortKeys[existing] = new SortKey(col, !_sortKeys[existing].Ascending);
+                else _sortKeys.Add(new SortKey(col, true));
+            }
+            else
+            {
+                bool asc = (existing == 0 && _sortKeys.Count == 1) ? !_sortKeys[0].Ascending : true;
+                _sortKeys.Clear();
+                _sortKeys.Add(new SortKey(col, asc));
+            }
             _ = SortAsync();
         }
 
-        // Edit/툴바 ▸ 오름·내림차순 정렬: 현재 셀의 열(없으면 첫 열)을 기준으로 정렬.
+        // Edit/툴바 ▸ 오름·내림차순 정렬: 현재 셀의 열(없으면 첫 열)을 단일 기준으로 정렬.
         private void OnSortAscMenuClick(object? sender, EventArgs e) => SortCurrentColumn(true);
         private void OnSortDescMenuClick(object? sender, EventArgs e) => SortCurrentColumn(false);
 
@@ -778,29 +794,37 @@ namespace NanumCsvViewer
             int col = grid.CurrentCell?.ColumnIndex ?? -1;
             if (col < 0) col = grid.Columns.Count > 0 ? 0 : -1;
             if (col < 0) return;
-            _sortColumn = col;
-            _sortAscending = ascending;
+            _sortKeys.Clear();
+            _sortKeys.Add(new SortKey(col, ascending));
             _ = SortAsync();
         }
 
         private async Task SortAsync()
         {
-            if (_doc is null) return;
-            // 정렬은 현재 뷰(필터 결과 또는 전체)를 기준으로 동작.
-            // 필터가 적용된 상태에서 정렬하려면 먼저 필터 뷰가 구성돼 있어야 하므로,
-            // 필터가 있는데 정렬 기준이 바뀌면 SortAsync가 현재 _viewMap을 재정렬한다.
-            await RunViewOpAsync(p => _doc.SortAsync(_sortColumn, _sortAscending, p, _opCts!.Token), "정렬 중...");
+            if (_doc is null || _sortKeys.Count == 0) return;
+            // 정렬은 현재 뷰(필터 결과 또는 전체)를 기준으로 동작. 다중 키는 목록 순서가 우선순위.
+            var keys = _sortKeys.ToArray();
+            await RunViewOpAsync(p => _doc.SortAsync(keys, p, _opCts!.Token), "정렬 중...");
 
-            ClearSortGlyphs();
-            if (_sortColumn >= 0 && _sortColumn < grid.Columns.Count)
-                grid.Columns[_sortColumn].HeaderCell.SortGlyphDirection = _sortAscending ? SortOrder.Ascending : SortOrder.Descending;
-            statusLabel.Text = $"정렬: {grid.Columns[_sortColumn].HeaderText} {(_sortAscending ? "오름차순" : "내림차순")} · {_doc.DisplayRowCount:N0} 행";
+            UpdateSortGlyphs();
+            statusLabel.Text = $"정렬: {DescribeSort()} · {_doc.DisplayRowCount:N0} 행";
+        }
+
+        private string DescribeSort()
+        {
+            var parts = new List<string>(_sortKeys.Count);
+            foreach (var s in _sortKeys)
+            {
+                string name = s.Column < grid.Columns.Count ? grid.Columns[s.Column].HeaderText : $"열{s.Column + 1}";
+                parts.Add($"{name} {(s.Ascending ? "▲" : "▼")}");
+            }
+            return string.Join(" → ", parts);
         }
 
         private void OnClearSortClick(object? sender, EventArgs e)
         {
             if (_doc is null || _busy) return;
-            _sortColumn = -1;
+            _sortKeys.Clear();
             ClearSortGlyphs();
             // 정렬만 해제: 필터가 있으면 결과를 파일 순서로 즉시 복원(재필터 없음), 없으면 전체 보기.
             if (HasAnyFilter)
@@ -823,6 +847,36 @@ namespace NanumCsvViewer
         {
             foreach (DataGridViewColumn c in grid.Columns)
                 c.HeaderCell.SortGlyphDirection = SortOrder.None;
+            grid.Invalidate(); // 우선순위 배지 다시 그리기
+        }
+
+        // 정렬 컬럼마다 화살표 표시. 다중 정렬이면 우선순위 배지는 OnGridCellPainting에서 그림.
+        private void UpdateSortGlyphs()
+        {
+            foreach (DataGridViewColumn c in grid.Columns)
+                c.HeaderCell.SortGlyphDirection = SortOrder.None;
+            foreach (var s in _sortKeys)
+                if (s.Column >= 0 && s.Column < grid.Columns.Count)
+                    grid.Columns[s.Column].HeaderCell.SortGlyphDirection =
+                        s.Ascending ? SortOrder.Ascending : SortOrder.Descending;
+            grid.Invalidate();
+        }
+
+        // 다중 컬럼 정렬 시 헤더 우측 상단에 우선순위 번호(1,2,3…)를 작게 표시.
+        // HeaderText는 손대지 않아 컬럼명 조회(필터/상세/주소)는 그대로 유지된다.
+        private void OnGridCellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex != -1 || e.ColumnIndex < 0 || _sortKeys.Count <= 1 || e.Graphics is null) return;
+            int priority = _sortKeys.FindIndex(s => s.Column == e.ColumnIndex);
+            if (priority < 0) return;
+
+            e.Paint(e.ClipBounds, e.PaintParts); // 기본 헤더(텍스트+정렬 화살표) 먼저
+            string badge = (priority + 1).ToString();
+            using var f = new Font(grid.Font.FontFamily, 6.5f, FontStyle.Bold);
+            Size sz = TextRenderer.MeasureText(badge, f);
+            var pt = new Point(e.CellBounds.Right - sz.Width - 1, e.CellBounds.Top + 1);
+            TextRenderer.DrawText(e.Graphics, badge, f, pt, Color.FromArgb(30, 110, 200));
+            e.Handled = true;
         }
 
         // ---------------------------------------------------------------- Shared op runner
@@ -930,7 +984,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
-            _sortColumn = -1;
+            _sortKeys.Clear();
             ClearSortGlyphs();
         }
 
@@ -939,7 +993,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
-            _sortColumn = -1;
+            _sortKeys.Clear();
             ClearSortGlyphs();
             _doc?.ClearView();
         }
