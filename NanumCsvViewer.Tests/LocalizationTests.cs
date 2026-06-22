@@ -20,6 +20,10 @@ namespace NanumCsvViewer.Tests
         }
 
         [Theory]
+        [InlineData("Menu_File", "파일")]
+        [InlineData("Menu_Edit", "편집")]
+        [InlineData("Menu_View", "보기")]
+        [InlineData("Menu_Help", "도움말")]
         [InlineData("Menu_Open", "열기...")]
         [InlineData("Menu_DetailPanel", "상세 패널")]
         [InlineData("Signal_Ready", "준비완료")]

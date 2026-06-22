@@ -51,7 +51,7 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
 
-  <data name="Menu_File" xml:space="preserve"><value>File</value></data>
+  <data name="Menu_File" xml:space="preserve"><value>파일</value></data>
   <data name="Menu_Open" xml:space="preserve"><value>열기...</value></data>
   <data name="Menu_Quit" xml:space="preserve"><value>종료</value></data>
   <data name="Menu_Edit" xml:space="preserve"><value>편집</value></data>
