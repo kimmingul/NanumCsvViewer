@@ -50,37 +50,33 @@ dotnet test
 
 ## 📦 단일 실행 파일 만들기
 
-두 가지 단일 `.exe` 변형을 게시할 수 있습니다.
+릴리즈는 **Portable**과 **Install** 두 가지로 배포합니다(둘 다 프레임워크 의존 — 앱에 .NET 미포함).
 
-```bash
-# 자체 포함본(.NET 불필요, 약 50 MB)
-dotnet publish NanumCsvViewer/NanumCsvViewer.csproj -p:PublishProfile=win-x64-singlefile
+| 산출물 | 형태 | 요구사항 |
+|---|---|---|
+| **Portable** | `…-portable.exe` — 설치 없이 실행하는 단일 exe | [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) (없으면 Windows가 안내) |
+| **Install** | `…-setup.exe` — 시작 메뉴 등록·제거 지원 설치 관리자 | 설치 중 .NET 10을 점검해 **없으면 자동 설치** |
 
-# 프레임워크 의존본(작음, .NET 10 Desktop Runtime 필요)
-dotnet publish NanumCsvViewer/NanumCsvViewer.csproj -p:PublishProfile=win-x64-framework
-```
-
-| 변형 | 프로필 | 크기 | 요구사항 |
-|---|---|---|---|
-| 자체 포함 | `win-x64-singlefile` | ~50 MB | 없음 |
-| 프레임워크 의존 | `win-x64-framework` | ~수 MB | [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
-
-Visual Studio에서는 게시 시 해당 프로필을 선택하면 됩니다.
+앱 빌드는 `win-x64-framework` 게시 프로필을 사용하고, 설치 관리자는 `installer/NanumCsvViewer.iss`(Inno Setup)로 만듭니다.
+(.NET을 포함한 자체 포함본이 필요하면 `win-x64-singlefile` 프로필로 별도 게시할 수 있습니다.)
 
 ### 릴리즈 + 코드 서명
 
-`scripts/release.ps1`이 두 변형을 게시하고 SafeNet 토큰 인증서로 코드 서명(타임스탬프 포함)한 뒤 GitHub 릴리즈를 만듭니다. 서명 시 토큰 PIN 프롬프트가 뜹니다.
+`scripts/release.ps1`이 게시 → **앱 exe 서명** → Portable 복사 → 설치 관리자 컴파일 → **setup 서명** → **설치된 exe 서명 검증**(임시 무인 설치·제거) → GitHub 릴리즈까지 수행합니다.
+
+- Portable·setup·**설치되는 앱 exe** 모두 SafeNet 토큰의 EV 인증서로 서명·타임스탬프됩니다. (페이로드를 먼저 서명한 뒤 패키징하므로, Inno Setup이 바이트 보존하여 설치된 exe의 서명이 유지됩니다.)
+- `-p:Version`으로 바이너리 파일버전을 릴리즈 버전과 자동 일치시킵니다.
+- 서명 시 토큰 PIN 프롬프트가 뜹니다(연속 서명은 SafeNet single-logon 권장). 동일 버전 재실행 시 기존 릴리즈에 자산을 덮어씁니다.
 
 ```powershell
-# 토큰 연결 상태에서 실행(인증서를 목록에서 선택)
-.\scripts\release.ps1 -Version 1.4.0
+# 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
+.\scripts\release.ps1 -Version 1.5.0
 
-# 빌드/서명만(릴리즈 생략) 또는 서명 생략
-.\scripts\release.ps1 -Version 1.4.0 -SkipRelease
-.\scripts\release.ps1 -Version 1.4.0 -SkipSign -SkipRelease
+# 빌드/컴파일만(서명·검증·릴리즈 생략)
+.\scripts\release.ps1 -Version 1.5.0 -SkipSign -SkipRelease
 ```
 
-요구: Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
+요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
 
 ## 📖 사용법
 
