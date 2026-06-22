@@ -9,6 +9,14 @@
     <!-- 2GB가 넘는 파일을 안전하게 메모리 매핑/버퍼링하려면 64비트 프로세스가 필요합니다. -->
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64;AnyCPU</Platforms>
+
+    <!-- 어셈블리/실행 파일 메타데이터(About 창·파일 속성에 노출) -->
+    <Product>Nanum CSV Viewer</Product>
+    <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
+    <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <!--

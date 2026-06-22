@@ -22,9 +22,20 @@ namespace NanumCsvViewer
             fileToolStripMenuItem = new ToolStripMenuItem();
             openToolStripMenuItem = new ToolStripMenuItem();
             quitToolStripMenuItem = new ToolStripMenuItem();
-            viewToolStripMenuItem = new ToolStripMenuItem();
+            editToolStripMenuItem = new ToolStripMenuItem();
+            findMenuItem = new ToolStripMenuItem();
+            findNextMenuItem = new ToolStripMenuItem();
+            editSeparator1 = new ToolStripSeparator();
+            applyFilterMenuItem = new ToolStripMenuItem();
+            editFilterByCellMenuItem = new ToolStripMenuItem();
             clearFilterToolStripMenuItem = new ToolStripMenuItem();
+            editSeparator2 = new ToolStripSeparator();
+            sortAscMenuItem = new ToolStripMenuItem();
+            sortDescMenuItem = new ToolStripMenuItem();
             clearSortToolStripMenuItem = new ToolStripMenuItem();
+            viewToolStripMenuItem = new ToolStripMenuItem();
+            encodingMenuItem = new ToolStripMenuItem();
+            viewSeparator1 = new ToolStripSeparator();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
 
@@ -55,6 +66,10 @@ namespace NanumCsvViewer
             detailRichText = new RichTextBox();
             detailToggleButton = new ToolStripButton();
             toolStripSeparatorD = new ToolStripSeparator();
+            toolStripSeparatorE = new ToolStripSeparator();
+            sortAscButton = new ToolStripButton();
+            sortDescButton = new ToolStripButton();
+            clearSortButton = new ToolStripButton();
             detailPanelMenuItem = new ToolStripMenuItem();
             grid = new DataGridView();
             statusStrip1 = new StatusStrip();
@@ -79,7 +94,7 @@ namespace NanumCsvViewer
             SuspendLayout();
 
             // menuStrip1
-            menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, viewToolStripMenuItem, helpToolStripMenuItem });
+            menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, editToolStripMenuItem, viewToolStripMenuItem, helpToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
             menuStrip1.Size = new Size(1008, 24);
@@ -90,33 +105,76 @@ namespace NanumCsvViewer
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "File";
             openToolStripMenuItem.Name = "openToolStripMenuItem";
-            openToolStripMenuItem.Size = new Size(180, 22);
+            openToolStripMenuItem.Size = new Size(220, 22);
             openToolStripMenuItem.Text = "Open...";
             openToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
             openToolStripMenuItem.Click += OnOpenClick;
             quitToolStripMenuItem.Name = "quitToolStripMenuItem";
-            quitToolStripMenuItem.Size = new Size(180, 22);
+            quitToolStripMenuItem.Size = new Size(220, 22);
             quitToolStripMenuItem.Text = "Quit";
+            quitToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Q;
             quitToolStripMenuItem.Click += OnQuitClick;
+            // Edit (검색 · 필터 · 정렬 명령)
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                findMenuItem, findNextMenuItem, editSeparator1,
+                applyFilterMenuItem, editFilterByCellMenuItem, clearFilterToolStripMenuItem, editSeparator2,
+                sortAscMenuItem, sortDescMenuItem, clearSortToolStripMenuItem
+            });
+            editToolStripMenuItem.Name = "editToolStripMenuItem";
+            editToolStripMenuItem.Size = new Size(39, 20);
+            editToolStripMenuItem.Text = "Edit";
+            findMenuItem.Name = "findMenuItem";
+            findMenuItem.Size = new Size(220, 22);
+            findMenuItem.Text = "찾기...";
+            findMenuItem.ShortcutKeys = Keys.Control | Keys.F;
+            findMenuItem.Click += OnFindMenuClick;
+            findNextMenuItem.Name = "findNextMenuItem";
+            findNextMenuItem.Size = new Size(220, 22);
+            findNextMenuItem.Text = "다음 찾기";
+            findNextMenuItem.ShortcutKeys = Keys.F3;
+            findNextMenuItem.Click += OnFindNextClick;
+            applyFilterMenuItem.Name = "applyFilterMenuItem";
+            applyFilterMenuItem.Size = new Size(220, 22);
+            applyFilterMenuItem.Text = "필터 적용";
+            applyFilterMenuItem.Click += OnApplyFilterClick;
+            editFilterByCellMenuItem.Name = "editFilterByCellMenuItem";
+            editFilterByCellMenuItem.Size = new Size(220, 22);
+            editFilterByCellMenuItem.Text = "이 셀 값으로 필터";
+            editFilterByCellMenuItem.ShortcutKeys = Keys.Control | Keys.B;
+            editFilterByCellMenuItem.Click += OnFilterByCellClick;
+            clearFilterToolStripMenuItem.Name = "clearFilterToolStripMenuItem";
+            clearFilterToolStripMenuItem.Size = new Size(220, 22);
+            clearFilterToolStripMenuItem.Text = "Clear Filter";
+            clearFilterToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.L;
+            clearFilterToolStripMenuItem.Click += OnClearFilterClick;
+            sortAscMenuItem.Name = "sortAscMenuItem";
+            sortAscMenuItem.Size = new Size(220, 22);
+            sortAscMenuItem.Text = "오름차순 정렬 (현재 열)";
+            sortAscMenuItem.Click += OnSortAscMenuClick;
+            sortDescMenuItem.Name = "sortDescMenuItem";
+            sortDescMenuItem.Size = new Size(220, 22);
+            sortDescMenuItem.Text = "내림차순 정렬 (현재 열)";
+            sortDescMenuItem.Click += OnSortDescMenuClick;
+            clearSortToolStripMenuItem.Name = "clearSortToolStripMenuItem";
+            clearSortToolStripMenuItem.Size = new Size(220, 22);
+            clearSortToolStripMenuItem.Text = "Clear Sort";
+            clearSortToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
+            clearSortToolStripMenuItem.Click += OnClearSortClick;
             // View
-            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { detailPanelMenuItem, clearFilterToolStripMenuItem, clearSortToolStripMenuItem });
+            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { encodingMenuItem, viewSeparator1, detailPanelMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(45, 20);
             viewToolStripMenuItem.Text = "View";
+            encodingMenuItem.Name = "encodingMenuItem";
+            encodingMenuItem.Size = new Size(180, 22);
+            encodingMenuItem.Text = "인코딩";   // 하위 항목은 코드(BuildEncodingMenu)에서 채움
             detailPanelMenuItem.Name = "detailPanelMenuItem";
             detailPanelMenuItem.Size = new Size(180, 22);
             detailPanelMenuItem.Text = "상세 패널";
             detailPanelMenuItem.CheckOnClick = true;
             detailPanelMenuItem.ShortcutKeys = Keys.F4;
             detailPanelMenuItem.CheckedChanged += OnDetailMenuChanged;
-            clearFilterToolStripMenuItem.Name = "clearFilterToolStripMenuItem";
-            clearFilterToolStripMenuItem.Size = new Size(180, 22);
-            clearFilterToolStripMenuItem.Text = "Clear Filter";
-            clearFilterToolStripMenuItem.Click += OnClearFilterClick;
-            clearSortToolStripMenuItem.Name = "clearSortToolStripMenuItem";
-            clearSortToolStripMenuItem.Size = new Size(180, 22);
-            clearSortToolStripMenuItem.Text = "Clear Sort";
-            clearSortToolStripMenuItem.Click += OnClearSortClick;
             // Help
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
@@ -134,6 +192,7 @@ namespace NanumCsvViewer
                 encodingLabel, encodingCombo, toolStripSeparatorB,
                 findLabel, findTextBox, findNextButton, toolStripSeparatorC,
                 filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
+                toolStripSeparatorE, sortAscButton, sortDescButton, clearSortButton,
                 detailToggleButton
             });
             toolStrip1.Location = new Point(0, 24);
@@ -200,6 +259,25 @@ namespace NanumCsvViewer
             filterByCellButton.Click += OnFilterByCellClick;
 
             toolStripSeparatorD.Name = "toolStripSeparatorD";
+            toolStripSeparatorE.Name = "toolStripSeparatorE";
+
+            sortAscButton.Name = "sortAscButton";
+            sortAscButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            sortAscButton.Text = "Sort ▲";
+            sortAscButton.ToolTipText = "현재 열을 오름차순으로 정렬";
+            sortAscButton.Click += OnSortAscMenuClick;
+
+            sortDescButton.Name = "sortDescButton";
+            sortDescButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            sortDescButton.Text = "Sort ▼";
+            sortDescButton.ToolTipText = "현재 열을 내림차순으로 정렬";
+            sortDescButton.Click += OnSortDescMenuClick;
+
+            clearSortButton.Name = "clearSortButton";
+            clearSortButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            clearSortButton.Text = "Clear Sort";
+            clearSortButton.ToolTipText = "정렬 해제(파일 순서로 복원)";
+            clearSortButton.Click += OnClearSortClick;
 
             detailToggleButton.Name = "detailToggleButton";
             detailToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
@@ -381,9 +459,20 @@ namespace NanumCsvViewer
         private ToolStripMenuItem fileToolStripMenuItem;
         private ToolStripMenuItem openToolStripMenuItem;
         private ToolStripMenuItem quitToolStripMenuItem;
-        private ToolStripMenuItem viewToolStripMenuItem;
+        private ToolStripMenuItem editToolStripMenuItem;
+        private ToolStripMenuItem findMenuItem;
+        private ToolStripMenuItem findNextMenuItem;
+        private ToolStripSeparator editSeparator1;
+        private ToolStripMenuItem applyFilterMenuItem;
+        private ToolStripMenuItem editFilterByCellMenuItem;
         private ToolStripMenuItem clearFilterToolStripMenuItem;
+        private ToolStripSeparator editSeparator2;
+        private ToolStripMenuItem sortAscMenuItem;
+        private ToolStripMenuItem sortDescMenuItem;
         private ToolStripMenuItem clearSortToolStripMenuItem;
+        private ToolStripMenuItem viewToolStripMenuItem;
+        private ToolStripMenuItem encodingMenuItem;
+        private ToolStripSeparator viewSeparator1;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
 
@@ -403,6 +492,10 @@ namespace NanumCsvViewer
         private ToolStripButton applyFilterButton;
         private ToolStripButton clearFilterButton;
         private ToolStripButton filterByCellButton;
+        private ToolStripSeparator toolStripSeparatorE;
+        private ToolStripButton sortAscButton;
+        private ToolStripButton sortDescButton;
+        private ToolStripButton clearSortButton;
         private ContextMenuStrip gridContextMenu;
         private ToolStripMenuItem filterByCellMenuItem;
 

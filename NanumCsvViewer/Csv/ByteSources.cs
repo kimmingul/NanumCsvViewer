@@ -29,7 +29,9 @@ namespace NanumCsvViewer.Csv
             while (total < dest.Length)
             {
                 int r = RandomAccess.Read(_handle, dest.Slice(total), offset + total);
-                if (r == 0) break; // EOF (정상 범위면 발생하지 않음)
+                // 정상 범위면 EOF가 나오지 않는다. 발생했다면 외부에서 파일이 잘렸다는 뜻 → 무음 수용 대신 표면화.
+                if (r == 0)
+                    throw new EndOfStreamException("파일이 예상보다 짧습니다(외부에서 변경되었을 수 있음).");
                 total += r;
             }
         }

@@ -10,6 +10,11 @@ namespace NanumCsvViewer
         private VirtualCsvDocument? _doc;
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _opCts;
+        private CancellationTokenSource? _findCts;
+        // 진행 중 비동기 작업 추적: 새 파일을 열기 전에 취소하고 완료까지 대기(옛 문서 안전 해제).
+        private Task? _indexTask;
+        private Task? _opTask;
+        private Task? _findTask;
         private readonly System.Windows.Forms.Timer _rowCountTimer;
         private readonly System.Windows.Forms.Timer _detailTimer;
 
@@ -39,6 +44,8 @@ namespace NanumCsvViewer
             Text = ProgramName;
 
             encodingCombo.Items.AddRange(EncodingDetector.SelectableNames);
+            BuildEncodingMenu();
+            ApplyIcons();
 
             // 셀 내 줄바꿈을 여러 줄로 표시
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
@@ -59,19 +66,86 @@ namespace NanumCsvViewer
             statusLabel.Text = "파일을 여세요 (File ▸ Open).";
         }
 
-        // ---------------------------------------------------------------- Open
+        // ---------------------------------------------------------------- UI 설정(아이콘 · 인코딩 메뉴)
 
-        private void OnOpenClick(object? sender, EventArgs e)
+        private void ApplyIcons()
         {
-            if (openFileDialog1.ShowDialog(this) != DialogResult.OK) return;
-            OpenFile(openFileDialog1.FileName);
+            // 메뉴 아이콘
+            openToolStripMenuItem.Image = UiIcons.Open();
+            quitToolStripMenuItem.Image = UiIcons.Quit();
+            findMenuItem.Image = UiIcons.Find();
+            findNextMenuItem.Image = UiIcons.FindNext();
+            applyFilterMenuItem.Image = UiIcons.Filter();
+            editFilterByCellMenuItem.Image = UiIcons.FilterByCell();
+            clearFilterToolStripMenuItem.Image = UiIcons.ClearFilter();
+            sortAscMenuItem.Image = UiIcons.SortAscending();
+            sortDescMenuItem.Image = UiIcons.SortDescending();
+            clearSortToolStripMenuItem.Image = UiIcons.ClearSort();
+            encodingMenuItem.Image = UiIcons.Encoding();
+            detailPanelMenuItem.Image = UiIcons.DetailPanel();
+            aboutToolStripMenuItem.Image = UiIcons.About();
+            filterByCellMenuItem.Image = UiIcons.FilterByCell();
+
+            // 툴바 버튼(이미지 + 텍스트)
+            SetButtonImage(openToolStripButton, UiIcons.Open());
+            SetButtonImage(findNextButton, UiIcons.FindNext());
+            SetButtonImage(filterByCellButton, UiIcons.FilterByCell());
+            SetButtonImage(applyFilterButton, UiIcons.Filter());
+            SetButtonImage(clearFilterButton, UiIcons.ClearFilter());
+            SetButtonImage(sortAscButton, UiIcons.SortAscending());
+            SetButtonImage(sortDescButton, UiIcons.SortDescending());
+            SetButtonImage(clearSortButton, UiIcons.ClearSort());
+            SetButtonImage(detailToggleButton, UiIcons.DetailPanel());
         }
 
-        private void OpenFile(string path)
+        private static void SetButtonImage(ToolStripButton btn, Image img)
+        {
+            btn.Image = img;
+            btn.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            btn.ImageScaling = ToolStripItemImageScaling.None;
+        }
+
+        // View ▸ 인코딩 하위 메뉴를 SelectableNames로 채움(콤보와 동일 목록).
+        private void BuildEncodingMenu()
+        {
+            foreach (string name in EncodingDetector.SelectableNames)
+            {
+                var item = new ToolStripMenuItem(name) { Tag = name };
+                item.Click += OnEncodingMenuItemClick;
+                encodingMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private void OnEncodingMenuItemClick(object? sender, EventArgs e)
+        {
+            if (_doc is null || sender is not ToolStripMenuItem item || item.Tag is not string name) return;
+            int idx = encodingCombo.Items.IndexOf(name);
+            if (idx >= 0) encodingCombo.SelectedIndex = idx; // OnEncodingChanged가 실제 변경을 수행
+        }
+
+        // 현재 인코딩에 해당하는 하위 메뉴 항목에 체크 표시.
+        private void SyncEncodingMenu(string name)
+        {
+            foreach (ToolStripItem it in encodingMenuItem.DropDownItems)
+                if (it is ToolStripMenuItem mi)
+                    mi.Checked = mi.Tag is string n && n == name;
+        }
+
+        // ---------------------------------------------------------------- Open
+
+        private async void OnOpenClick(object? sender, EventArgs e)
+        {
+            if (openFileDialog1.ShowDialog(this) != DialogResult.OK) return;
+            await OpenFileAsync(openFileDialog1.FileName);
+        }
+
+        private async Task OpenFileAsync(string path)
         {
             try
             {
-                CancelAll();
+                // 진행 중인 인덱싱/필터/정렬/검색을 취소하고 완료까지 기다린 뒤에야 옛 문서를 해제한다.
+                // (검색 스레드가 해제된 _doc/디스크 핸들을 참조해 NRE/ObjectDisposedException 나는 것을 방지)
+                await CancelAndDrainAsync();
                 var old = _doc;
                 _doc = null;
                 old?.Dispose();
@@ -136,7 +210,7 @@ namespace NanumCsvViewer
             UpdateFeatureState();
 
             var progress = new Progress<IndexProgress>(OnIndexProgress);
-            _ = RunIndexingAsync(progress);
+            _indexTask = RunIndexingAsync(progress);
         }
 
         private async Task RunIndexingAsync(IProgress<IndexProgress> progress)
@@ -233,8 +307,9 @@ namespace NanumCsvViewer
                 string[] row = _doc.GetDisplayRow(e.RowIndex);
                 e.Value = e.ColumnIndex < row.Length ? row[e.ColumnIndex] : string.Empty;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[CellValueNeeded] r={e.RowIndex} c={e.ColumnIndex}: {ex}");
                 e.Value = string.Empty;
             }
         }
@@ -310,7 +385,7 @@ namespace NanumCsvViewer
                 string colName = c < grid.Columns.Count ? grid.Columns[c].HeaderText : "";
                 cellAddressLabel.Text = $"R{_doc.GetSourceRowNumber(r):N0} · {colName}";
             }
-            catch { }
+            catch (Exception ex) { Debug.WriteLine($"[CurrentCellChanged] {ex}"); }
 
             if (!outerSplit.Panel2Collapsed) { _detailTimer.Stop(); _detailTimer.Start(); }
         }
@@ -376,7 +451,7 @@ namespace NanumCsvViewer
 
             string[] row;
             try { row = _doc.GetDisplayRow(r); }
-            catch { return; }
+            catch (Exception ex) { Debug.WriteLine($"[DetailPanel] {ex}"); return; }
 
             detailHeaderLabel.Text = $"행 상세 — R{_doc.GetSourceRowNumber(r):N0}";
             _detailBoldFont ??= new Font(detailRichText.Font, FontStyle.Bold);
@@ -411,6 +486,7 @@ namespace NanumCsvViewer
             int idx = encodingCombo.Items.IndexOf(name);
             encodingCombo.SelectedIndex = idx >= 0 ? idx : 0;
             _suppressEncodingEvent = false;
+            SyncEncodingMenu(encodingCombo.SelectedItem as string ?? "");
         }
 
         private void OnEncodingChanged(object? sender, EventArgs e)
@@ -419,6 +495,7 @@ namespace NanumCsvViewer
             if (encodingCombo.SelectedItem is not string name) return;
 
             _doc.ChangeEncoding(name);
+            SyncEncodingMenu(name);
             BuildColumns(_doc.Header);
             ResetViewMapOnly();
             grid.RowCount = 0;
@@ -436,20 +513,48 @@ namespace NanumCsvViewer
 
         private void OnFindNextClick(object? sender, EventArgs e) => _ = FindNextAsync();
 
+        // Edit ▸ 찾기... (Ctrl+F): 검색 입력란으로 포커스 이동 + 전체 선택
+        private void OnFindMenuClick(object? sender, EventArgs e)
+        {
+            if (!findTextBox.Enabled) return;
+            findTextBox.Focus();
+            findTextBox.SelectAll();
+        }
+
         private async Task FindNextAsync()
         {
             if (_doc is null || _busy) return;
+            var task = FindNextCoreAsync();
+            _findTask = task;
+            await task;
+        }
+
+        private async Task FindNextCoreAsync()
+        {
+            var doc = _doc;                       // 로컬 캡처: 검색 도중 파일이 바뀌어도 안전
+            if (doc is null) return;
             string term = findTextBox.Text;
             if (string.IsNullOrEmpty(term)) return;
 
-            int total = _doc.DisplayRowCount;
+            int total = doc.DisplayRowCount;
             if (total == 0) return;
             int start = (grid.CurrentCell?.RowIndex ?? -1) + 1;
 
+            _findCts?.Cancel();
+            _findCts = new CancellationTokenSource();
+            var ct = _findCts.Token;
+
             SetBusy(true);
             statusLabel.Text = $"'{term}' 검색 중...";
-            int found = await Task.Run(() => SearchForward(term, start, total));
-            SetBusy(false);
+            int found;
+            try
+            {
+                found = await Task.Run(() => SearchForward(doc, term, start, total, ct), ct);
+            }
+            catch (OperationCanceledException) { return; }
+            finally { SetBusy(false); }
+
+            if (doc != _doc) return;              // 검색 중 다른 파일이 열렸으면 결과 무시
 
             if (found >= 0)
             {
@@ -463,19 +568,25 @@ namespace NanumCsvViewer
             }
         }
 
-        private int SearchForward(string term, int start, int total)
+        private static int SearchForward(VirtualCsvDocument doc, string term, int start, int total, CancellationToken ct)
         {
             // start..total-1 후 0..start-1 (랩어라운드)
             for (int i = start; i < total; i++)
-                if (RowContains(i, term)) return i;
+            {
+                if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+                if (RowContains(doc, i, term)) return i;
+            }
             for (int i = 0; i < start && i < total; i++)
-                if (RowContains(i, term)) return i;
+            {
+                if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+                if (RowContains(doc, i, term)) return i;
+            }
             return -1;
         }
 
-        private bool RowContains(int viewRow, string term)
+        private static bool RowContains(VirtualCsvDocument doc, int viewRow, string term)
         {
-            string[] row = _doc!.GetDisplayRow(viewRow);
+            string[] row = doc.GetDisplayRow(viewRow);
             foreach (string f in row)
                 if (f.Contains(term, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
@@ -657,6 +768,21 @@ namespace NanumCsvViewer
             _ = SortAsync();
         }
 
+        // Edit/툴바 ▸ 오름·내림차순 정렬: 현재 셀의 열(없으면 첫 열)을 기준으로 정렬.
+        private void OnSortAscMenuClick(object? sender, EventArgs e) => SortCurrentColumn(true);
+        private void OnSortDescMenuClick(object? sender, EventArgs e) => SortCurrentColumn(false);
+
+        private void SortCurrentColumn(bool ascending)
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            int col = grid.CurrentCell?.ColumnIndex ?? -1;
+            if (col < 0) col = grid.Columns.Count > 0 ? 0 : -1;
+            if (col < 0) return;
+            _sortColumn = col;
+            _sortAscending = ascending;
+            _ = SortAsync();
+        }
+
         private async Task SortAsync()
         {
             if (_doc is null) return;
@@ -701,7 +827,14 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- Shared op runner
 
-        private async Task RunViewOpAsync(Func<IProgress<int>, Task> op, string busyText)
+        private Task RunViewOpAsync(Func<IProgress<int>, Task> op, string busyText)
+        {
+            var task = RunViewOpCoreAsync(op, busyText);
+            _opTask = task; // 새 파일 열기 전 드레인 대상으로 추적
+            return task;
+        }
+
+        private async Task RunViewOpCoreAsync(Func<IProgress<int>, Task> op, string busyText)
         {
             _opCts?.Cancel();
             _opCts = new CancellationTokenSource();
@@ -755,8 +888,11 @@ namespace NanumCsvViewer
             bool ready = open && _doc!.IndexingComplete && !_busy;
 
             encodingCombo.Enabled = open && !_busy;
+            encodingMenuItem.Enabled = open && !_busy;
             findTextBox.Enabled = open && !_busy;
             findNextButton.Enabled = open && !_busy;
+            findMenuItem.Enabled = open && !_busy;
+            findNextMenuItem.Enabled = open && !_busy;
 
             filterColumnCombo.Enabled = ready;
             filterTextBox.Enabled = ready;
@@ -764,8 +900,15 @@ namespace NanumCsvViewer
             clearFilterButton.Enabled = ready;
             filterByCellButton.Enabled = ready;
             filterByCellMenuItem.Enabled = ready;
+            applyFilterMenuItem.Enabled = ready;
+            editFilterByCellMenuItem.Enabled = ready;
             clearFilterToolStripMenuItem.Enabled = ready;
             clearSortToolStripMenuItem.Enabled = ready;
+            sortAscMenuItem.Enabled = ready;
+            sortDescMenuItem.Enabled = ready;
+            sortAscButton.Enabled = ready;
+            sortDescButton.Enabled = ready;
+            clearSortButton.Enabled = ready;
 
             RefreshSignal();
         }
@@ -806,6 +949,24 @@ namespace NanumCsvViewer
             _rowCountTimer.Stop();
             _indexCts?.Cancel();
             _opCts?.Cancel();
+            _findCts?.Cancel();
+        }
+
+        // 모든 백그라운드 작업을 취소하고 완료될 때까지 대기. 옛 문서를 Dispose하기 전에 호출해야
+        // 백그라운드 스레드가 해제된 리소스를 건드리지 않는다.
+        private async Task CancelAndDrainAsync()
+        {
+            CancelAll();
+            var tasks = new List<Task>(3);
+            if (_indexTask is not null) tasks.Add(_indexTask);
+            if (_opTask is not null) tasks.Add(_opTask);
+            if (_findTask is not null) tasks.Add(_findTask);
+            if (tasks.Count > 0)
+            {
+                try { await Task.WhenAll(tasks); }
+                catch { /* 취소/오류는 각 메서드가 자체 처리하므로 여기선 무시 */ }
+            }
+            _indexTask = _opTask = _findTask = null;
         }
 
         private static string FormatBytes(long bytes)

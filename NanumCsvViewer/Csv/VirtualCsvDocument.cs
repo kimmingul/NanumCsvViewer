@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -35,7 +36,11 @@ namespace NanumCsvViewer.Csv
 
         private long _headerStart;
         private long _headerEnd;
-        private int[]? _viewMap; // null이면 항등(전체, 원래 순서)
+        // 백그라운드(필터/정렬)에서 교체하고 UI 스레드에서 읽으므로 volatile로 가시성 보장.
+        // 참조 대입은 원자적이며, 읽는 쪽은 항상 지역 변수로 스냅샷을 떠 길이/인덱스를 일관되게 사용한다.
+        private volatile int[]? _viewMap; // null이면 항등(전체, 원래 순서)
+
+        private static readonly string[] EmptyRow = { string.Empty };
 
         public long FileLength { get; }
         public string[] Header { get; private set; } = Array.Empty<string>();
@@ -45,7 +50,6 @@ namespace NanumCsvViewer.Csv
         public bool IndexingComplete { get; private set; }
         public bool WillUseRam { get; }
         public bool InMemory => _ramBuffer is not null;
-        public bool RowCountTruncated { get; private set; }
         public bool IsFiltered => _viewMap is not null;
 
         private VirtualCsvDocument(string path, EncodingDetectionResult det)
@@ -151,55 +155,73 @@ namespace NanumCsvViewer.Csv
             }, ct);
         }
 
-        /// <summary>현재 표시 가능한 데이터 행 수(헤더 제외). 인덱싱 진행 중에는 끝 오프셋이 확정된 행만.</summary>
-        public int DataRowsAvailable
+        /// <summary>int 범위로 자르기 전, 실제 데이터 행 수(헤더 제외). 인덱싱 중에는 끝 오프셋이 확정된 행만.</summary>
+        private long RawDataRowCount
         {
             get
             {
-                long recs = _index.Count;
-                long rows = IndexingComplete ? recs - 1 : recs - 2;
-                if (rows < 0) rows = 0;
-                if (rows > int.MaxValue) { RowCountTruncated = true; rows = int.MaxValue; }
-                return (int)rows;
+                long rows = IndexingComplete ? _index.Count - 1 : _index.Count - 2;
+                return rows < 0 ? 0 : rows;
             }
         }
+
+        /// <summary>행 수가 int.MaxValue를 넘어 일부만 표시되는지. 부수효과 없는 순수 계산.</summary>
+        public bool RowCountTruncated => RawDataRowCount > int.MaxValue;
+
+        /// <summary>현재 표시 가능한 데이터 행 수(헤더 제외, DataGridView용 int 상한 적용).</summary>
+        public int DataRowsAvailable => (int)Math.Min(int.MaxValue, RawDataRowCount);
 
         /// <summary>그리드에 표시할 행 수(필터 적용 시 일치 행 수).</summary>
         public int DisplayRowCount => _viewMap?.Length ?? DataRowsAvailable;
 
+        /// <summary>표시 행(viewIndex)을 데이터 행으로 변환. 뷰맵 스냅샷 1회 + 범위 가드(레이스 안전).</summary>
+        private bool TryMapToDataRow(int viewIndex, out int dataRow)
+        {
+            int[]? map = _viewMap; // 스냅샷: 길이/인덱스 모두 이 참조로만 판단
+            if (map is null)
+            {
+                dataRow = viewIndex;
+                return viewIndex >= 0;
+            }
+            if ((uint)viewIndex >= (uint)map.Length) { dataRow = -1; return false; }
+            dataRow = map[viewIndex];
+            return true;
+        }
+
         /// <summary>표시 행(viewIndex) → 실제 데이터 행을 디코드/파싱하여 반환(캐시 사용).</summary>
         public string[] GetDisplayRow(int viewIndex)
-        {
-            int dataRow = _viewMap is { } map ? map[viewIndex] : viewIndex;
-            return GetDataRow(dataRow);
-        }
+            => TryMapToDataRow(viewIndex, out int dataRow) ? GetDataRow(dataRow) : EmptyRow;
 
         /// <summary>표시 행(viewIndex) → 원본 데이터 행 번호(1-based, 헤더 제외). 필터/정렬 시 원래 위치를 유지.</summary>
         public long GetSourceRowNumber(int viewIndex)
-        {
-            int dataRow = _viewMap is { } map ? map[viewIndex] : viewIndex;
-            return dataRow + 1L;
-        }
+            => TryMapToDataRow(viewIndex, out int dataRow) ? dataRow + 1L : 0L;
 
         /// <summary>이미 캐시에 있을 때만 행을 반환(디스크/파싱 트리거 없음). 행 높이 계산 등 핫 패스용.</summary>
         public bool TryGetCachedDisplayRow(int viewIndex, out string[] fields)
         {
-            int dataRow = _viewMap is { } map ? map[viewIndex] : viewIndex;
+            if (!TryMapToDataRow(viewIndex, out int dataRow)) { fields = EmptyRow; return false; }
             return _cache.TryGet(dataRow, out fields);
         }
 
         public string[] GetDataRow(int dataRow)
         {
             if (_cache.TryGet(dataRow, out var cached)) return cached;
-
-            long rec = dataRow + 1L; // 0번 레코드는 헤더
-            long count = _index.Count;
-            long start = _index[rec];
-            long end = (rec + 1 < count) ? _index[rec + 1] : FileLength;
-
-            string[] fields = DecodeAndParse(start, end);
+            string[] fields = ParseDataRow(dataRow);
             _cache.Add(dataRow, fields);
             return fields;
+        }
+
+        /// <summary>캐시를 조회하지도 채우지도 않는 디코드. 필터/정렬의 대량 스캔용(LRU 오염·락 경합 방지).</summary>
+        public string[] GetDataRowUncached(int dataRow) => ParseDataRow(dataRow);
+
+        private string[] ParseDataRow(int dataRow)
+        {
+            long rec = dataRow + 1L; // 0번 레코드는 헤더
+            long count = _index.Count;
+            if (rec < 1 || rec >= count) return EmptyRow; // 범위 밖(레이스/인덱싱 중)이면 안전하게 빈 행
+            long start = _index[rec];
+            long end = (rec + 1 < count) ? _index[rec + 1] : FileLength;
+            return DecodeAndParse(start, end);
         }
 
         private string[] DecodeAndParse(long start, long end)
@@ -246,7 +268,7 @@ namespace NanumCsvViewer.Csv
                 for (int i = 0; i < total; i++)
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    if (predicate(GetDataRow(i))) matches.Add(i);
+                    if (predicate(GetDataRowUncached(i))) matches.Add(i);
                     if (progress is not null && (i & 0x3FFFF) == 0)
                         progress.Report(total == 0 ? 100 : (int)(i * 100L / total));
                 }
@@ -269,7 +291,7 @@ namespace NanumCsvViewer.Csv
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                     int dataRow = baseMap[i];
-                    if (predicate(GetDataRow(dataRow))) result.Add(dataRow);
+                    if (predicate(GetDataRowUncached(dataRow))) result.Add(dataRow);
                     if (progress is not null && (i & 0x3FFFF) == 0 && baseMap.Length > 0)
                         progress.Report((int)(i * 100L / baseMap.Length));
                 }
@@ -291,24 +313,41 @@ namespace NanumCsvViewer.Csv
             {
                 int total = DataRowsAvailable;
                 int[] baseMap = _viewMap ?? CreateIdentity(total);
-                var keys = new string[baseMap.Length];
-                for (int i = 0; i < baseMap.Length; i++)
+                int n = baseMap.Length;
+
+                // 키를 한 번만 추출(캐시 우회) + 숫자 파싱을 미리 1회 수행(비교마다 재파싱 방지).
+                var keys = new string[n];
+                var num = new double[n];
+                bool allNumeric = n > 0;
+                for (int i = 0; i < n; i++)
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    string[] row = GetDataRow(baseMap[i]);
-                    keys[i] = column < row.Length ? row[column] : string.Empty;
-                    if (progress is not null && (i & 0x3FFFF) == 0 && baseMap.Length > 0)
-                        progress.Report((int)(i * 100L / baseMap.Length));
+                    string[] row = GetDataRowUncached(baseMap[i]);
+                    string key = column < row.Length ? row[column] : string.Empty;
+                    keys[i] = key;
+                    if (allNumeric)
+                    {
+                        if (double.TryParse(key, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) num[i] = d;
+                        else if (key.Length == 0) num[i] = double.NegativeInfinity; // 빈 값은 맨 앞
+                        else allNumeric = false; // 숫자 아님 → 전체를 문자열 비교로
+                    }
+                    if (progress is not null && (i & 0x3FFFF) == 0 && n > 0)
+                        progress.Report((int)(i * 100L / n));
                 }
-                // keys[i]는 baseMap[i]에 대응 → 인덱스(idx)를 키 기준으로 정렬한 뒤 baseMap을 재배열
-                int[] idx = CreateIdentity(baseMap.Length);
+
+                // idx를 키 기준으로 정렬 후 baseMap을 재배열. 동률은 파일 순서(baseMap)로 안정화.
+                int[] idx = CreateIdentity(n);
+                int dir = ascending ? 1 : -1;
                 Array.Sort(idx, (x, y) =>
                 {
-                    int c = NaturalCompare(keys[x], keys[y]);
-                    return ascending ? c : -c;
+                    int c = allNumeric
+                        ? num[x].CompareTo(num[y])
+                        : string.Compare(keys[x], keys[y], StringComparison.OrdinalIgnoreCase);
+                    if (c != 0) return dir * c;
+                    return baseMap[x].CompareTo(baseMap[y]); // 안정 정렬 tie-break(방향 무관 파일 순서)
                 });
-                var result = new int[baseMap.Length];
-                for (int i = 0; i < idx.Length; i++) result[i] = baseMap[idx[i]];
+                var result = new int[n];
+                for (int i = 0; i < n; i++) result[i] = baseMap[idx[i]];
                 _viewMap = result;
                 progress?.Report(100);
             }, ct);
@@ -319,15 +358,6 @@ namespace NanumCsvViewer.Csv
             var a = new int[n];
             for (int i = 0; i < n; i++) a[i] = i;
             return a;
-        }
-
-        /// <summary>숫자처럼 보이면 수치 비교, 아니면 서수 비교(자연 정렬 근사).</summary>
-        private static int NaturalCompare(string a, string b)
-        {
-            bool na = double.TryParse(a, out double da);
-            bool nb = double.TryParse(b, out double db);
-            if (na && nb) return da.CompareTo(db);
-            return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
         }
 
         public void ClearView() => _viewMap = null;
@@ -344,7 +374,8 @@ namespace NanumCsvViewer.Csv
             while (total < length)
             {
                 int r = fs.Read(buffer, total, length - total);
-                if (r == 0) break;
+                if (r == 0)
+                    throw new EndOfStreamException("파일이 예상보다 짧습니다(인덱싱 중 외부에서 변경되었을 수 있음).");
                 total += r;
             }
         }

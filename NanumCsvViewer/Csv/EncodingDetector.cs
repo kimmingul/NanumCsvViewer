@@ -79,8 +79,10 @@ namespace NanumCsvViewer.Csv
             int offset = 0;
             if (start > 0)
                 while (offset < read && (buffer[offset] & 0xC0) == 0x80) offset++;
-            // 표본 끝의 불완전한 시퀀스는 허용(청크 경계).
-            return IsValidUtf8(buffer.AsSpan(offset, read - offset), allowIncompleteAtEnd: true);
+            // 표본 끝이 파일 끝과 일치하면 잘린 시퀀스는 '진짜 손상'이므로 허용하지 않는다.
+            // (중간 표본은 SampleSize로 잘렸을 뿐이라 끝의 불완전 시퀀스를 허용)
+            bool reachedEof = start + read >= length;
+            return IsValidUtf8(buffer.AsSpan(offset, read - offset), allowIncompleteAtEnd: !reachedEof);
         }
 
         /// <summary>

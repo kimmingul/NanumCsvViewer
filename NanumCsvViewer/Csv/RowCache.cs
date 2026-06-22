@@ -2,7 +2,8 @@ namespace NanumCsvViewer.Csv
 {
     /// <summary>
     /// 파싱된 행(string[])의 LRU 캐시. 최근 사용 행만 유지하여 파일 크기와 무관하게
-    /// 메모리를 일정하게 유지합니다. UI 스레드와 프리페치 스레드가 함께 접근하므로 잠금으로 보호.
+    /// 메모리를 일정하게 유지합니다. UI 스레드와 백그라운드 검색(Find) 스레드가 함께 접근하므로
+    /// 잠금으로 보호합니다(필터·정렬의 대량 스캔은 GetDataRowUncached로 캐시를 우회).
     /// </summary>
     public sealed class RowCache
     {

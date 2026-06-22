@@ -365,3 +365,4 @@ FodyWeavers.xsd
 # Project-specific
 samples/
 .omc/
+.serena/
