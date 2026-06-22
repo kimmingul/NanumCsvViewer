@@ -42,9 +42,6 @@ namespace NanumCsvViewer
             toolStrip1 = new ToolStrip();
             openToolStripButton = new ToolStripButton();
             toolStripSeparatorA = new ToolStripSeparator();
-            encodingLabel = new ToolStripLabel();
-            encodingCombo = new ToolStripComboBox();
-            toolStripSeparatorB = new ToolStripSeparator();
             findLabel = new ToolStripLabel();
             findTextBox = new ToolStripTextBox();
             findNextButton = new ToolStripButton();
@@ -76,6 +73,7 @@ namespace NanumCsvViewer
             statusLabel = new ToolStripStatusLabel();
             progressLabel = new ToolStripStatusLabel();
             progressBar = new ToolStripProgressBar();
+            encodingStatusButton = new ToolStripDropDownButton();
             signalLabel = new ToolStripStatusLabel();
             openFileDialog1 = new OpenFileDialog();
 
@@ -189,7 +187,6 @@ namespace NanumCsvViewer
             toolStrip1.Items.AddRange(new ToolStripItem[]
             {
                 openToolStripButton, toolStripSeparatorA,
-                encodingLabel, encodingCombo, toolStripSeparatorB,
                 findLabel, findTextBox, findNextButton, toolStripSeparatorC,
                 filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
                 toolStripSeparatorE, sortAscButton, sortDescButton, clearSortButton,
@@ -206,16 +203,6 @@ namespace NanumCsvViewer
             openToolStripButton.Click += OnOpenClick;
 
             toolStripSeparatorA.Name = "toolStripSeparatorA";
-
-            encodingLabel.Name = "encodingLabel";
-            encodingLabel.Text = "Encoding:";
-
-            encodingCombo.Name = "encodingCombo";
-            encodingCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-            encodingCombo.Size = new Size(140, 25);
-            encodingCombo.SelectedIndexChanged += OnEncodingChanged;
-
-            toolStripSeparatorB.Name = "toolStripSeparatorB";
 
             findLabel.Name = "findLabel";
             findLabel.Text = "Find:";
@@ -387,7 +374,7 @@ namespace NanumCsvViewer
             filterByCellMenuItem.Click += OnFilterByCellClick;
 
             // statusStrip1
-            statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar, signalLabel });
+            statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar, encodingStatusButton, signalLabel });
             statusStrip1.Location = new Point(0, 707);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new Size(1008, 22);
@@ -407,6 +394,14 @@ namespace NanumCsvViewer
             progressBar.Name = "progressBar";
             progressBar.Size = new Size(200, 16);
             progressBar.Visible = false;
+
+            // 상태바 인코딩 위젯(신호등 좌측): 현재 인코딩 표시 + 클릭 시 드롭다운으로 전환
+            encodingStatusButton.Name = "encodingStatusButton";
+            encodingStatusButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            encodingStatusButton.ImageScaling = ToolStripItemImageScaling.None;
+            encodingStatusButton.ShowDropDownArrow = true;
+            encodingStatusButton.Text = "";
+            encodingStatusButton.ToolTipText = "텍스트 인코딩 (클릭하여 변경)";
 
             signalLabel.Name = "signalLabel";
             signalLabel.AutoSize = false;
@@ -480,9 +475,6 @@ namespace NanumCsvViewer
         private ToolStrip toolStrip1;
         private ToolStripButton openToolStripButton;
         private ToolStripSeparator toolStripSeparatorA;
-        private ToolStripLabel encodingLabel;
-        private ToolStripComboBox encodingCombo;
-        private ToolStripSeparator toolStripSeparatorB;
         private ToolStripLabel findLabel;
         private ToolStripTextBox findTextBox;
         private ToolStripButton findNextButton;
@@ -514,6 +506,7 @@ namespace NanumCsvViewer
         private ToolStripStatusLabel statusLabel;
         private ToolStripStatusLabel progressLabel;
         private ToolStripProgressBar progressBar;
+        private ToolStripDropDownButton encodingStatusButton;
         private ToolStripStatusLabel signalLabel;
         private OpenFileDialog openFileDialog1;
     }

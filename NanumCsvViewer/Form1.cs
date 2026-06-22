@@ -18,7 +18,6 @@ namespace NanumCsvViewer
         private readonly System.Windows.Forms.Timer _rowCountTimer;
         private readonly System.Windows.Forms.Timer _detailTimer;
 
-        private bool _suppressEncodingEvent;
         private bool _busy;
         private bool _indexing;
         private bool _userResizedRowHeader;   // 사용자가 행번호 칸 폭을 직접 조절하면 자동 조정 중단
@@ -43,7 +42,6 @@ namespace NanumCsvViewer
             InitializeComponent();
             Text = ProgramName;
 
-            encodingCombo.Items.AddRange(EncodingDetector.SelectableNames);
             BuildEncodingMenu();
             ApplyIcons();
 
@@ -96,6 +94,9 @@ namespace NanumCsvViewer
             SetButtonImage(sortDescButton, UiIcons.SortDescending());
             SetButtonImage(clearSortButton, UiIcons.ClearSort());
             SetButtonImage(detailToggleButton, UiIcons.DetailPanel());
+
+            encodingStatusButton.Image = UiIcons.Encoding();
+            encodingStatusButton.ImageScaling = ToolStripItemImageScaling.None;
         }
 
         private static void SetButtonImage(ToolStripButton btn, Image img)
@@ -105,30 +106,25 @@ namespace NanumCsvViewer
             btn.ImageScaling = ToolStripItemImageScaling.None;
         }
 
-        // View ▸ 인코딩 하위 메뉴를 SelectableNames로 채움(콤보와 동일 목록).
+        // View 메뉴와 상태바 인코딩 드롭다운을 같은 목록(SelectableNames)으로 채움.
         private void BuildEncodingMenu()
         {
             foreach (string name in EncodingDetector.SelectableNames)
             {
-                var item = new ToolStripMenuItem(name) { Tag = name };
-                item.Click += OnEncodingMenuItemClick;
-                encodingMenuItem.DropDownItems.Add(item);
+                var menuItem = new ToolStripMenuItem(name) { Tag = name };
+                menuItem.Click += OnEncodingPick;
+                encodingMenuItem.DropDownItems.Add(menuItem);
+
+                var ddItem = new ToolStripMenuItem(name) { Tag = name };
+                ddItem.Click += OnEncodingPick;
+                encodingStatusButton.DropDownItems.Add(ddItem);
             }
         }
 
-        private void OnEncodingMenuItemClick(object? sender, EventArgs e)
+        // 상태바 드롭다운·View 메뉴 공통 진입점.
+        private void OnEncodingPick(object? sender, EventArgs e)
         {
-            if (_doc is null || sender is not ToolStripMenuItem item || item.Tag is not string name) return;
-            int idx = encodingCombo.Items.IndexOf(name);
-            if (idx >= 0) encodingCombo.SelectedIndex = idx; // OnEncodingChanged가 실제 변경을 수행
-        }
-
-        // 현재 인코딩에 해당하는 하위 메뉴 항목에 체크 표시.
-        private void SyncEncodingMenu(string name)
-        {
-            foreach (ToolStripItem it in encodingMenuItem.DropDownItems)
-                if (it is ToolStripMenuItem mi)
-                    mi.Checked = mi.Tag is string n && n == name;
+            if (sender is ToolStripMenuItem item && item.Tag is string name) ChangeEncodingTo(name);
         }
 
         // ---------------------------------------------------------------- Open
@@ -155,7 +151,7 @@ namespace NanumCsvViewer
                 _doc = VirtualCsvDocument.Open(path);
 
                 BuildColumns(_doc.Header);
-                SetEncodingComboSelection(_doc.EncodingName);
+                SyncEncodingUi(_doc.EncodingName);
 
                 grid.RowCount = 0;
                 Text = $"{ProgramName}  -  {Path.GetFileName(path)}";
@@ -260,7 +256,7 @@ namespace NanumCsvViewer
             string mode = _doc.InMemory ? "RAM" : "디스크";
             string trunc = _doc.RowCountTruncated ? "  [행 수 한계 초과로 일부만 표시]" : "";
             statusLabel.Text =
-                $"준비 완료 · {_doc.DataRowsAvailable:N0} 행 · {_doc.ColumnCount} 열 · {_doc.EncodingName} · 구분자 '{_doc.Delimiter}' · {mode} 모드 · {ms:N0} ms · 필터/정렬 준비됨{trunc}";
+                $"준비 완료 · {_doc.DataRowsAvailable:N0} 행 · {FormatBytes(_doc.FileLength)} · {_doc.ColumnCount} 열 · 구분자 '{_doc.Delimiter}' · {mode} 모드 · {ms:N0} ms · 필터/정렬 준비됨{trunc}";
         }
 
         private void RefreshRowCount()
@@ -480,28 +476,33 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- Encoding
 
-        private void SetEncodingComboSelection(string name)
+        // 인코딩 적용(드롭다운·메뉴 공통 경로). 현재와 같으면 무시.
+        private void ChangeEncodingTo(string name)
         {
-            _suppressEncodingEvent = true;
-            int idx = encodingCombo.Items.IndexOf(name);
-            encodingCombo.SelectedIndex = idx >= 0 ? idx : 0;
-            _suppressEncodingEvent = false;
-            SyncEncodingMenu(encodingCombo.SelectedItem as string ?? "");
-        }
-
-        private void OnEncodingChanged(object? sender, EventArgs e)
-        {
-            if (_suppressEncodingEvent || _doc is null) return;
-            if (encodingCombo.SelectedItem is not string name) return;
-
+            if (_doc is null || string.Equals(name, _doc.EncodingName, StringComparison.Ordinal)) return;
             _doc.ChangeEncoding(name);
-            SyncEncodingMenu(name);
+            SyncEncodingUi(name);
             BuildColumns(_doc.Header);
             ResetViewMapOnly();
             grid.RowCount = 0;
             RefreshRowCount();
             grid.Invalidate();
             statusLabel.Text = $"인코딩 변경: {name}";
+        }
+
+        // 상태바 버튼 텍스트 + 양쪽(메뉴/드롭다운) 체크 표시를 현재 인코딩으로 동기화.
+        private void SyncEncodingUi(string name)
+        {
+            encodingStatusButton.Text = name;
+            SyncChecks(encodingMenuItem.DropDownItems, name);
+            SyncChecks(encodingStatusButton.DropDownItems, name);
+
+            static void SyncChecks(ToolStripItemCollection items, string current)
+            {
+                foreach (ToolStripItem it in items)
+                    if (it is ToolStripMenuItem mi)
+                        mi.Checked = mi.Tag is string n && n == current;
+            }
         }
 
         // ---------------------------------------------------------------- Find (streaming)
@@ -715,15 +716,16 @@ namespace NanumCsvViewer
         private void UpdateFilterStatus()
         {
             if (_doc is null) return;
+            string size = FormatBytes(_doc.FileLength);
             if (!HasAnyFilter)
             {
-                statusLabel.Text = $"필터 없음 · {_doc.DataRowsAvailable:N0} 행";
+                statusLabel.Text = $"필터 없음 · {_doc.DataRowsAvailable:N0} 행 · {size}";
                 return;
             }
             var parts = new List<string>();
             if (_textCondition is not null) parts.Add(_textConditionDesc);
             parts.AddRange(_valueConditions.Select(v => v.desc));
-            statusLabel.Text = $"필터({parts.Count}): {string.Join(" AND ", parts)}  →  {_doc.DisplayRowCount:N0} / {_doc.DataRowsAvailable:N0} 행";
+            statusLabel.Text = $"필터({parts.Count}): {string.Join(" AND ", parts)}  →  {_doc.DisplayRowCount:N0} / {_doc.DataRowsAvailable:N0} 행 · {size}";
         }
 
         private static string Trunc(string s)
@@ -753,7 +755,7 @@ namespace NanumCsvViewer
             grid.RowCount = 0;
             RefreshRowCount();
             grid.Invalidate();
-            statusLabel.Text = $"필터 해제 · {_doc.DataRowsAvailable:N0} 행";
+            statusLabel.Text = $"필터 해제 · {_doc.DataRowsAvailable:N0} 행 · {FormatBytes(_doc.FileLength)}";
         }
 
         // ---------------------------------------------------------------- Sort (Phase 3)
@@ -941,7 +943,7 @@ namespace NanumCsvViewer
             bool open = _doc is not null;
             bool ready = open && _doc!.IndexingComplete && !_busy;
 
-            encodingCombo.Enabled = open && !_busy;
+            encodingStatusButton.Enabled = open && !_busy;
             encodingMenuItem.Enabled = open && !_busy;
             findTextBox.Enabled = open && !_busy;
             findNextButton.Enabled = open && !_busy;
