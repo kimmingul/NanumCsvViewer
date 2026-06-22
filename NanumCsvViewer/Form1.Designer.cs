@@ -37,7 +37,9 @@ namespace NanumCsvViewer
             encodingMenuItem = new ToolStripMenuItem();
             viewSeparator1 = new ToolStripSeparator();
             detailPanelMenuItem = new ToolStripMenuItem();
+            languageMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
+            usageMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
             toolStrip1 = new ToolStrip();
             openToolStripButton = new ToolStripButton();
@@ -58,6 +60,7 @@ namespace NanumCsvViewer
             clearFilterButton = new ToolStripButton();
             toolStripSeparatorE = new ToolStripSeparator();
             detailToggleButton = new ToolStripButton();
+            themeToggleButton = new ToolStripButton();
             gridContextMenu = new ContextMenuStrip(components);
             filterByCellMenuItem = new ToolStripMenuItem();
             outerSplit = new SplitContainer();
@@ -202,7 +205,7 @@ namespace NanumCsvViewer
             // 
             // viewToolStripMenuItem
             // 
-            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { encodingMenuItem, viewSeparator1, detailPanelMenuItem });
+            viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { encodingMenuItem, languageMenuItem, viewSeparator1, detailPanelMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(45, 20);
             viewToolStripMenuItem.Text = "View";
@@ -226,16 +229,30 @@ namespace NanumCsvViewer
             detailPanelMenuItem.Size = new Size(146, 22);
             detailPanelMenuItem.Text = "상세 패널";
             detailPanelMenuItem.CheckedChanged += OnDetailMenuChanged;
-            // 
+            //
+            // languageMenuItem (하위 항목은 BuildLanguageMenu에서 채움)
+            //
+            languageMenuItem.Name = "languageMenuItem";
+            languageMenuItem.Size = new Size(146, 22);
+            languageMenuItem.Text = "Language";
+            //
             // helpToolStripMenuItem
-            // 
-            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
+            //
+            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { usageMenuItem, aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "Help";
-            // 
+            //
+            // usageMenuItem
+            //
+            usageMenuItem.Name = "usageMenuItem";
+            usageMenuItem.ShortcutKeys = Keys.F1;
+            usageMenuItem.Size = new Size(107, 22);
+            usageMenuItem.Text = "How to Use";
+            usageMenuItem.Click += OnUsageClick;
+            //
             // aboutToolStripMenuItem
-            // 
+            //
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
             aboutToolStripMenuItem.Size = new Size(107, 22);
             aboutToolStripMenuItem.Text = "About";
@@ -244,7 +261,7 @@ namespace NanumCsvViewer
             // toolStrip1
             // 
             toolStrip1.GripStyle = ToolStripGripStyle.Hidden;
-            toolStrip1.Items.AddRange(new ToolStripItem[] { openToolStripButton, toolStripSeparatorA, sortAscButton, sortDescButton, clearSortButton, toolStripSeparator1, findLabel, findTextBox, findNextButton, toolStripSeparatorC, filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton, toolStripSeparatorE, detailToggleButton });
+            toolStrip1.Items.AddRange(new ToolStripItem[] { openToolStripButton, toolStripSeparatorA, sortAscButton, sortDescButton, clearSortButton, toolStripSeparator1, findLabel, findTextBox, findNextButton, toolStripSeparatorC, filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton, toolStripSeparatorE, detailToggleButton, themeToggleButton });
             toolStrip1.Location = new Point(0, 24);
             toolStrip1.Name = "toolStrip1";
             toolStrip1.Size = new Size(1008, 25);
@@ -378,9 +395,18 @@ namespace NanumCsvViewer
             detailToggleButton.Text = "Details (F4)";
             detailToggleButton.ToolTipText = "선택한 행의 전체 내용을 우측 패널에 표시";
             detailToggleButton.CheckedChanged += OnDetailToggleChanged;
-            // 
+            //
+            // themeToggleButton (우측 정렬, 아이콘은 ApplyTheme에서 설정)
+            //
+            themeToggleButton.Alignment = ToolStripItemAlignment.Right;
+            themeToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            themeToggleButton.ImageScaling = ToolStripItemImageScaling.None;
+            themeToggleButton.Name = "themeToggleButton";
+            themeToggleButton.Size = new Size(23, 22);
+            themeToggleButton.Click += OnThemeToggleClick;
+            //
             // gridContextMenu
-            // 
+            //
             gridContextMenu.Items.AddRange(new ToolStripItem[] { filterByCellMenuItem });
             gridContextMenu.Name = "gridContextMenu";
             gridContextMenu.Size = new Size(171, 26);
@@ -625,7 +651,9 @@ namespace NanumCsvViewer
         private ToolStripMenuItem viewToolStripMenuItem;
         private ToolStripMenuItem encodingMenuItem;
         private ToolStripSeparator viewSeparator1;
+        private ToolStripMenuItem languageMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
+        private ToolStripMenuItem usageMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
 
         private ToolStrip toolStrip1;
@@ -655,6 +683,7 @@ namespace NanumCsvViewer
         private Label detailHeaderLabel;
         private RichTextBox detailRichText;
         private ToolStripButton detailToggleButton;
+        private ToolStripButton themeToggleButton;
         private ToolStripSeparator toolStripSeparatorD;
         private ToolStripMenuItem detailPanelMenuItem;
         private DataGridView grid;

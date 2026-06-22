@@ -226,5 +226,44 @@ namespace NanumCsvViewer
             }
             return bmp;
         }
+
+        // ── Theme toggle ──────────────────────────────────────
+        public static Bitmap Sun()
+        {
+            var bmp = New(out var g);
+            using (g)
+            {
+                using var b = new SolidBrush(Amber);
+                g.FillEllipse(b, 5.5f, 5.5f, 5, 5);       // core
+                using var p = Stroke(Amber, 1.5f);
+                for (int i = 0; i < 8; i++)
+                {
+                    double a = i * Math.PI / 4;
+                    float cx = 8, cy = 8;
+                    g.DrawLine(p,
+                        cx + (float)Math.Cos(a) * 6, cy + (float)Math.Sin(a) * 6,
+                        cx + (float)Math.Cos(a) * 7.3f, cy + (float)Math.Sin(a) * 7.3f);
+                }
+            }
+            return bmp;
+        }
+
+        public static Bitmap Moon()
+        {
+            var bmp = New(out var g);
+            using (g)
+            {
+                using var b = new SolidBrush(Color.FromArgb(90, 120, 200));
+                // 보름달에서 우상단을 배경색으로 도려내 초승달 모양 생성
+                var path = new System.Drawing.Drawing2D.GraphicsPath();
+                path.AddEllipse(3, 3, 10, 10);
+                g.FillPath(b, path);
+                using var cut = new SolidBrush(Color.Transparent);
+                g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                using var erase = new SolidBrush(Color.FromArgb(0, 0, 0, 0));
+                g.FillEllipse(erase, 6.5f, 1.5f, 9, 9);
+            }
+            return bmp;
+        }
     }
 }

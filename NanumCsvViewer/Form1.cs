@@ -7,6 +7,10 @@ namespace NanumCsvViewer
     {
         private const string ProgramName = "Nanum CSV Viewer";
 
+        private readonly AppSettings _settings;
+        private AppTheme _theme = AppTheme.Light;
+        private ThemePalette _palette = ThemePalette.Light;
+
         private VirtualCsvDocument? _doc;
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _opCts;
@@ -37,13 +41,16 @@ namespace NanumCsvViewer
         private int _lineHeight = 18;
         private const int MaxCellLines = 6;
 
-        public Form1()
+        public Form1(AppSettings settings)
         {
+            _settings = settings;
             InitializeComponent();
             Text = ProgramName;
 
             BuildEncodingMenu();
+            BuildLanguageMenu();
             ApplyIcons();
+            ApplyLocalization();
 
             // 셀 내 줄바꿈을 여러 줄로 표시
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
@@ -59,9 +66,18 @@ namespace NanumCsvViewer
             _detailTimer = new System.Windows.Forms.Timer { Interval = 40 };
             _detailTimer.Tick += (_, _) => { _detailTimer.Stop(); UpdateDetailPanel(); };
 
+            // 테마: 저장값(Light/Dark) 우선, 없으면 Windows 시스템 테마 따름.
+            _theme = _settings.Theme switch
+            {
+                "Dark" => AppTheme.Dark,
+                "Light" => AppTheme.Light,
+                _ => ThemeManager.DetectSystem(),
+            };
+            ApplyTheme(_theme);
+
             UpdateFeatureState();
             RefreshSignal();
-            statusLabel.Text = "파일을 여세요 (File ▸ Open).";
+            statusLabel.Text = Loc.T("Status_OpenPrompt");
         }
 
         // ---------------------------------------------------------------- UI 설정(아이콘 · 인코딩 메뉴)
@@ -128,6 +144,127 @@ namespace NanumCsvViewer
             if (sender is ToolStripMenuItem item && item.Tag is string name) ChangeEncodingTo(name);
         }
 
+        // ---------------------------------------------------------------- Localization (i18n)
+
+        // View ▸ Language 하위 메뉴 구성(English / 한국어). OS 자동 감지는 시작값.
+        private void BuildLanguageMenu()
+        {
+            AddLang("en", "Lang_English");
+            AddLang("ko", "Lang_Korean");
+
+            void AddLang(string code, string key)
+            {
+                var item = new ToolStripMenuItem { Tag = code };
+                item.Click += OnLanguagePick;
+                languageMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private void OnLanguagePick(object? sender, EventArgs e)
+        {
+            if (sender is not ToolStripMenuItem item || item.Tag is not string code) return;
+            if (code == Loc.CurrentLanguage) return;
+            _settings.Language = code;
+            _settings.Save();
+            Loc.Apply(code);
+            ApplyLocalization();         // 모든 정적 텍스트 즉시 갱신
+            RefreshDynamicTexts();       // 상태바 등 동적 텍스트 갱신
+        }
+
+        // 메뉴/툴바/툴팁/컨텍스트 등 모든 정적 UI 텍스트를 현재 언어로 설정(코드가 단일 소스).
+        private void ApplyLocalization()
+        {
+            // 메뉴
+            fileToolStripMenuItem.Text = Loc.T("Menu_File");
+            openToolStripMenuItem.Text = Loc.T("Menu_Open");
+            quitToolStripMenuItem.Text = Loc.T("Menu_Quit");
+            editToolStripMenuItem.Text = Loc.T("Menu_Edit");
+            findMenuItem.Text = Loc.T("Menu_Find");
+            findNextMenuItem.Text = Loc.T("Menu_FindNext");
+            applyFilterMenuItem.Text = Loc.T("Menu_ApplyFilter");
+            editFilterByCellMenuItem.Text = Loc.T("Menu_FilterByCell");
+            clearFilterToolStripMenuItem.Text = Loc.T("Menu_ClearFilter");
+            sortAscMenuItem.Text = Loc.T("Menu_SortAsc");
+            sortDescMenuItem.Text = Loc.T("Menu_SortDesc");
+            clearSortToolStripMenuItem.Text = Loc.T("Menu_ClearSort");
+            viewToolStripMenuItem.Text = Loc.T("Menu_View");
+            encodingMenuItem.Text = Loc.T("Menu_Encoding");
+            detailPanelMenuItem.Text = Loc.T("Menu_DetailPanel");
+            languageMenuItem.Text = Loc.T("Menu_Language");
+            helpToolStripMenuItem.Text = Loc.T("Menu_Help");
+            usageMenuItem.Text = Loc.T("Menu_Usage");
+            aboutToolStripMenuItem.Text = Loc.T("Menu_About");
+
+            // 언어 하위 항목(라벨 + 체크)
+            foreach (ToolStripItem it in languageMenuItem.DropDownItems)
+                if (it is ToolStripMenuItem mi && mi.Tag is string code)
+                {
+                    mi.Text = Loc.T(code == "ko" ? "Lang_Korean" : "Lang_English");
+                    mi.Checked = code == Loc.CurrentLanguage;
+                }
+
+            // 툴바
+            openToolStripButton.Text = Loc.T("Tb_Open");
+            findLabel.Text = Loc.T("Tb_FindLabel");
+            findNextButton.Text = Loc.T("Tb_FindNext");
+            filterByCellButton.Text = Loc.T("Tb_FilterByCell");
+            filterByCellButton.ToolTipText = Loc.T("Tip_FilterByCell");
+            filterColumnLabel.Text = Loc.T("Tb_FilterLabel");
+            applyFilterButton.Text = Loc.T("Tb_Apply");
+            clearFilterButton.Text = Loc.T("Tb_Clear");
+            sortAscButton.ToolTipText = Loc.T("Tip_SortAsc");
+            sortDescButton.ToolTipText = Loc.T("Tip_SortDesc");
+            clearSortButton.Text = Loc.T("Menu_ClearSort");
+            clearSortButton.ToolTipText = Loc.T("Tip_ClearSort");
+            detailToggleButton.Text = Loc.T("Tb_Details");
+            detailToggleButton.ToolTipText = Loc.T("Tip_Detail");
+            themeToggleButton.ToolTipText = Loc.T("Tip_Theme");
+            encodingStatusButton.ToolTipText = Loc.T("Tip_Encoding");
+
+            // 컨텍스트 메뉴
+            filterByCellMenuItem.Text = Loc.T("Ctx_FilterByCell");
+
+            // 필터 컬럼 콤보 첫 항목(열려 있는 경우)
+            if (filterColumnCombo.Items.Count > 0) filterColumnCombo.Items[0] = Loc.T("Combo_AllColumns");
+        }
+
+        // 언어 변경 시 동적 텍스트(상태바·신호등) 갱신.
+        private void RefreshDynamicTexts()
+        {
+            RefreshSignal();
+            if (_doc is null) { statusLabel.Text = Loc.T("Status_OpenPrompt"); return; }
+            if (HasAnyFilter || _sortKeys.Count > 0) UpdateFilterStatus();
+            else statusLabel.Text = Loc.F("Status_NoFilterFmt", _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength));
+        }
+
+        // ---------------------------------------------------------------- Theme (light/dark)
+
+        private void ApplyTheme(AppTheme theme)
+        {
+            _theme = theme;
+            _palette = ThemeManager.Apply(this, theme);
+            // 토글 버튼 아이콘: 현재 다크면 해(라이트로 전환), 라이트면 달(다크로 전환)
+            themeToggleButton.Image = theme == AppTheme.Dark ? UiIcons.Sun() : UiIcons.Moon();
+            if (_doc is not null) { _detailTimer.Stop(); UpdateDetailPanel(); } // 상세 패널 색 갱신
+            grid.Invalidate();
+        }
+
+        private void OnThemeToggleClick(object? sender, EventArgs e)
+        {
+            var next = _theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark;
+            ApplyTheme(next);
+            _settings.Theme = next == AppTheme.Dark ? "Dark" : "Light";
+            _settings.Save();
+        }
+
+        // ---------------------------------------------------------------- Help
+
+        private void OnUsageClick(object? sender, EventArgs e)
+        {
+            using var usage = new UsageForm(_palette);
+            usage.ShowDialog(this);
+        }
+
         // ---------------------------------------------------------------- Open
 
         private async void OnOpenClick(object? sender, EventArgs e)
@@ -162,8 +299,8 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                statusLabel.Text = "열기 실패.";
+                MessageBox.Show(ex.Message, Loc.T("Title_OpenFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                statusLabel.Text = Loc.T("Status_OpenFailed");
             }
         }
 
@@ -173,7 +310,7 @@ namespace NanumCsvViewer
             cellValueTextBox.Text = "";
             grid.Columns.Clear();
             filterColumnCombo.Items.Clear();
-            filterColumnCombo.Items.Add("(모든 컬럼)");
+            filterColumnCombo.Items.Add(Loc.T("Combo_AllColumns"));
 
             for (int i = 0; i < header.Length; i++)
             {
@@ -202,7 +339,7 @@ namespace NanumCsvViewer
             progressBar.Value = 0;
             progressLabel.Visible = true;
             progressLabel.Text = "0%";
-            statusLabel.Text = "불러오는 중...";
+            statusLabel.Text = Loc.T("Status_Loading");
             _rowCountTimer.Start();
             UpdateFeatureState();
 
@@ -235,7 +372,7 @@ namespace NanumCsvViewer
                 progressBar.Visible = false;
                 progressLabel.Visible = false;
                 UpdateFeatureState();
-                MessageBox.Show(ex.Message, "인덱싱 오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(ex.Message, Loc.T("Title_IndexError"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -244,7 +381,7 @@ namespace NanumCsvViewer
             int pct = Math.Clamp(p.Percent, 0, 100);
             progressBar.Value = pct;
             progressLabel.Text = pct + "%";
-            statusLabel.Text = $"불러오는 중...  {p.RowsSoFar:N0} 행 인덱싱  ({FormatBytes(p.BytesProcessed)} / {FormatBytes(p.FileLength)})";
+            statusLabel.Text = Loc.F("Status_LoadingProgressFmt", p.RowsSoFar.ToString("N0"), FormatBytes(p.BytesProcessed), FormatBytes(p.FileLength));
         }
 
         private void OnIndexingComplete(long ms)
@@ -254,10 +391,11 @@ namespace NanumCsvViewer
             UpdateFeatureState();
 
             if (_doc is null) return;
-            string mode = _doc.InMemory ? "RAM" : "디스크";
-            string trunc = _doc.RowCountTruncated ? "  [행 수 한계 초과로 일부만 표시]" : "";
-            statusLabel.Text =
-                $"준비 완료 · {_doc.DataRowsAvailable:N0} 행 · {FormatBytes(_doc.FileLength)} · {_doc.ColumnCount} 열 · 구분자 '{_doc.Delimiter}' · {mode} 모드 · {ms:N0} ms · 필터/정렬 준비됨{trunc}";
+            string mode = _doc.InMemory ? Loc.T("Mode_Ram") : Loc.T("Mode_Disk");
+            string trunc = _doc.RowCountTruncated ? Loc.T("Status_Truncated") : "";
+            statusLabel.Text = Loc.F("Status_ReadyFmt",
+                _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength), _doc.ColumnCount,
+                _doc.Delimiter, mode, ms.ToString("N0"), trunc);
         }
 
         private void RefreshRowCount()
@@ -320,7 +458,7 @@ namespace NanumCsvViewer
             catch { return; }
             var bounds = new Rectangle(e.RowBounds.Left + 2, e.RowBounds.Top, grid.RowHeadersWidth - 6, e.RowBounds.Height);
             var font = grid.RowHeadersDefaultCellStyle.Font ?? grid.Font;
-            TextRenderer.DrawText(e.Graphics, s, font, bounds, SystemColors.ControlText,
+            TextRenderer.DrawText(e.Graphics, s, font, bounds, _palette.HeaderText,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
@@ -380,7 +518,7 @@ namespace NanumCsvViewer
                 // TextBox 멀티라인은 CRLF를 줄바꿈으로 인식
                 cellValueTextBox.Text = val.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
                 string colName = c < grid.Columns.Count ? grid.Columns[c].HeaderText : "";
-                cellAddressLabel.Text = $"R{_doc.GetSourceRowNumber(r):N0} · {colName}";
+                cellAddressLabel.Text = Loc.F("CellAddr_Fmt", _doc.GetSourceRowNumber(r).ToString("N0"), colName);
             }
             catch (Exception ex) { Debug.WriteLine($"[CurrentCellChanged] {ex}"); }
 
@@ -441,7 +579,7 @@ namespace NanumCsvViewer
             int r = grid.CurrentCell?.RowIndex ?? -1;
             if (r < 0 || r >= _doc.DisplayRowCount)
             {
-                detailHeaderLabel.Text = "행 상세";
+                detailHeaderLabel.Text = Loc.T("Detail_Header");
                 detailRichText.Clear();
                 return;
             }
@@ -450,7 +588,7 @@ namespace NanumCsvViewer
             try { row = _doc.GetDisplayRow(r); }
             catch (Exception ex) { Debug.WriteLine($"[DetailPanel] {ex}"); return; }
 
-            detailHeaderLabel.Text = $"행 상세 — R{_doc.GetSourceRowNumber(r):N0}";
+            detailHeaderLabel.Text = Loc.F("Detail_HeaderFmt", _doc.GetSourceRowNumber(r).ToString("N0"));
             _detailBoldFont ??= new Font(detailRichText.Font, FontStyle.Bold);
 
             detailRichText.SuspendLayout();
@@ -458,16 +596,16 @@ namespace NanumCsvViewer
             int cols = _doc.ColumnCount;
             for (int c = 0; c < cols; c++)
             {
-                string name = c < grid.Columns.Count ? grid.Columns[c].HeaderText : $"Column{c + 1}";
+                string name = c < grid.Columns.Count ? grid.Columns[c].HeaderText : Loc.F("Column_Fmt", c + 1);
                 string val = c < row.Length ? row[c] : string.Empty;
                 val = val.Replace("\r\n", "\n").Replace("\r", "\n");
 
                 detailRichText.SelectionFont = _detailBoldFont;
-                detailRichText.SelectionColor = Color.FromArgb(0, 70, 140);
+                detailRichText.SelectionColor = _palette.Accent;   // 테마에 맞춘 컬럼명 색
                 detailRichText.AppendText(name + "\n");
 
                 detailRichText.SelectionFont = detailRichText.Font;
-                detailRichText.SelectionColor = Color.Black;
+                detailRichText.SelectionColor = _palette.Text;     // 다크에서도 보이도록 테마 텍스트색
                 detailRichText.AppendText(val + "\n\n");
             }
             detailRichText.SelectionStart = 0;
@@ -488,7 +626,7 @@ namespace NanumCsvViewer
             grid.RowCount = 0;
             RefreshRowCount();
             grid.Invalidate();
-            statusLabel.Text = $"인코딩 변경: {name}";
+            statusLabel.Text = Loc.F("Status_EncodingChangedFmt", name);
         }
 
         // 상태바 버튼 텍스트 + 양쪽(메뉴/드롭다운) 체크 표시를 현재 인코딩으로 동기화.
@@ -547,7 +685,7 @@ namespace NanumCsvViewer
             var ct = _findCts.Token;
 
             SetBusy(true);
-            statusLabel.Text = $"'{term}' 검색 중...";
+            statusLabel.Text = Loc.F("Status_SearchingFmt", term);
             int found;
             try
             {
@@ -562,11 +700,11 @@ namespace NanumCsvViewer
             {
                 grid.CurrentCell = grid.Rows[found].Cells[Math.Max(0, grid.CurrentCell?.ColumnIndex ?? 0)];
                 grid.FirstDisplayedScrollingRowIndex = found;
-                statusLabel.Text = $"'{term}' 발견: {found + 1:N0} 행";
+                statusLabel.Text = Loc.F("Status_FoundFmt", term, (found + 1).ToString("N0"));
             }
             else
             {
-                statusLabel.Text = $"'{term}' 을(를) 찾을 수 없습니다.";
+                statusLabel.Text = Loc.F("Status_NotFoundFmt", term);
             }
         }
 
@@ -615,26 +753,26 @@ namespace NanumCsvViewer
                 if (!hadText) { UpdateFilterStatus(); return; }   // 변화 없음
                 _textCondition = null;
                 _textConditionDesc = "";
-                await RebuildFilterAsync("필터 갱신 중...");        // 조건 제거 → 넓어짐 → 전체 재스캔
+                await RebuildFilterAsync(Loc.T("Status_FilterUpdating"));        // 조건 제거 → 넓어짐 → 전체 재스캔
                 return;
             }
 
             int sel = filterColumnCombo.SelectedIndex;   // 0 = 모든 컬럼
             int col = sel - 1;
             var pred = BuildContainsPredicate(term, col);
-            string colName = col < 0 ? "전체" : (col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}");
+            string colName = col < 0 ? Loc.T("Filter_All") : (col < grid.Columns.Count ? grid.Columns[col].HeaderText : Loc.F("ColShort_Fmt", col + 1));
             _textCondition = pred;
-            _textConditionDesc = $"{colName}⊇\"{Trunc(term)}\"";
+            _textConditionDesc = Loc.F("Filter_ContainsFmt", colName, Trunc(term));
 
             if (hadText)
             {
                 // 기존 텍스트 조건 교체 → 결과가 넓어질 수 있어 전체 재스캔
-                await RebuildFilterAsync("필터 적용 중...");
+                await RebuildFilterAsync(Loc.T("Status_FilterApplying"));
             }
             else
             {
                 // 첫 텍스트 조건 = 순수 AND 추가(좁힘) → 증분(현재 뷰만)
-                await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), "필터 적용 중...");
+                await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), Loc.T("Status_FilterApplying"));
                 UpdateFilterStatus();
             }
         }
@@ -648,22 +786,22 @@ namespace NanumCsvViewer
             var cell = grid.CurrentCell;
             if (cell is null || cell.RowIndex < 0 || cell.ColumnIndex < 0)
             {
-                statusLabel.Text = "먼저 셀을 선택하세요.";
+                statusLabel.Text = Loc.T("Status_SelectCellFirst");
                 return;
             }
             int viewRow = cell.RowIndex, col = cell.ColumnIndex;
             string[] row;
             try { row = _doc.GetDisplayRow(viewRow); } catch { return; }
             string value = col < row.Length ? row[col] : "";
-            string colName = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"열{col + 1}";
+            string colName = col < grid.Columns.Count ? grid.Columns[col].HeaderText : Loc.F("ColShort_Fmt", col + 1);
 
             int capCol = col;
             string capVal = value;
             Func<string[], bool> pred = r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal);
-            _valueConditions.Add(($"{colName}=\"{Trunc(value)}\"", pred));
+            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred));
 
             // 증분: 현재 뷰만 새 조건으로 좁힘(전체 재스캔 안 함). 정렬 순서 유지.
-            await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), "셀값 필터 적용 중...");
+            await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), Loc.T("Status_CellFilterApplying"));
             UpdateFilterStatus();
         }
 
@@ -720,13 +858,14 @@ namespace NanumCsvViewer
             string size = FormatBytes(_doc.FileLength);
             if (!HasAnyFilter)
             {
-                statusLabel.Text = $"필터 없음 · {_doc.DataRowsAvailable:N0} 행 · {size}";
+                statusLabel.Text = Loc.F("Status_NoFilterFmt", _doc.DataRowsAvailable.ToString("N0"), size);
                 return;
             }
             var parts = new List<string>();
             if (_textCondition is not null) parts.Add(_textConditionDesc);
             parts.AddRange(_valueConditions.Select(v => v.desc));
-            statusLabel.Text = $"필터({parts.Count}): {string.Join(" AND ", parts)}  →  {_doc.DisplayRowCount:N0} / {_doc.DataRowsAvailable:N0} 행 · {size}";
+            statusLabel.Text = Loc.F("Status_FilterFmt", parts.Count, string.Join(Loc.T("Filter_And"), parts),
+                _doc.DisplayRowCount.ToString("N0"), _doc.DataRowsAvailable.ToString("N0"), size);
         }
 
         private static string Trunc(string s)
@@ -756,7 +895,7 @@ namespace NanumCsvViewer
             grid.RowCount = 0;
             RefreshRowCount();
             grid.Invalidate();
-            statusLabel.Text = $"필터 해제 · {_doc.DataRowsAvailable:N0} 행 · {FormatBytes(_doc.FileLength)}";
+            statusLabel.Text = Loc.F("Status_FilterClearedFmt", _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength));
         }
 
         // ---------------------------------------------------------------- Sort (Phase 3)
@@ -807,10 +946,10 @@ namespace NanumCsvViewer
             if (_doc is null || _sortKeys.Count == 0) return;
             // 정렬은 현재 뷰(필터 결과 또는 전체)를 기준으로 동작. 다중 키는 목록 순서가 우선순위.
             var keys = _sortKeys.ToArray();
-            await RunViewOpAsync(p => _doc.SortAsync(keys, p, _opCts!.Token), "정렬 중...");
+            await RunViewOpAsync(p => _doc.SortAsync(keys, p, _opCts!.Token), Loc.T("Status_Sorting"));
 
             UpdateSortGlyphs();
-            statusLabel.Text = $"정렬: {DescribeSort()} · {_doc.DisplayRowCount:N0} 행";
+            statusLabel.Text = Loc.F("Status_SortFmt", DescribeSort(), _doc.DisplayRowCount.ToString("N0"));
         }
 
         private string DescribeSort()
@@ -818,7 +957,7 @@ namespace NanumCsvViewer
             var parts = new List<string>(_sortKeys.Count);
             foreach (var s in _sortKeys)
             {
-                string name = s.Column < grid.Columns.Count ? grid.Columns[s.Column].HeaderText : $"열{s.Column + 1}";
+                string name = s.Column < grid.Columns.Count ? grid.Columns[s.Column].HeaderText : Loc.F("ColShort_Fmt", s.Column + 1);
                 parts.Add($"{name} {(s.Ascending ? "▲" : "▼")}");
             }
             return string.Join(" → ", parts);
@@ -842,7 +981,7 @@ namespace NanumCsvViewer
                 grid.RowCount = 0;
                 RefreshRowCount();
                 grid.Invalidate();
-                statusLabel.Text = "정렬 해제.";
+                statusLabel.Text = Loc.T("Status_SortCleared");
             }
         }
 
@@ -974,10 +1113,10 @@ namespace NanumCsvViewer
         private void RefreshSignal()
         {
             Color c; string t;
-            if (_doc is null) { c = Color.Gray; t = "대기"; }
-            else if (_indexing) { c = Color.Goldenrod; t = "불러오는 중"; }
-            else if (_busy) { c = Color.DarkOrange; t = "작업 중"; }
-            else { c = Color.ForestGreen; t = "준비완료"; }
+            if (_doc is null) { c = Color.Gray; t = Loc.T("Signal_Idle"); }
+            else if (_indexing) { c = Color.Goldenrod; t = Loc.T("Signal_Loading"); }
+            else if (_busy) { c = Color.DarkOrange; t = Loc.T("Signal_Busy"); }
+            else { c = Color.ForestGreen; t = Loc.T("Signal_Ready"); }
             signalLabel.ForeColor = c;
             signalLabel.Text = "● " + t;
         }

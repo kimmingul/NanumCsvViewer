@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <data name="Menu_File" xml:space="preserve"><value>File</value></data>
+  <data name="Menu_Open" xml:space="preserve"><value>Open...</value></data>
+  <data name="Menu_Quit" xml:space="preserve"><value>Quit</value></data>
+  <data name="Menu_Edit" xml:space="preserve"><value>Edit</value></data>
+  <data name="Menu_Find" xml:space="preserve"><value>Find...</value></data>
+  <data name="Menu_FindNext" xml:space="preserve"><value>Find Next</value></data>
+  <data name="Menu_ApplyFilter" xml:space="preserve"><value>Apply Filter</value></data>
+  <data name="Menu_FilterByCell" xml:space="preserve"><value>Filter by Selected Cell</value></data>
+  <data name="Menu_ClearFilter" xml:space="preserve"><value>Clear Filter</value></data>
+  <data name="Menu_SortAsc" xml:space="preserve"><value>Sort Ascending (current column)</value></data>
+  <data name="Menu_SortDesc" xml:space="preserve"><value>Sort Descending (current column)</value></data>
+  <data name="Menu_ClearSort" xml:space="preserve"><value>Clear Sort</value></data>
+  <data name="Menu_View" xml:space="preserve"><value>View</value></data>
+  <data name="Menu_Encoding" xml:space="preserve"><value>Encoding</value></data>
+  <data name="Menu_DetailPanel" xml:space="preserve"><value>Detail Panel</value></data>
+  <data name="Menu_Language" xml:space="preserve"><value>Language</value></data>
+  <data name="Lang_English" xml:space="preserve"><value>English</value></data>
+  <data name="Lang_Korean" xml:space="preserve"><value>한국어</value></data>
+  <data name="Menu_Help" xml:space="preserve"><value>Help</value></data>
+  <data name="Menu_Usage" xml:space="preserve"><value>How to Use</value></data>
+  <data name="Menu_About" xml:space="preserve"><value>About</value></data>
+
+  <data name="Tb_Open" xml:space="preserve"><value>Open</value></data>
+  <data name="Tb_FindLabel" xml:space="preserve"><value>Find:</value></data>
+  <data name="Tb_FindNext" xml:space="preserve"><value>Next</value></data>
+  <data name="Tb_FilterByCell" xml:space="preserve"><value>Filter by Cell</value></data>
+  <data name="Tb_FilterLabel" xml:space="preserve"><value>Filter:</value></data>
+  <data name="Tb_Apply" xml:space="preserve"><value>Apply</value></data>
+  <data name="Tb_Clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="Tb_Details" xml:space="preserve"><value>Details (F4)</value></data>
+
+  <data name="Tip_FilterByCell" xml:space="preserve"><value>Filter by the selected cell's column = its value (AND with existing filters)</value></data>
+  <data name="Tip_SortAsc" xml:space="preserve"><value>Sort the current column ascending</value></data>
+  <data name="Tip_SortDesc" xml:space="preserve"><value>Sort the current column descending</value></data>
+  <data name="Tip_ClearSort" xml:space="preserve"><value>Clear sort (restore file order)</value></data>
+  <data name="Tip_Detail" xml:space="preserve"><value>Show the full content of the selected row in the right panel</value></data>
+  <data name="Tip_Encoding" xml:space="preserve"><value>Text encoding (click to change)</value></data>
+  <data name="Tip_Theme" xml:space="preserve"><value>Toggle light/dark theme</value></data>
+  <data name="Ctx_FilterByCell" xml:space="preserve"><value>Filter by this cell value</value></data>
+
+  <data name="Status_OpenPrompt" xml:space="preserve"><value>Open a file (File ▸ Open).</value></data>
+  <data name="Status_Loading" xml:space="preserve"><value>Loading...</value></data>
+  <data name="Status_LoadingProgressFmt" xml:space="preserve"><value>Loading...  {0} rows indexed  ({1} / {2})</value></data>
+  <data name="Status_ReadyFmt" xml:space="preserve"><value>Ready · {0} rows · {1} · {2} cols · delimiter '{3}' · {4} mode · {5} ms · filter/sort ready{6}</value></data>
+  <data name="Mode_Ram" xml:space="preserve"><value>RAM</value></data>
+  <data name="Mode_Disk" xml:space="preserve"><value>Disk</value></data>
+  <data name="Status_Truncated" xml:space="preserve"><value>  [row limit exceeded; partial view]</value></data>
+  <data name="Title_OpenFailed" xml:space="preserve"><value>Open Failed</value></data>
+  <data name="Status_OpenFailed" xml:space="preserve"><value>Open failed.</value></data>
+  <data name="Title_IndexError" xml:space="preserve"><value>Indexing Error</value></data>
+  <data name="Status_EncodingChangedFmt" xml:space="preserve"><value>Encoding changed: {0}</value></data>
+  <data name="Status_SearchingFmt" xml:space="preserve"><value>Searching '{0}'...</value></data>
+  <data name="Status_FoundFmt" xml:space="preserve"><value>'{0}' found: row {1}</value></data>
+  <data name="Status_NotFoundFmt" xml:space="preserve"><value>'{0}' not found.</value></data>
+  <data name="Status_FilterUpdating" xml:space="preserve"><value>Updating filter...</value></data>
+  <data name="Status_FilterApplying" xml:space="preserve"><value>Applying filter...</value></data>
+  <data name="Status_CellFilterApplying" xml:space="preserve"><value>Applying cell filter...</value></data>
+  <data name="Status_Sorting" xml:space="preserve"><value>Sorting...</value></data>
+  <data name="Status_SelectCellFirst" xml:space="preserve"><value>Select a cell first.</value></data>
+  <data name="Status_NoFilterFmt" xml:space="preserve"><value>No filter · {0} rows · {1}</value></data>
+  <data name="Status_FilterFmt" xml:space="preserve"><value>Filter({0}): {1}  →  {2} / {3} rows · {4}</value></data>
+  <data name="Status_FilterClearedFmt" xml:space="preserve"><value>Filter cleared · {0} rows · {1}</value></data>
+  <data name="Filter_All" xml:space="preserve"><value>All</value></data>
+  <data name="Filter_ContainsFmt" xml:space="preserve"><value>{0}⊇"{1}"</value></data>
+  <data name="Filter_EqualsFmt" xml:space="preserve"><value>{0}="{1}"</value></data>
+  <data name="Filter_And" xml:space="preserve"><value> AND </value></data>
+  <data name="Status_SortFmt" xml:space="preserve"><value>Sort: {0} · {1} rows</value></data>
+  <data name="Status_SortCleared" xml:space="preserve"><value>Sort cleared.</value></data>
+  <data name="ColShort_Fmt" xml:space="preserve"><value>Col{0}</value></data>
+  <data name="Column_Fmt" xml:space="preserve"><value>Column{0}</value></data>
+  <data name="Signal_Idle" xml:space="preserve"><value>Idle</value></data>
+  <data name="Signal_Loading" xml:space="preserve"><value>Loading</value></data>
+  <data name="Signal_Busy" xml:space="preserve"><value>Busy</value></data>
+  <data name="Signal_Ready" xml:space="preserve"><value>Ready</value></data>
+  <data name="Detail_Header" xml:space="preserve"><value>Row Detail</value></data>
+  <data name="Detail_HeaderFmt" xml:space="preserve"><value>Row Detail — R{0}</value></data>
+  <data name="CellAddr_Fmt" xml:space="preserve"><value>R{0} · {1}</value></data>
+  <data name="Combo_AllColumns" xml:space="preserve"><value>(All columns)</value></data>
+
+  <data name="Err_UnsupportedEncodingFmt" xml:space="preserve"><value>The '{0}' encoding is not supported in large-file fast mode.
+Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
+  <data name="Err_FileTruncated" xml:space="preserve"><value>The file is shorter than expected (it may have been modified externally).</value></data>
+
+  <data name="Usage_Title" xml:space="preserve"><value>How to Use</value></data>
+  <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — Quick Guide
+
+[Open]
+• File ▸ Open (Ctrl+O), or the Open button, to open a .csv / .txt file.
+• The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
+
+[Encoding]
+• Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use View ▸ Encoding. No re-indexing needed.
+
+[Find]
+• Type in the Find box and press Enter, or F3, to jump to the next match (case-insensitive, wraps around).
+
+[Filter]
+• Choose a column (or All) + text, then Apply (or Enter).
+• Select a cell and use "Filter by Cell" (Ctrl+B) or right-click ▸ "Filter by this cell value" to add that value as a condition.
+• Conditions accumulate with AND (like Excel). Clear removes all.
+
+[Sort]
+• Click a column header to sort (click again to toggle direction).
+• Shift+Click headers to sort by multiple columns (priority shown on each header).
+• Equal values keep their original order (stable sort). Clear Sort restores file order.
+
+[Detail Panel]
+• Toggle with the Details button or F4. Shows every column of the selected row as name + value — handy for cells with line breaks.
+
+[Status Light]
+• The colored dot at the right end of the status bar: ⚪ Idle · 🟡 Loading · 🟠 Busy · 🟢 Ready.
+
+[Theme]
+• Use the theme toggle at the right of the toolbar to switch light/dark.
+
+[Shortcuts]
+Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next
+Ctrl+B Filter by Cell · Ctrl+Shift+L Clear Filter · Ctrl+Shift+S Clear Sort
+F4 Detail Panel · F1 This help</value></data>
+</root>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <data name="Menu_File" xml:space="preserve"><value>File</value></data>
+  <data name="Menu_Open" xml:space="preserve"><value>열기...</value></data>
+  <data name="Menu_Quit" xml:space="preserve"><value>종료</value></data>
+  <data name="Menu_Edit" xml:space="preserve"><value>편집</value></data>
+  <data name="Menu_Find" xml:space="preserve"><value>찾기...</value></data>
+  <data name="Menu_FindNext" xml:space="preserve"><value>다음 찾기</value></data>
+  <data name="Menu_ApplyFilter" xml:space="preserve"><value>필터 적용</value></data>
+  <data name="Menu_FilterByCell" xml:space="preserve"><value>선택한 셀 값으로 필터</value></data>
+  <data name="Menu_ClearFilter" xml:space="preserve"><value>필터 해제</value></data>
+  <data name="Menu_SortAsc" xml:space="preserve"><value>오름차순 정렬 (현재 열)</value></data>
+  <data name="Menu_SortDesc" xml:space="preserve"><value>내림차순 정렬 (현재 열)</value></data>
+  <data name="Menu_ClearSort" xml:space="preserve"><value>정렬 해제</value></data>
+  <data name="Menu_View" xml:space="preserve"><value>보기</value></data>
+  <data name="Menu_Encoding" xml:space="preserve"><value>인코딩</value></data>
+  <data name="Menu_DetailPanel" xml:space="preserve"><value>상세 패널</value></data>
+  <data name="Menu_Language" xml:space="preserve"><value>언어</value></data>
+  <data name="Lang_English" xml:space="preserve"><value>English</value></data>
+  <data name="Lang_Korean" xml:space="preserve"><value>한국어</value></data>
+  <data name="Menu_Help" xml:space="preserve"><value>도움말</value></data>
+  <data name="Menu_Usage" xml:space="preserve"><value>사용법</value></data>
+  <data name="Menu_About" xml:space="preserve"><value>정보</value></data>
+
+  <data name="Tb_Open" xml:space="preserve"><value>열기</value></data>
+  <data name="Tb_FindLabel" xml:space="preserve"><value>찾기:</value></data>
+  <data name="Tb_FindNext" xml:space="preserve"><value>다음</value></data>
+  <data name="Tb_FilterByCell" xml:space="preserve"><value>셀 값으로 필터</value></data>
+  <data name="Tb_FilterLabel" xml:space="preserve"><value>필터:</value></data>
+  <data name="Tb_Apply" xml:space="preserve"><value>적용</value></data>
+  <data name="Tb_Clear" xml:space="preserve"><value>해제</value></data>
+  <data name="Tb_Details" xml:space="preserve"><value>상세 (F4)</value></data>
+
+  <data name="Tip_FilterByCell" xml:space="preserve"><value>선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)</value></data>
+  <data name="Tip_SortAsc" xml:space="preserve"><value>현재 열을 오름차순으로 정렬</value></data>
+  <data name="Tip_SortDesc" xml:space="preserve"><value>현재 열을 내림차순으로 정렬</value></data>
+  <data name="Tip_ClearSort" xml:space="preserve"><value>정렬 해제(파일 순서로 복원)</value></data>
+  <data name="Tip_Detail" xml:space="preserve"><value>선택한 행의 전체 내용을 우측 패널에 표시</value></data>
+  <data name="Tip_Encoding" xml:space="preserve"><value>텍스트 인코딩 (클릭하여 변경)</value></data>
+  <data name="Tip_Theme" xml:space="preserve"><value>밝은/어두운 테마 전환</value></data>
+  <data name="Ctx_FilterByCell" xml:space="preserve"><value>이 셀 값으로 필터</value></data>
+
+  <data name="Status_OpenPrompt" xml:space="preserve"><value>파일을 여세요 (File ▸ Open).</value></data>
+  <data name="Status_Loading" xml:space="preserve"><value>불러오는 중...</value></data>
+  <data name="Status_LoadingProgressFmt" xml:space="preserve"><value>불러오는 중...  {0} 행 인덱싱  ({1} / {2})</value></data>
+  <data name="Status_ReadyFmt" xml:space="preserve"><value>준비 완료 · {0} 행 · {1} · {2} 열 · 구분자 '{3}' · {4} 모드 · {5} ms · 필터/정렬 준비됨{6}</value></data>
+  <data name="Mode_Ram" xml:space="preserve"><value>RAM</value></data>
+  <data name="Mode_Disk" xml:space="preserve"><value>디스크</value></data>
+  <data name="Status_Truncated" xml:space="preserve"><value>  [행 수 한계 초과로 일부만 표시]</value></data>
+  <data name="Title_OpenFailed" xml:space="preserve"><value>열기 실패</value></data>
+  <data name="Status_OpenFailed" xml:space="preserve"><value>열기 실패.</value></data>
+  <data name="Title_IndexError" xml:space="preserve"><value>인덱싱 오류</value></data>
+  <data name="Status_EncodingChangedFmt" xml:space="preserve"><value>인코딩 변경: {0}</value></data>
+  <data name="Status_SearchingFmt" xml:space="preserve"><value>'{0}' 검색 중...</value></data>
+  <data name="Status_FoundFmt" xml:space="preserve"><value>'{0}' 발견: {1} 행</value></data>
+  <data name="Status_NotFoundFmt" xml:space="preserve"><value>'{0}' 을(를) 찾을 수 없습니다.</value></data>
+  <data name="Status_FilterUpdating" xml:space="preserve"><value>필터 갱신 중...</value></data>
+  <data name="Status_FilterApplying" xml:space="preserve"><value>필터 적용 중...</value></data>
+  <data name="Status_CellFilterApplying" xml:space="preserve"><value>셀값 필터 적용 중...</value></data>
+  <data name="Status_Sorting" xml:space="preserve"><value>정렬 중...</value></data>
+  <data name="Status_SelectCellFirst" xml:space="preserve"><value>먼저 셀을 선택하세요.</value></data>
+  <data name="Status_NoFilterFmt" xml:space="preserve"><value>필터 없음 · {0} 행 · {1}</value></data>
+  <data name="Status_FilterFmt" xml:space="preserve"><value>필터({0}): {1}  →  {2} / {3} 행 · {4}</value></data>
+  <data name="Status_FilterClearedFmt" xml:space="preserve"><value>필터 해제 · {0} 행 · {1}</value></data>
+  <data name="Filter_All" xml:space="preserve"><value>전체</value></data>
+  <data name="Filter_ContainsFmt" xml:space="preserve"><value>{0}⊇"{1}"</value></data>
+  <data name="Filter_EqualsFmt" xml:space="preserve"><value>{0}="{1}"</value></data>
+  <data name="Filter_And" xml:space="preserve"><value> AND </value></data>
+  <data name="Status_SortFmt" xml:space="preserve"><value>정렬: {0} · {1} 행</value></data>
+  <data name="Status_SortCleared" xml:space="preserve"><value>정렬 해제.</value></data>
+  <data name="ColShort_Fmt" xml:space="preserve"><value>열{0}</value></data>
+  <data name="Column_Fmt" xml:space="preserve"><value>Column{0}</value></data>
+  <data name="Signal_Idle" xml:space="preserve"><value>대기</value></data>
+  <data name="Signal_Loading" xml:space="preserve"><value>불러오는 중</value></data>
+  <data name="Signal_Busy" xml:space="preserve"><value>작업 중</value></data>
+  <data name="Signal_Ready" xml:space="preserve"><value>준비완료</value></data>
+  <data name="Detail_Header" xml:space="preserve"><value>행 상세</value></data>
+  <data name="Detail_HeaderFmt" xml:space="preserve"><value>행 상세 — R{0}</value></data>
+  <data name="CellAddr_Fmt" xml:space="preserve"><value>R{0} · {1}</value></data>
+  <data name="Combo_AllColumns" xml:space="preserve"><value>(모든 컬럼)</value></data>
+
+  <data name="Err_UnsupportedEncodingFmt" xml:space="preserve"><value>'{0}' 인코딩은 대용량 고속 모드에서 지원되지 않습니다.
+UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
+  <data name="Err_FileTruncated" xml:space="preserve"><value>파일이 예상보다 짧습니다(외부에서 변경되었을 수 있음).</value></data>
+
+  <data name="Usage_Title" xml:space="preserve"><value>사용법</value></data>
+  <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — 빠른 사용 안내
+
+[열기]
+• File ▸ Open (Ctrl+O) 또는 Open 버튼으로 .csv / .txt 파일을 엽니다.
+• 첫 페이지는 즉시 표시되고 나머지는 백그라운드로 인덱싱됩니다(하단 진행바). 인덱싱 중에도 스크롤할 수 있습니다.
+
+[인코딩]
+• 자동 감지(UTF-8 / UTF-8 BOM / CP949·EUC-KR). 틀린 경우 상태바 우측의 인코딩 위젯을 클릭하거나 보기 ▸ 인코딩에서 바꿉니다. 재인덱싱은 필요 없습니다.
+
+[찾기]
+• 찾기 입력란에 입력 후 Enter, 또는 F3로 다음 일치로 이동(대소문자 무시, 끝에서 처음으로 순환).
+
+[필터]
+• 컬럼(또는 전체) + 검색어를 고르고 적용(또는 Enter).
+• 셀을 선택한 뒤 "셀 값으로 필터"(Ctrl+B) 또는 우클릭 ▸ "이 셀 값으로 필터"로 그 값을 조건으로 추가.
+• 조건은 AND로 누적됩니다(Excel처럼). 해제로 모두 지웁니다.
+
+[정렬]
+• 컬럼 헤더를 클릭해 정렬(다시 클릭하면 방향 전환).
+• 헤더를 Shift+클릭하면 다중 컬럼 정렬(헤더에 우선순위 표시).
+• 같은 값끼리는 원래 순서 유지(안정 정렬). 정렬 해제로 파일 순서 복원.
+
+[상세 패널]
+• 상세 버튼 또는 F4로 토글. 선택한 행의 모든 컬럼을 컬럼명+값으로 표시 — 줄바꿈이 있는 셀을 읽기에 좋습니다.
+
+[상태 표시등]
+• 상태바 우측 끝의 색 점: ⚪ 대기 · 🟡 불러오는 중 · 🟠 작업 중 · 🟢 준비 완료.
+
+[테마]
+• 툴바 우측의 테마 토글로 밝은/어두운 모드를 전환합니다.
+
+[단축키]
+Ctrl+O 열기 · Ctrl+Q 종료 · Ctrl+F 찾기 · F3 다음 찾기
+Ctrl+B 셀 값으로 필터 · Ctrl+Shift+L 필터 해제 · Ctrl+Shift+S 정렬 해제
+F4 상세 패널 · F1 이 도움말</value></data>
+</root>
