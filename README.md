@@ -50,14 +50,37 @@ dotnet test
 
 ## 📦 단일 실행 파일 만들기
 
-.NET 설치 없이 어디서나 실행되는 단일 `.exe`(자체 포함 + 압축)를 만듭니다.
+두 가지 단일 `.exe` 변형을 게시할 수 있습니다.
 
 ```bash
+# 자체 포함본(.NET 불필요, 약 50 MB)
 dotnet publish NanumCsvViewer/NanumCsvViewer.csproj -p:PublishProfile=win-x64-singlefile
+
+# 프레임워크 의존본(작음, .NET 10 Desktop Runtime 필요)
+dotnet publish NanumCsvViewer/NanumCsvViewer.csproj -p:PublishProfile=win-x64-framework
 ```
 
-산출물: `NanumCsvViewer/bin/Release/publish/NanumCsvViewer.exe` (약 50 MB).
-Visual Studio에서는 게시 시 `win-x64-singlefile` 프로필을 선택하면 됩니다.
+| 변형 | 프로필 | 크기 | 요구사항 |
+|---|---|---|---|
+| 자체 포함 | `win-x64-singlefile` | ~50 MB | 없음 |
+| 프레임워크 의존 | `win-x64-framework` | ~수 MB | [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+Visual Studio에서는 게시 시 해당 프로필을 선택하면 됩니다.
+
+### 릴리즈 + 코드 서명
+
+`scripts/release.ps1`이 두 변형을 게시하고 SafeNet 토큰 인증서로 코드 서명(타임스탬프 포함)한 뒤 GitHub 릴리즈를 만듭니다. 서명 시 토큰 PIN 프롬프트가 뜹니다.
+
+```powershell
+# 토큰 연결 상태에서 실행(인증서를 목록에서 선택)
+.\scripts\release.ps1 -Version 1.4.0
+
+# 빌드/서명만(릴리즈 생략) 또는 서명 생략
+.\scripts\release.ps1 -Version 1.4.0 -SkipRelease
+.\scripts\release.ps1 -Version 1.4.0 -SkipSign -SkipRelease
+```
+
+요구: Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
 
 ## 📖 사용법
 

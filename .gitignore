@@ -366,3 +366,5 @@ FodyWeavers.xsd
 samples/
 .omc/
 .serena/
+# 릴리즈 산출물(서명된 exe) — GitHub 릴리즈로 배포, 저장소에는 커밋하지 않음
+/dist/
