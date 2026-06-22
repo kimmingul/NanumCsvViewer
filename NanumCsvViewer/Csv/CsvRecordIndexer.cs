@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace NanumCsvViewer.Csv
 {
     /// <summary>
@@ -19,6 +21,8 @@ namespace NanumCsvViewer.Csv
         private readonly long _fileLength;
         private readonly byte _delim;
         private readonly byte _quote;
+        // 인용 밖에서 의미 있는 바이트 집합(구분자/따옴표/CR/LF). 그 외 일반 문자는 벡터화로 건너뜀.
+        private readonly SearchValues<byte> _structural;
 
         private State _state = State.FieldStart;
         private bool _awaitingLfAfterCr;
@@ -29,6 +33,7 @@ namespace NanumCsvViewer.Csv
             _fileLength = fileLength;
             _delim = delimiter;
             _quote = quote;
+            _structural = SearchValues.Create(new[] { quote, delimiter, CR, LF });
             // 첫 레코드(헤더) 시작 = BOM 다음 위치.
             if (fileLength > firstRecordStart) _index.Add(firstRecordStart);
         }
@@ -42,56 +47,75 @@ namespace NanumCsvViewer.Csv
             bool awaiting = _awaitingLfAfterCr;
             byte delim = _delim, quote = _quote;
             long fileLength = _fileLength;
+            var structural = _structural;
 
             int i = 0;
             while (i < n)
             {
-                byte b = buffer[i];
-
-                // 직전 버퍼/바이트가 CR로 레코드를 끝냈을 때, 뒤따르는 LF(=CRLF) 여부 해소.
+                // 직전이 CR로 레코드를 끝냈을 때, 뒤따르는 LF(=CRLF) 여부 해소.
                 if (awaiting)
                 {
                     awaiting = false;
-                    if (b == LF)
+                    if (buffer[i] == LF)
                     {
                         AddStart(baseOffset + i + 1, fileLength);
                         state = State.FieldStart;
                         i++;
                         continue;
                     }
-                    // 단독 CR: 새 레코드는 현재 바이트에서 시작 → 등록 후 이 바이트를 재처리.
+                    // 단독 CR: 새 레코드는 현재 바이트에서 시작 → 등록 후 이 바이트를 아래에서 재처리.
                     AddStart(baseOffset + i, fileLength);
                     state = State.FieldStart;
                 }
 
+                // 인용 안에서는 다음 따옴표까지의 모든 데이터(쉼표·줄바꿈 포함)를 한 번에 건너뜀.
+                if (state == State.InQuoted)
+                {
+                    int q = buffer.Slice(i).IndexOf(quote);
+                    if (q < 0) break;            // 버퍼 끝까지 인용 데이터
+                    i += q;                       // 따옴표 위치
+                    state = State.QuoteInQuoted;
+                    i++;
+                    continue;
+                }
+
+                // FieldStart / InUnquoted / QuoteInQuoted: 다음 구조 바이트로 벡터화 점프.
+                int rel = buffer.Slice(i).IndexOfAny(structural);
+                if (rel < 0)
+                {
+                    // 남은 건 전부 일반 문자 → 필드 진입 상태만 갱신하고 종료.
+                    if (state == State.FieldStart || state == State.QuoteInQuoted) state = State.InUnquoted;
+                    break;
+                }
+                if (rel > 0)
+                {
+                    // 건너뛴 일반 문자들로 인해 필드 시작/닫는따옴표 뒤 상태는 InUnquoted가 됨.
+                    if (state == State.FieldStart || state == State.QuoteInQuoted) state = State.InUnquoted;
+                    i += rel;
+                }
+
+                byte c = buffer[i];
                 switch (state)
                 {
                     case State.FieldStart:
-                        if (b == quote) state = State.InQuoted;
-                        else if (b == delim) state = State.FieldStart;
-                        else if (b == CR) { awaiting = true; i++; continue; }
-                        else if (b == LF) { AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
-                        else state = State.InUnquoted;
+                        if (c == quote) state = State.InQuoted;
+                        else if (c == delim) state = State.FieldStart;
+                        else if (c == CR) { awaiting = true; i++; continue; }
+                        else { /* LF */ AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
                         break;
 
                     case State.InUnquoted:
-                        if (b == delim) state = State.FieldStart;
-                        else if (b == CR) { awaiting = true; i++; continue; }
-                        else if (b == LF) { AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
-                        // 비인용 필드 내부의 따옴표는 리터럴로 간주(관대 모드).
-                        break;
-
-                    case State.InQuoted:
-                        if (b == quote) state = State.QuoteInQuoted;
-                        // 그 외(CR/LF/구분자 포함)는 모두 데이터.
+                        if (c == delim) state = State.FieldStart;
+                        else if (c == CR) { awaiting = true; i++; continue; }
+                        else if (c == LF) { AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
+                        // 비인용 필드 내부의 따옴표는 리터럴(관대 모드) → 상태 유지.
                         break;
 
                     case State.QuoteInQuoted:
-                        if (b == quote) state = State.InQuoted;            // "" → 이스케이프된 따옴표
-                        else if (b == delim) state = State.FieldStart;     // 필드 종료
-                        else if (b == CR) { awaiting = true; i++; continue; }
-                        else if (b == LF) { AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
-                        else state = State.InUnquoted;                     // 관대 모드
+                        if (c == quote) state = State.InQuoted;            // "" → 이스케이프된 따옴표
+                        else if (c == delim) state = State.FieldStart;     // 필드 종료
+                        else if (c == CR) { awaiting = true; i++; continue; }
+                        else { /* LF */ AddStart(baseOffset + i + 1, fileLength); state = State.FieldStart; i++; continue; }
                         break;
                 }
                 i++;
