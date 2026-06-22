@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading.Channels;
 
 namespace NanumCsvViewer.Csv
 {
@@ -24,6 +25,7 @@ namespace NanumCsvViewer.Csv
         public const long RamBufferBudgetBytes = 1_500_000_000;
         private const int RowCacheCapacity = 8192;
         private const int ReadUnit = MemoryFileBuffer.ChunkSize; // 16 MB
+        private const int PrefetchChunks = 3;                    // 읽기/스캔 겹치기용 선반입 청크 수
 
         private readonly string _path;
         private readonly RecordIndex _index = new();
@@ -123,38 +125,66 @@ namespace NanumCsvViewer.Csv
         /// <summary>백그라운드 단일 패스: 순차로 읽으며 인덱싱(+적응형이면 RAM 적재).</summary>
         public Task RunIndexingAsync(IProgress<IndexProgress> progress, CancellationToken ct)
         {
-            return Task.Run(() =>
+            return Task.Run(async () =>
             {
                 using var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 20, FileOptions.SequentialScan);
                 var indexer = new CsvRecordIndexer(_index, FileLength, _delim, _preamble);
 
-                byte[]? reuse = WillUseRam ? null : new byte[ReadUnit];
-                long offset = 0;
-                int chunkIndex = 0;
-                long lastReport = 0;
+                // 읽기(I/O)와 스캔(CPU)을 겹친다: 생산자가 다음 청크를 읽는 동안 소비자가 현재 청크를 스캔.
+                var channel = Channel.CreateBounded<(byte[] buf, int len, long off, int idx)>(
+                    new BoundedChannelOptions(PrefetchChunks) { SingleReader = true, SingleWriter = true });
 
-                while (offset < FileLength)
+                // 디스크 모드(미적재)는 버퍼 재사용 풀, RAM 모드는 청크마다 새 배열(어차피 보관됨).
+                var pool = WillUseRam ? null : new System.Collections.Concurrent.ConcurrentQueue<byte[]>();
+
+                // ── 생산자: 순차 읽기 ──
+                var producer = Task.Run(async () =>
                 {
-                    ct.ThrowIfCancellationRequested();
-                    int thisLen = (int)Math.Min(ReadUnit, FileLength - offset);
-                    byte[] chunk = WillUseRam ? new byte[thisLen] : reuse!;
-                    ReadFully(fs, chunk, thisLen);
-
-                    if (WillUseRam) _ramBufferPending!.SetChunk(chunkIndex, chunk);
-                    indexer.ProcessBuffer(chunk.AsSpan(0, thisLen), offset);
-                    _index.Publish(); // 청크 단위로 개수 공개(레코드당 공개 대신 일괄)
-
-                    offset += thisLen;
-                    chunkIndex++;
-
-                    if (offset - lastReport >= ReadUnit || offset >= FileLength)
+                    long off = 0;
+                    int idx = 0;
+                    try
                     {
-                        lastReport = offset;
-                        progress.Report(new IndexProgress(offset, FileLength, _index.Count));
+                        while (off < FileLength)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            int len = (int)Math.Min(ReadUnit, FileLength - off);
+                            byte[] buf;
+                            if (WillUseRam) buf = new byte[len];
+                            else if (!pool!.TryDequeue(out buf!)) buf = new byte[ReadUnit];
+                            ReadFully(fs, buf, len);
+                            await channel.Writer.WriteAsync((buf, len, off, idx), ct);
+                            off += len;
+                            idx++;
+                        }
+                        channel.Writer.Complete();
+                    }
+                    catch (Exception ex)
+                    {
+                        channel.Writer.Complete(ex); // 소비자 측에서 예외 전파
+                    }
+                }, ct);
+
+                // ── 소비자(현재 스레드): 순서대로 스캔 ──
+                long lastReport = 0;
+                await foreach (var item in channel.Reader.ReadAllAsync(ct))
+                {
+                    if (WillUseRam) _ramBufferPending!.SetChunk(item.idx, item.buf);
+                    indexer.ProcessBuffer(item.buf.AsSpan(0, item.len), item.off);
+                    _index.Publish(); // 청크 단위로 개수 공개
+
+                    if (!WillUseRam) pool!.Enqueue(item.buf); // 버퍼 재사용
+
+                    long processed = item.off + item.len;
+                    if (processed - lastReport >= ReadUnit || processed >= FileLength)
+                    {
+                        lastReport = processed;
+                        progress.Report(new IndexProgress(processed, FileLength, _index.Count));
                     }
                 }
 
-                _index.Publish(); // 마지막 청크까지 최종 공개
+                await producer; // 생산자 예외 전파
+
+                _index.Publish(); // 최종 공개
                 IndexingComplete = true;
                 if (WillUseRam) _ramBuffer = _ramBufferPending; // 디스크→RAM 전환(이후 필터 스캔 가속)
                 progress.Report(new IndexProgress(FileLength, FileLength, _index.Count));
