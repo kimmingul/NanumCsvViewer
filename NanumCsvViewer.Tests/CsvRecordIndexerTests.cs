@@ -15,6 +15,7 @@ namespace NanumCsvViewer.Tests
                 int len = Math.Min(chunk, data.Length - off);
                 indexer.ProcessBuffer(data.AsSpan(off, len), off);
             }
+            idx.Publish();
             var result = new long[idx.Count];
             for (long i = 0; i < idx.Count; i++) result[i] = idx[i];
             return result;

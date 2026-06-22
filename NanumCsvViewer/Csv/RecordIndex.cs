@@ -18,15 +18,19 @@ namespace NanumCsvViewer.Csv
         private const int SegmentMask = SegmentSize - 1;
 
         private volatile long[][] _segments = Array.Empty<long[]>();
-        private long _count;
+        private long _count;       // 독자에게 공개된 개수
+        private long _writeCount;  // 작성자 전용(미공개 진행 카운터)
 
-        /// <summary>지금까지 등록된 레코드 시작 오프셋 개수(헤더 포함).</summary>
+        /// <summary>지금까지 <b>공개된</b> 레코드 시작 오프셋 개수(헤더 포함). 독자는 [0, Count)만 읽음.</summary>
         public long Count => Volatile.Read(ref _count);
 
-        /// <summary>오프셋 하나 추가. 작성자 스레드에서만 호출.</summary>
+        /// <summary>
+        /// 오프셋 하나 추가. 작성자 스레드에서만 호출. 핫 패스라 매 호출 공개하지 않고
+        /// <see cref="Publish"/>로 일괄 공개한다(레코드당 Volatile.Write 제거).
+        /// </summary>
         public void Add(long offset)
         {
-            long c = _count;
+            long c = _writeCount;
             int seg = (int)(c >> SegmentBits);
             int within = (int)(c & SegmentMask);
 
@@ -36,16 +40,18 @@ namespace NanumCsvViewer.Csv
                 var bigger = new long[seg + 1][];
                 Array.Copy(segs, bigger, segs.Length);
                 bigger[seg] = new long[SegmentSize];
-                _segments = bigger; // volatile 공개
+                _segments = bigger; // volatile 공개(세그먼트 배열)
+                segs = bigger;
             }
-            else if (segs[seg] is null)
-            {
-                segs[seg] = new long[SegmentSize];
-            }
+            long[] segArr = segs[seg];
+            if (segArr is null) { segArr = new long[SegmentSize]; segs[seg] = segArr; }
 
-            _segments[seg][within] = offset;
-            Volatile.Write(ref _count, c + 1); // 값을 쓴 뒤 마지막에 개수 공개
+            segArr[within] = offset;
+            _writeCount = c + 1; // 공개는 Publish()에서 일괄로
         }
+
+        /// <summary>지금까지 Add한 개수를 독자에게 공개(release). 작성자가 청크 단위로 호출.</summary>
+        public void Publish() => Volatile.Write(ref _count, _writeCount);
 
         /// <summary>index번째 레코드 시작 오프셋.</summary>
         public long this[long index]

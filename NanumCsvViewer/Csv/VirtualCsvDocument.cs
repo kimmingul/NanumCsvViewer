@@ -92,6 +92,7 @@ namespace NanumCsvViewer.Csv
             var tmp = new RecordIndex();
             var probe = new CsvRecordIndexer(tmp, FileLength, _delim, _preamble);
             probe.ProcessBuffer(sample.AsSpan(0, sampleLen), 0);
+            tmp.Publish();
             _headerStart = _preamble;
             _headerEnd = tmp.Count >= 2 ? tmp[1] : Math.Min(sampleLen, FileLength);
 
@@ -141,6 +142,7 @@ namespace NanumCsvViewer.Csv
 
                     if (WillUseRam) _ramBufferPending!.SetChunk(chunkIndex, chunk);
                     indexer.ProcessBuffer(chunk.AsSpan(0, thisLen), offset);
+                    _index.Publish(); // 청크 단위로 개수 공개(레코드당 공개 대신 일괄)
 
                     offset += thisLen;
                     chunkIndex++;
@@ -152,6 +154,7 @@ namespace NanumCsvViewer.Csv
                     }
                 }
 
+                _index.Publish(); // 마지막 청크까지 최종 공개
                 IndexingComplete = true;
                 if (WillUseRam) _ramBuffer = _ramBufferPending; // 디스크→RAM 전환(이후 필터 스캔 가속)
                 progress.Report(new IndexProgress(FileLength, FileLength, _index.Count));

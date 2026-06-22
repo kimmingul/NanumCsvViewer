@@ -12,6 +12,8 @@ namespace NanumCsvViewer.Tests
             idx.Add(10);
             idx.Add(25);
             idx.Add(99);
+            Assert.Equal(0, idx.Count);  // Publish 전에는 공개되지 않음
+            idx.Publish();
             Assert.Equal(3, idx.Count);
             Assert.Equal(10, idx[0]);
             Assert.Equal(25, idx[1]);
@@ -26,6 +28,7 @@ namespace NanumCsvViewer.Tests
             int total = SegmentSize + 5;
             var idx = new RecordIndex();
             for (int i = 0; i < total; i++) idx.Add(i * 2L);
+            idx.Publish();
 
             Assert.Equal(total, idx.Count);
             Assert.Equal(0L, idx[0]);
