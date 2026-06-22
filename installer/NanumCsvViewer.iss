@@ -22,6 +22,9 @@
   #define DotNetUrl "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
 #endif
 #define DotNetPage "https://dotnet.microsoft.com/download/dotnet/10.0"
+#ifndef IconFile
+  #define IconFile "..\NanumCsvViewer\app.ico"
+#endif
 
 [Setup]
 AppId={{8F3A1C2E-5B7D-4E9A-9C61-2D4F6A8B0E13}
@@ -31,6 +34,7 @@ AppPublisher={#MyPublisher}
 DefaultDirName={autopf}\NanumCsvViewer
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\NanumCsvViewer.exe
+SetupIconFile={#IconFile}
 OutputBaseFilename=NanumCsvViewer-setup
 Compression=lzma2
 SolidCompression=yes

@@ -47,6 +47,10 @@ namespace NanumCsvViewer
             InitializeComponent();
             Text = ProgramName;
 
+            // 창/작업표시줄 아이콘: exe에 박힌 앱 아이콘(app.ico) 사용
+            try { if (Environment.ProcessPath is { } p) Icon = System.Drawing.Icon.ExtractAssociatedIcon(p); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Icon] {ex}"); }
+
             BuildEncodingMenu();
             BuildLanguageMenu();
             ApplyIcons();
