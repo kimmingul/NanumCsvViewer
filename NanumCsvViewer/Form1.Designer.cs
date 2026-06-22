@@ -36,39 +36,38 @@ namespace NanumCsvViewer
             viewToolStripMenuItem = new ToolStripMenuItem();
             encodingMenuItem = new ToolStripMenuItem();
             viewSeparator1 = new ToolStripSeparator();
+            detailPanelMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
-
             toolStrip1 = new ToolStrip();
             openToolStripButton = new ToolStripButton();
             toolStripSeparatorA = new ToolStripSeparator();
+            sortAscButton = new ToolStripButton();
+            sortDescButton = new ToolStripButton();
+            clearSortButton = new ToolStripButton();
+            toolStripSeparator1 = new ToolStripSeparator();
             findLabel = new ToolStripLabel();
             findTextBox = new ToolStripTextBox();
             findNextButton = new ToolStripButton();
             toolStripSeparatorC = new ToolStripSeparator();
+            filterByCellButton = new ToolStripButton();
             filterColumnLabel = new ToolStripLabel();
             filterColumnCombo = new ToolStripComboBox();
             filterTextBox = new ToolStripTextBox();
             applyFilterButton = new ToolStripButton();
             clearFilterButton = new ToolStripButton();
-            filterByCellButton = new ToolStripButton();
+            toolStripSeparatorE = new ToolStripSeparator();
+            detailToggleButton = new ToolStripButton();
             gridContextMenu = new ContextMenuStrip(components);
             filterByCellMenuItem = new ToolStripMenuItem();
-
             outerSplit = new SplitContainer();
             splitContainer1 = new SplitContainer();
-            cellAddressLabel = new Label();
             cellValueTextBox = new TextBox();
-            detailHeaderLabel = new Label();
-            detailRichText = new RichTextBox();
-            detailToggleButton = new ToolStripButton();
-            toolStripSeparatorD = new ToolStripSeparator();
-            toolStripSeparatorE = new ToolStripSeparator();
-            sortAscButton = new ToolStripButton();
-            sortDescButton = new ToolStripButton();
-            clearSortButton = new ToolStripButton();
-            detailPanelMenuItem = new ToolStripMenuItem();
+            cellAddressLabel = new Label();
             grid = new DataGridView();
+            detailRichText = new RichTextBox();
+            detailHeaderLabel = new Label();
+            toolStripSeparatorD = new ToolStripSeparator();
             statusStrip1 = new StatusStrip();
             statusLabel = new ToolStripStatusLabel();
             progressLabel = new ToolStripStatusLabel();
@@ -76,9 +75,9 @@ namespace NanumCsvViewer
             encodingStatusButton = new ToolStripDropDownButton();
             signalLabel = new ToolStripStatusLabel();
             openFileDialog1 = new OpenFileDialog();
-
             menuStrip1.SuspendLayout();
             toolStrip1.SuspendLayout();
+            gridContextMenu.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)outerSplit).BeginInit();
             outerSplit.Panel1.SuspendLayout();
             outerSplit.Panel2.SuspendLayout();
@@ -90,332 +89,490 @@ namespace NanumCsvViewer
             ((System.ComponentModel.ISupportInitialize)grid).BeginInit();
             statusStrip1.SuspendLayout();
             SuspendLayout();
-
+            // 
             // menuStrip1
+            // 
             menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, editToolStripMenuItem, viewToolStripMenuItem, helpToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
             menuStrip1.Size = new Size(1008, 24);
+            menuStrip1.TabIndex = 4;
             menuStrip1.Text = "menuStrip1";
-            // File
+            // 
+            // fileToolStripMenuItem
+            // 
             fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openToolStripMenuItem, quitToolStripMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "File";
+            // 
+            // openToolStripMenuItem
+            // 
             openToolStripMenuItem.Name = "openToolStripMenuItem";
-            openToolStripMenuItem.Size = new Size(220, 22);
-            openToolStripMenuItem.Text = "Open...";
             openToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
+            openToolStripMenuItem.Size = new Size(155, 22);
+            openToolStripMenuItem.Text = "Open...";
             openToolStripMenuItem.Click += OnOpenClick;
+            // 
+            // quitToolStripMenuItem
+            // 
             quitToolStripMenuItem.Name = "quitToolStripMenuItem";
-            quitToolStripMenuItem.Size = new Size(220, 22);
-            quitToolStripMenuItem.Text = "Quit";
             quitToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Q;
+            quitToolStripMenuItem.Size = new Size(155, 22);
+            quitToolStripMenuItem.Text = "Quit";
             quitToolStripMenuItem.Click += OnQuitClick;
-            // Edit (검색 · 필터 · 정렬 명령)
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[]
-            {
-                findMenuItem, findNextMenuItem, editSeparator1,
-                applyFilterMenuItem, editFilterByCellMenuItem, clearFilterToolStripMenuItem, editSeparator2,
-                sortAscMenuItem, sortDescMenuItem, clearSortToolStripMenuItem
-            });
+            // 
+            // editToolStripMenuItem
+            // 
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findMenuItem, findNextMenuItem, editSeparator1, applyFilterMenuItem, editFilterByCellMenuItem, clearFilterToolStripMenuItem, editSeparator2, sortAscMenuItem, sortDescMenuItem, clearSortToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "Edit";
+            // 
+            // findMenuItem
+            // 
             findMenuItem.Name = "findMenuItem";
-            findMenuItem.Size = new Size(220, 22);
-            findMenuItem.Text = "찾기...";
             findMenuItem.ShortcutKeys = Keys.Control | Keys.F;
+            findMenuItem.Size = new Size(211, 22);
+            findMenuItem.Text = "찾기...";
             findMenuItem.Click += OnFindMenuClick;
+            // 
+            // findNextMenuItem
+            // 
             findNextMenuItem.Name = "findNextMenuItem";
-            findNextMenuItem.Size = new Size(220, 22);
-            findNextMenuItem.Text = "다음 찾기";
             findNextMenuItem.ShortcutKeys = Keys.F3;
+            findNextMenuItem.Size = new Size(211, 22);
+            findNextMenuItem.Text = "다음 찾기";
             findNextMenuItem.Click += OnFindNextClick;
+            // 
+            // editSeparator1
+            // 
+            editSeparator1.Name = "editSeparator1";
+            editSeparator1.Size = new Size(208, 6);
+            // 
+            // applyFilterMenuItem
+            // 
             applyFilterMenuItem.Name = "applyFilterMenuItem";
-            applyFilterMenuItem.Size = new Size(220, 22);
+            applyFilterMenuItem.Size = new Size(211, 22);
             applyFilterMenuItem.Text = "필터 적용";
             applyFilterMenuItem.Click += OnApplyFilterClick;
+            // 
+            // editFilterByCellMenuItem
+            // 
             editFilterByCellMenuItem.Name = "editFilterByCellMenuItem";
-            editFilterByCellMenuItem.Size = new Size(220, 22);
-            editFilterByCellMenuItem.Text = "이 셀 값으로 필터";
             editFilterByCellMenuItem.ShortcutKeys = Keys.Control | Keys.B;
+            editFilterByCellMenuItem.Size = new Size(211, 22);
+            editFilterByCellMenuItem.Text = "이 셀 값으로 필터";
             editFilterByCellMenuItem.Click += OnFilterByCellClick;
+            // 
+            // clearFilterToolStripMenuItem
+            // 
             clearFilterToolStripMenuItem.Name = "clearFilterToolStripMenuItem";
-            clearFilterToolStripMenuItem.Size = new Size(220, 22);
-            clearFilterToolStripMenuItem.Text = "Clear Filter";
             clearFilterToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.L;
+            clearFilterToolStripMenuItem.Size = new Size(211, 22);
+            clearFilterToolStripMenuItem.Text = "Clear Filter";
             clearFilterToolStripMenuItem.Click += OnClearFilterClick;
+            // 
+            // editSeparator2
+            // 
+            editSeparator2.Name = "editSeparator2";
+            editSeparator2.Size = new Size(208, 6);
+            // 
+            // sortAscMenuItem
+            // 
             sortAscMenuItem.Name = "sortAscMenuItem";
-            sortAscMenuItem.Size = new Size(220, 22);
+            sortAscMenuItem.Size = new Size(211, 22);
             sortAscMenuItem.Text = "오름차순 정렬 (현재 열)";
             sortAscMenuItem.Click += OnSortAscMenuClick;
+            // 
+            // sortDescMenuItem
+            // 
             sortDescMenuItem.Name = "sortDescMenuItem";
-            sortDescMenuItem.Size = new Size(220, 22);
+            sortDescMenuItem.Size = new Size(211, 22);
             sortDescMenuItem.Text = "내림차순 정렬 (현재 열)";
             sortDescMenuItem.Click += OnSortDescMenuClick;
+            // 
+            // clearSortToolStripMenuItem
+            // 
             clearSortToolStripMenuItem.Name = "clearSortToolStripMenuItem";
-            clearSortToolStripMenuItem.Size = new Size(220, 22);
-            clearSortToolStripMenuItem.Text = "Clear Sort";
             clearSortToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
+            clearSortToolStripMenuItem.Size = new Size(211, 22);
+            clearSortToolStripMenuItem.Text = "Clear Sort";
             clearSortToolStripMenuItem.Click += OnClearSortClick;
-            // View
+            // 
+            // viewToolStripMenuItem
+            // 
             viewToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { encodingMenuItem, viewSeparator1, detailPanelMenuItem });
             viewToolStripMenuItem.Name = "viewToolStripMenuItem";
             viewToolStripMenuItem.Size = new Size(45, 20);
             viewToolStripMenuItem.Text = "View";
+            // 
+            // encodingMenuItem
+            // 
             encodingMenuItem.Name = "encodingMenuItem";
-            encodingMenuItem.Size = new Size(180, 22);
-            encodingMenuItem.Text = "인코딩";   // 하위 항목은 코드(BuildEncodingMenu)에서 채움
-            detailPanelMenuItem.Name = "detailPanelMenuItem";
-            detailPanelMenuItem.Size = new Size(180, 22);
-            detailPanelMenuItem.Text = "상세 패널";
+            encodingMenuItem.Size = new Size(146, 22);
+            encodingMenuItem.Text = "인코딩";
+            // 
+            // viewSeparator1
+            // 
+            viewSeparator1.Name = "viewSeparator1";
+            viewSeparator1.Size = new Size(143, 6);
+            // 
+            // detailPanelMenuItem
+            // 
             detailPanelMenuItem.CheckOnClick = true;
+            detailPanelMenuItem.Name = "detailPanelMenuItem";
             detailPanelMenuItem.ShortcutKeys = Keys.F4;
+            detailPanelMenuItem.Size = new Size(146, 22);
+            detailPanelMenuItem.Text = "상세 패널";
             detailPanelMenuItem.CheckedChanged += OnDetailMenuChanged;
-            // Help
+            // 
+            // helpToolStripMenuItem
+            // 
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "Help";
+            // 
+            // aboutToolStripMenuItem
+            // 
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
-            aboutToolStripMenuItem.Size = new Size(180, 22);
+            aboutToolStripMenuItem.Size = new Size(107, 22);
             aboutToolStripMenuItem.Text = "About";
             aboutToolStripMenuItem.Click += OnAboutClick;
-
+            // 
             // toolStrip1
-            toolStrip1.Items.AddRange(new ToolStripItem[]
-            {
-                openToolStripButton, toolStripSeparatorA,
-                findLabel, findTextBox, findNextButton, toolStripSeparatorC,
-                filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton,
-                toolStripSeparatorE, sortAscButton, sortDescButton, clearSortButton,
-                detailToggleButton
-            });
+            // 
+            toolStrip1.GripStyle = ToolStripGripStyle.Hidden;
+            toolStrip1.Items.AddRange(new ToolStripItem[] { openToolStripButton, toolStripSeparatorA, sortAscButton, sortDescButton, clearSortButton, toolStripSeparator1, findLabel, findTextBox, findNextButton, toolStripSeparatorC, filterByCellButton, filterColumnLabel, filterColumnCombo, filterTextBox, applyFilterButton, clearFilterButton, toolStripSeparatorE, detailToggleButton });
             toolStrip1.Location = new Point(0, 24);
             toolStrip1.Name = "toolStrip1";
             toolStrip1.Size = new Size(1008, 25);
-            toolStrip1.GripStyle = ToolStripGripStyle.Hidden;
-
+            toolStrip1.TabIndex = 3;
+            // 
+            // openToolStripButton
+            // 
+            openToolStripButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             openToolStripButton.Name = "openToolStripButton";
-            openToolStripButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            openToolStripButton.Size = new Size(23, 22);
             openToolStripButton.Text = "Open";
             openToolStripButton.Click += OnOpenClick;
-
+            // 
+            // toolStripSeparatorA
+            // 
             toolStripSeparatorA.Name = "toolStripSeparatorA";
-
-            findLabel.Name = "findLabel";
-            findLabel.Text = "Find:";
-
-            findTextBox.Name = "findTextBox";
-            findTextBox.Size = new Size(140, 25);
-            findTextBox.KeyDown += OnFindKeyDown;
-
-            findNextButton.Name = "findNextButton";
-            findNextButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            findNextButton.Text = "Find Next";
-            findNextButton.Click += OnFindNextClick;
-
-            toolStripSeparatorC.Name = "toolStripSeparatorC";
-
-            filterColumnLabel.Name = "filterColumnLabel";
-            filterColumnLabel.Text = "Filter:";
-
-            filterColumnCombo.Name = "filterColumnCombo";
-            filterColumnCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-            filterColumnCombo.Size = new Size(130, 25);
-
-            filterTextBox.Name = "filterTextBox";
-            filterTextBox.Size = new Size(140, 25);
-            filterTextBox.KeyDown += OnFilterKeyDown;
-
-            applyFilterButton.Name = "applyFilterButton";
-            applyFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            applyFilterButton.Text = "Apply";
-            applyFilterButton.Click += OnApplyFilterClick;
-
-            clearFilterButton.Name = "clearFilterButton";
-            clearFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            clearFilterButton.Text = "Clear";
-            clearFilterButton.Click += OnClearFilterClick;
-
-            filterByCellButton.Name = "filterByCellButton";
-            filterByCellButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            filterByCellButton.Text = "Filter by Cell";
-            filterByCellButton.ToolTipText = "선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)";
-            filterByCellButton.Click += OnFilterByCellClick;
-
-            toolStripSeparatorD.Name = "toolStripSeparatorD";
-            toolStripSeparatorE.Name = "toolStripSeparatorE";
-
+            toolStripSeparatorA.Size = new Size(6, 25);
+            // 
+            // sortAscButton
+            // 
+            sortAscButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             sortAscButton.Name = "sortAscButton";
-            sortAscButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            sortAscButton.Size = new Size(23, 22);
             sortAscButton.Text = "Sort ▲";
             sortAscButton.ToolTipText = "현재 열을 오름차순으로 정렬";
             sortAscButton.Click += OnSortAscMenuClick;
-
+            // 
+            // sortDescButton
+            // 
+            sortDescButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             sortDescButton.Name = "sortDescButton";
-            sortDescButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            sortDescButton.Size = new Size(23, 22);
             sortDescButton.Text = "Sort ▼";
             sortDescButton.ToolTipText = "현재 열을 내림차순으로 정렬";
             sortDescButton.Click += OnSortDescMenuClick;
-
+            // 
+            // clearSortButton
+            // 
+            clearSortButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             clearSortButton.Name = "clearSortButton";
-            clearSortButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            clearSortButton.Size = new Size(23, 22);
             clearSortButton.Text = "Clear Sort";
             clearSortButton.ToolTipText = "정렬 해제(파일 순서로 복원)";
             clearSortButton.Click += OnClearSortClick;
-
-            detailToggleButton.Name = "detailToggleButton";
-            detailToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            detailToggleButton.Text = "Detail Panel (F4)";
+            // 
+            // toolStripSeparator1
+            // 
+            toolStripSeparator1.Name = "toolStripSeparator1";
+            toolStripSeparator1.Size = new Size(6, 25);
+            // 
+            // findLabel
+            // 
+            findLabel.Name = "findLabel";
+            findLabel.Size = new Size(33, 22);
+            findLabel.Text = "Find:";
+            // 
+            // findTextBox
+            // 
+            findTextBox.Name = "findTextBox";
+            findTextBox.Size = new Size(140, 25);
+            findTextBox.KeyDown += OnFindKeyDown;
+            // 
+            // findNextButton
+            // 
+            findNextButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            findNextButton.Name = "findNextButton";
+            findNextButton.Size = new Size(36, 22);
+            findNextButton.Text = "Next";
+            findNextButton.Click += OnFindNextClick;
+            // 
+            // toolStripSeparatorC
+            // 
+            toolStripSeparatorC.Name = "toolStripSeparatorC";
+            toolStripSeparatorC.Size = new Size(6, 25);
+            // 
+            // filterByCellButton
+            // 
+            filterByCellButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            filterByCellButton.Name = "filterByCellButton";
+            filterByCellButton.Size = new Size(78, 22);
+            filterByCellButton.Text = "Filter by Cell";
+            filterByCellButton.ToolTipText = "선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)";
+            filterByCellButton.Click += OnFilterByCellClick;
+            // 
+            // filterColumnLabel
+            // 
+            filterColumnLabel.Name = "filterColumnLabel";
+            filterColumnLabel.Size = new Size(36, 22);
+            filterColumnLabel.Text = "Filter:";
+            // 
+            // filterColumnCombo
+            // 
+            filterColumnCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            filterColumnCombo.Name = "filterColumnCombo";
+            filterColumnCombo.Size = new Size(130, 25);
+            // 
+            // filterTextBox
+            // 
+            filterTextBox.Name = "filterTextBox";
+            filterTextBox.Size = new Size(140, 25);
+            filterTextBox.KeyDown += OnFilterKeyDown;
+            // 
+            // applyFilterButton
+            // 
+            applyFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            applyFilterButton.Name = "applyFilterButton";
+            applyFilterButton.Size = new Size(42, 22);
+            applyFilterButton.Text = "Apply";
+            applyFilterButton.Click += OnApplyFilterClick;
+            // 
+            // clearFilterButton
+            // 
+            clearFilterButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            clearFilterButton.Name = "clearFilterButton";
+            clearFilterButton.Size = new Size(38, 22);
+            clearFilterButton.Text = "Clear";
+            clearFilterButton.Click += OnClearFilterClick;
+            // 
+            // toolStripSeparatorE
+            // 
+            toolStripSeparatorE.Name = "toolStripSeparatorE";
+            toolStripSeparatorE.Size = new Size(6, 25);
+            // 
+            // detailToggleButton
+            // 
             detailToggleButton.Alignment = ToolStripItemAlignment.Right;
             detailToggleButton.CheckOnClick = true;
+            detailToggleButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            detailToggleButton.Name = "detailToggleButton";
+            detailToggleButton.Size = new Size(72, 22);
+            detailToggleButton.Text = "Details (F4)";
             detailToggleButton.ToolTipText = "선택한 행의 전체 내용을 우측 패널에 표시";
             detailToggleButton.CheckedChanged += OnDetailToggleChanged;
-
-            // outerSplit (좌: 기존 화면 / 우: 상세 패널) — 세로 분할, 폭 확장, 기본 숨김
-            outerSplit.Name = "outerSplit";
+            // 
+            // gridContextMenu
+            // 
+            gridContextMenu.Items.AddRange(new ToolStripItem[] { filterByCellMenuItem });
+            gridContextMenu.Name = "gridContextMenu";
+            gridContextMenu.Size = new Size(171, 26);
+            // 
+            // filterByCellMenuItem
+            // 
+            filterByCellMenuItem.Name = "filterByCellMenuItem";
+            filterByCellMenuItem.Size = new Size(170, 22);
+            filterByCellMenuItem.Text = "이 셀 값으로 필터";
+            filterByCellMenuItem.Click += OnFilterByCellClick;
+            // 
+            // outerSplit
+            // 
             outerSplit.Dock = DockStyle.Fill;
-            outerSplit.Orientation = Orientation.Vertical;
-            outerSplit.SplitterWidth = 4;
-            outerSplit.Panel1MinSize = 200;
-            outerSplit.Panel2MinSize = 150;
+            outerSplit.Location = new Point(0, 49);
+            outerSplit.Name = "outerSplit";
+            // 
+            // outerSplit.Panel1
+            // 
             outerSplit.Panel1.Controls.Add(splitContainer1);
+            outerSplit.Panel1MinSize = 200;
+            // 
+            // outerSplit.Panel2
+            // 
             outerSplit.Panel2.Controls.Add(detailRichText);
             outerSplit.Panel2.Controls.Add(detailHeaderLabel);
             outerSplit.Panel2Collapsed = true;
-
-            // detailHeaderLabel (패널 머리글: 행 번호)
-            detailHeaderLabel.Name = "detailHeaderLabel";
-            detailHeaderLabel.Dock = DockStyle.Top;
-            detailHeaderLabel.Height = 22;
-            detailHeaderLabel.TextAlign = ContentAlignment.MiddleLeft;
-            detailHeaderLabel.Padding = new Padding(5, 0, 0, 0);
-            detailHeaderLabel.BackColor = SystemColors.Control;
-            detailHeaderLabel.BorderStyle = BorderStyle.FixedSingle;
-            detailHeaderLabel.Text = "행 상세";
-
-            // detailRichText (선택 행 전체: 컬럼명 + 값, 멀티라인 읽기 전용)
-            detailRichText.Name = "detailRichText";
-            detailRichText.Dock = DockStyle.Fill;
-            detailRichText.ReadOnly = true;
-            detailRichText.BorderStyle = BorderStyle.None;
-            detailRichText.BackColor = SystemColors.Window;
-            detailRichText.WordWrap = true;
-            detailRichText.ScrollBars = RichTextBoxScrollBars.Both;
-            detailRichText.DetectUrls = false;
-
-            // splitContainer1 (위: 선택 셀 값 표시줄 / 아래: 그리드) — 가로 분할, 스플리터로 높이 확장
-            splitContainer1.Name = "splitContainer1";
+            outerSplit.Panel2MinSize = 150;
+            outerSplit.Size = new Size(1008, 658);
+            outerSplit.SplitterDistance = 200;
+            outerSplit.TabIndex = 1;
+            // 
+            // splitContainer1
+            // 
             splitContainer1.Dock = DockStyle.Fill;
+            splitContainer1.Location = new Point(0, 0);
+            splitContainer1.Name = "splitContainer1";
             splitContainer1.Orientation = Orientation.Horizontal;
-            splitContainer1.SplitterWidth = 4;
-            splitContainer1.Panel1MinSize = 22;
-            splitContainer1.Panel2MinSize = 60;
+            // 
+            // splitContainer1.Panel1
+            // 
             splitContainer1.Panel1.Controls.Add(cellValueTextBox);
             splitContainer1.Panel1.Controls.Add(cellAddressLabel);
+            splitContainer1.Panel1MinSize = 22;
+            // 
+            // splitContainer1.Panel2
+            // 
             splitContainer1.Panel2.Controls.Add(grid);
-
-            // cellAddressLabel (Excel 이름 상자 느낌)
-            cellAddressLabel.Name = "cellAddressLabel";
-            cellAddressLabel.Dock = DockStyle.Left;
-            cellAddressLabel.Width = 150;
-            cellAddressLabel.AutoSize = false;
-            cellAddressLabel.TextAlign = ContentAlignment.MiddleLeft;
-            cellAddressLabel.BorderStyle = BorderStyle.Fixed3D;
-            cellAddressLabel.Padding = new Padding(5, 0, 0, 0);
-            cellAddressLabel.BackColor = SystemColors.Control;
-
-            // cellValueTextBox (선택 셀 전체 값, 읽기 전용, 여러 줄)
-            cellValueTextBox.Name = "cellValueTextBox";
-            cellValueTextBox.Dock = DockStyle.Fill;
-            cellValueTextBox.Multiline = true;
-            cellValueTextBox.ReadOnly = true;
-            cellValueTextBox.WordWrap = true;
-            cellValueTextBox.ScrollBars = ScrollBars.Vertical;
-            cellValueTextBox.BorderStyle = BorderStyle.FixedSingle;
+            splitContainer1.Panel2MinSize = 60;
+            splitContainer1.Size = new Size(1008, 658);
+            splitContainer1.SplitterDistance = 329;
+            splitContainer1.TabIndex = 0;
+            // 
+            // cellValueTextBox
+            // 
             cellValueTextBox.BackColor = SystemColors.Window;
-
+            cellValueTextBox.BorderStyle = BorderStyle.FixedSingle;
+            cellValueTextBox.Dock = DockStyle.Fill;
+            cellValueTextBox.Location = new Point(150, 0);
+            cellValueTextBox.Multiline = true;
+            cellValueTextBox.Name = "cellValueTextBox";
+            cellValueTextBox.ReadOnly = true;
+            cellValueTextBox.ScrollBars = ScrollBars.Vertical;
+            cellValueTextBox.Size = new Size(858, 329);
+            cellValueTextBox.TabIndex = 0;
+            // 
+            // cellAddressLabel
+            // 
+            cellAddressLabel.BackColor = SystemColors.Control;
+            cellAddressLabel.BorderStyle = BorderStyle.Fixed3D;
+            cellAddressLabel.Dock = DockStyle.Left;
+            cellAddressLabel.Location = new Point(0, 0);
+            cellAddressLabel.Name = "cellAddressLabel";
+            cellAddressLabel.Padding = new Padding(5, 0, 0, 0);
+            cellAddressLabel.Size = new Size(150, 329);
+            cellAddressLabel.TabIndex = 1;
+            cellAddressLabel.TextAlign = ContentAlignment.MiddleLeft;
+            // 
             // grid
-            grid.Name = "grid";
-            grid.Dock = DockStyle.Fill;
-            grid.VirtualMode = true;
-            grid.ReadOnly = true;
+            // 
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
-            grid.RowHeadersVisible = true;
-            grid.RowHeadersWidth = 80;
-            grid.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.EnableResizing;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-            grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
-            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
-            grid.MultiSelect = false;
-            grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.BackgroundColor = SystemColors.Window;
             grid.BorderStyle = BorderStyle.None;
+            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             grid.ContextMenuStrip = gridContextMenu;
+            grid.Dock = DockStyle.Fill;
+            grid.EditMode = DataGridViewEditMode.EditProgrammatically;
+            grid.Location = new Point(0, 0);
+            grid.MultiSelect = false;
+            grid.Name = "grid";
+            grid.ReadOnly = true;
+            grid.RowHeadersWidth = 80;
+            grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            grid.Size = new Size(1008, 325);
+            grid.TabIndex = 0;
+            grid.VirtualMode = true;
+            grid.RowHeadersWidthChanged += OnRowHeadersWidthChanged;
+            grid.CellMouseDown += OnGridCellMouseDown;
+            grid.CellPainting += OnGridCellPainting;
             grid.CellValueNeeded += OnCellValueNeeded;
+            grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
+            grid.CurrentCellChanged += OnCurrentCellChanged;
             grid.RowHeightInfoNeeded += OnRowHeightInfoNeeded;
             grid.RowPostPaint += OnRowPostPaint;
-            grid.CurrentCellChanged += OnCurrentCellChanged;
-            grid.CellMouseDown += OnGridCellMouseDown;
-            grid.RowHeadersWidthChanged += OnRowHeadersWidthChanged;
-            grid.ColumnHeaderMouseClick += OnColumnHeaderMouseClick;
-            grid.CellPainting += OnGridCellPainting;
-
-            // gridContextMenu (우클릭)
-            gridContextMenu.Name = "gridContextMenu";
-            gridContextMenu.Items.Add(filterByCellMenuItem);
-            filterByCellMenuItem.Name = "filterByCellMenuItem";
-            filterByCellMenuItem.Text = "이 셀 값으로 필터";
-            filterByCellMenuItem.Click += OnFilterByCellClick;
-
+            // 
+            // detailRichText
+            // 
+            detailRichText.BackColor = SystemColors.Window;
+            detailRichText.BorderStyle = BorderStyle.None;
+            detailRichText.DetectUrls = false;
+            detailRichText.Dock = DockStyle.Fill;
+            detailRichText.Location = new Point(0, 22);
+            detailRichText.Name = "detailRichText";
+            detailRichText.ReadOnly = true;
+            detailRichText.Size = new Size(96, 78);
+            detailRichText.TabIndex = 0;
+            detailRichText.Text = "";
+            // 
+            // detailHeaderLabel
+            // 
+            detailHeaderLabel.BackColor = SystemColors.Control;
+            detailHeaderLabel.BorderStyle = BorderStyle.FixedSingle;
+            detailHeaderLabel.Dock = DockStyle.Top;
+            detailHeaderLabel.Location = new Point(0, 0);
+            detailHeaderLabel.Name = "detailHeaderLabel";
+            detailHeaderLabel.Padding = new Padding(5, 0, 0, 0);
+            detailHeaderLabel.Size = new Size(96, 22);
+            detailHeaderLabel.TabIndex = 1;
+            detailHeaderLabel.Text = "행 상세";
+            detailHeaderLabel.TextAlign = ContentAlignment.MiddleLeft;
+            // 
+            // toolStripSeparatorD
+            // 
+            toolStripSeparatorD.Name = "toolStripSeparatorD";
+            toolStripSeparatorD.Size = new Size(6, 6);
+            // 
             // statusStrip1
+            // 
             statusStrip1.Items.AddRange(new ToolStripItem[] { statusLabel, progressLabel, progressBar, encodingStatusButton, signalLabel });
             statusStrip1.Location = new Point(0, 707);
             statusStrip1.Name = "statusStrip1";
             statusStrip1.Size = new Size(1008, 22);
+            statusStrip1.TabIndex = 2;
             statusStrip1.Text = "statusStrip1";
-
+            // 
+            // statusLabel
+            // 
             statusLabel.Name = "statusLabel";
+            statusLabel.Size = new Size(860, 17);
             statusLabel.Spring = true;
-            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
             statusLabel.Text = "Ready.";
-
-            progressLabel.Name = "progressLabel";
+            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            // 
+            // progressLabel
+            // 
             progressLabel.AutoSize = false;
+            progressLabel.Name = "progressLabel";
             progressLabel.Size = new Size(50, 17);
             progressLabel.TextAlign = ContentAlignment.MiddleRight;
             progressLabel.Visible = false;
-
+            // 
+            // progressBar
+            // 
             progressBar.Name = "progressBar";
             progressBar.Size = new Size(200, 16);
             progressBar.Visible = false;
-
-            // 상태바 인코딩 위젯(신호등 좌측): 현재 인코딩 표시 + 클릭 시 드롭다운으로 전환
-            encodingStatusButton.Name = "encodingStatusButton";
-            encodingStatusButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            // 
+            // encodingStatusButton
+            // 
             encodingStatusButton.ImageScaling = ToolStripItemImageScaling.None;
-            encodingStatusButton.ShowDropDownArrow = true;
-            encodingStatusButton.Text = "";
+            encodingStatusButton.Name = "encodingStatusButton";
+            encodingStatusButton.Size = new Size(13, 20);
             encodingStatusButton.ToolTipText = "텍스트 인코딩 (클릭하여 변경)";
-
-            signalLabel.Name = "signalLabel";
+            // 
+            // signalLabel
+            // 
             signalLabel.AutoSize = false;
-            signalLabel.Size = new Size(120, 17);
-            signalLabel.TextAlign = ContentAlignment.MiddleRight;
-            signalLabel.Text = "● 대기";
             signalLabel.ForeColor = Color.Gray;
-
+            signalLabel.Name = "signalLabel";
+            signalLabel.Size = new Size(120, 17);
+            signalLabel.Text = "● 대기";
+            signalLabel.TextAlign = ContentAlignment.MiddleRight;
+            // 
             // openFileDialog1
+            // 
             openFileDialog1.Filter = "CSV / Text File (*.csv;*.txt)|*.csv;*.txt|All Files (*.*)|*.*";
-            openFileDialog1.FilterIndex = 1;
             openFileDialog1.RestoreDirectory = true;
-
+            // 
             // Form1
+            // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1008, 729);
@@ -427,22 +584,21 @@ namespace NanumCsvViewer
             Name = "Form1";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Nanum CSV Viewer";
-
             menuStrip1.ResumeLayout(false);
             menuStrip1.PerformLayout();
             toolStrip1.ResumeLayout(false);
             toolStrip1.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)grid).EndInit();
+            gridContextMenu.ResumeLayout(false);
+            outerSplit.Panel1.ResumeLayout(false);
+            outerSplit.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)outerSplit).EndInit();
+            outerSplit.ResumeLayout(false);
             splitContainer1.Panel1.ResumeLayout(false);
             splitContainer1.Panel1.PerformLayout();
             splitContainer1.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)splitContainer1).EndInit();
             splitContainer1.ResumeLayout(false);
-            outerSplit.Panel1.ResumeLayout(false);
-            outerSplit.Panel2.ResumeLayout(false);
-            outerSplit.Panel2.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)outerSplit).EndInit();
-            outerSplit.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)grid).EndInit();
             statusStrip1.ResumeLayout(false);
             statusStrip1.PerformLayout();
             ResumeLayout(false);
@@ -509,5 +665,6 @@ namespace NanumCsvViewer
         private ToolStripDropDownButton encodingStatusButton;
         private ToolStripStatusLabel signalLabel;
         private OpenFileDialog openFileDialog1;
+        private ToolStripSeparator toolStripSeparator1;
     }
 }

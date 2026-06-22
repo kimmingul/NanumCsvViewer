@@ -99,10 +99,11 @@ namespace NanumCsvViewer
             encodingStatusButton.ImageScaling = ToolStripItemImageScaling.None;
         }
 
+        // 아이콘 이미지만 코드에서 제공하고, 표시 방식(DisplayStyle: Image/Text/ImageAndText)은
+        // Designer가 단일 소스로 결정하게 둔다(런타임이 Designer 설정을 덮어쓰지 않도록).
         private static void SetButtonImage(ToolStripButton btn, Image img)
         {
             btn.Image = img;
-            btn.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
             btn.ImageScaling = ToolStripItemImageScaling.None;
         }
 
