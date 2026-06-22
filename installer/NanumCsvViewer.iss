@@ -11,7 +11,16 @@
   #error MyAppExe must be defined (path to framework-dependent NanumCsvViewer.exe)
 #endif
 #define MyPublisher "Nanum Space Co,. Ltd"
-#define DotNetUrl "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
+#ifndef Arch
+  #define Arch "x64"
+#endif
+#if Arch == "arm64"
+  #define ArchAllowed "arm64"
+  #define DotNetUrl "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-arm64.exe"
+#else
+  #define ArchAllowed "x64compatible"
+  #define DotNetUrl "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
+#endif
 #define DotNetPage "https://dotnet.microsoft.com/download/dotnet/10.0"
 
 [Setup]
@@ -25,8 +34,8 @@ UninstallDisplayIcon={app}\NanumCsvViewer.exe
 OutputBaseFilename=NanumCsvViewer-setup
 Compression=lzma2
 SolidCompression=yes
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#ArchAllowed}
+ArchitecturesInstallIn64BitMode={#ArchAllowed}
 PrivilegesRequired=admin
 WizardStyle=modern
 

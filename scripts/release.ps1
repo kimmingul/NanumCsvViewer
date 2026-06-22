@@ -30,6 +30,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $Version,
+    [ValidateSet('x64', 'arm64')] [string] $Arch = 'x64',
     [string] $Thumbprint,
     [switch] $ShowAllCerts,
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
@@ -44,9 +45,10 @@ $repo     = Split-Path $PSScriptRoot -Parent
 $proj     = Join-Path $repo 'NanumCsvViewer\NanumCsvViewer.csproj'
 $iss      = Join-Path $repo 'installer\NanumCsvViewer.iss'
 $dist     = Join-Path $repo 'dist'
-$fdExe    = Join-Path $repo 'NanumCsvViewer\bin\Release\publish-fd\NanumCsvViewer.exe'
-$portable = Join-Path $dist "NanumCsvViewer-v$Version-win-x64-portable.exe"
-$setupOut = Join-Path $dist "NanumCsvViewer-v$Version-win-x64-setup.exe"
+$fdDir    = if ($Arch -eq 'arm64') { 'publish-fd-arm64' } else { 'publish-fd' }
+$fdExe    = Join-Path $repo "NanumCsvViewer\bin\Release\$fdDir\NanumCsvViewer.exe"
+$portable = Join-Path $dist "NanumCsvViewer-v$Version-win-$Arch-portable.exe"
+$setupOut = Join-Path $dist "NanumCsvViewer-v$Version-win-$Arch-setup.exe"
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -110,10 +112,10 @@ function Resolve-ISCC() {
 }
 
 # ---- 1) publish (framework-dependent) -----------------------------------
-Step '프레임워크 의존본 게시 중 (단일 파일)...'
+Step "프레임워크 의존본 게시 중 ($Arch, 단일 파일)..."
 # 바이너리 버전을 릴리즈 버전과 일치(X.Y.Z → 파일/어셈블리 버전 X.Y.Z.0)
 $fileVer = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
-dotnet publish $proj -p:PublishProfile=win-x64-framework `
+dotnet publish $proj -p:PublishProfile=win-$Arch-framework `
     "-p:Version=$Version" "-p:FileVersion=$fileVer" "-p:AssemblyVersion=$fileVer"
 if ($LASTEXITCODE -ne 0) { throw 'publish 실패' }
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
@@ -132,15 +134,19 @@ Step "Portable: $(Split-Path $portable -Leaf)"
 # ---- 4) Install (Inno Setup 컴파일) -------------------------------------
 $iscc = Resolve-ISCC
 Step "설치본 컴파일: ISCC"
-& $iscc "/DMyAppVersion=$Version" "/DMyAppExe=$fdExe" "/O$dist" `
-        "/FNanumCsvViewer-v$Version-win-x64-setup" $iss
+& $iscc "/DMyAppVersion=$Version" "/DMyAppExe=$fdExe" "/DArch=$Arch" "/O$dist" `
+        "/FNanumCsvViewer-v$Version-win-$Arch-setup" $iss
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 컴파일 실패' }
 if (-not $SkipSign) { Sign $setupOut }   # 설치 관리자도 서명(SmartScreen)
 
 # ---- 4b) 설치된 exe 서명 검증(무인 설치 → verify → 제거) -----------------
 # 요구사항 증명: setup이 설치하는 앱 exe도 서명되어 있어야 한다.
 # 관리자 권한 설치라 UAC가 뜰 수 있음. (.NET 10이 이미 있으면 자동설치 분기는 건너뜀)
-if (-not $SkipSign -and -not $SkipVerifyInstall) {
+$hostArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+if ($Arch -ne $hostArch) {
+    Step "설치된 exe 무인 검증 건너뜀: 대상($Arch)이 호스트($hostArch)와 달라 실행/설치 불가(파일 서명은 검증됨)."
+}
+if (-not $SkipSign -and -not $SkipVerifyInstall -and $Arch -eq $hostArch) {
     $testDir = Join-Path $env:TEMP "nctest-$Version"
     $instExe = Join-Path $testDir 'NanumCsvViewer.exe'
     $uninst  = Join-Path $testDir 'unins000.exe'
@@ -174,8 +180,8 @@ NanumCsvViewer v$Version
 "@
     [System.IO.File]::WriteAllText($notes, $body, (New-Object System.Text.UTF8Encoding($false)))
 
-    $p1 = "$portable#Portable (설치 불필요, .NET 10 런타임 필요, x64)"
-    $p2 = "$setupOut#설치 관리자 (.NET 10 자동 설치, x64)"
+    $p1 = "$portable#Portable ($Arch, 설치 불필요, .NET 10 런타임 필요)"
+    $p2 = "$setupOut#설치 관리자 ($Arch, .NET 10 자동 설치)"
     # cmd /c 로 감싸 stderr를 완전히 삼킴(PS 5.1의 NativeCommandError + Stop 종료 회피)
     cmd /c "gh release view v$Version 1>nul 2>nul"
     if ($LASTEXITCODE -eq 0) {
