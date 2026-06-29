@@ -154,6 +154,8 @@
     :root[data-theme="dark"] .icon-btn .moon { display: block; }
     :root[data-theme="dark"] .icon-btn .sun { display: none; }
 
+    .lang-btn { width: auto; padding: 0 12px; font-family: var(--sans-text); font-size: 13px; font-weight: 700; letter-spacing: .03em; }
+
     /* ---- hero ---- */
     .hero { padding: clamp(48px, 8vw, 92px) 0 clamp(40px, 6vw, 72px); }
     .hero .wrap { display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, .98fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
@@ -307,16 +309,17 @@
       </a>
       <div class="nav-right">
         <div class="nav-links">
-          <a href="#features">기능</a>
-          <a href="#pivot">피벗</a>
-          <a href="#download">다운로드</a>
+          <a href="#features" data-i18n="nav.features">기능</a>
+          <a href="#pivot" data-i18n="nav.pivot">피벗</a>
+          <a href="#download" data-i18n="nav.download">다운로드</a>
           <a href="https://github.com/kimmingul/NanumCsvViewer">GitHub</a>
         </div>
+        <button class="icon-btn lang-btn" id="lang" type="button" aria-label="한국어/English" title="Language">EN</button>
         <button class="icon-btn" id="theme" type="button" aria-label="라이트/다크 전환" title="테마 전환">
           <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
           <svg class="moon" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         </button>
-        <a class="btn btn-accent" href="#download">다운로드</a>
+        <a class="btn btn-accent" href="#download" data-i18n="nav.dlbtn">다운로드</a>
       </div>
     </div>
   </nav>
@@ -325,17 +328,17 @@
     <section class="hero">
       <div class="wrap">
         <div>
-          <p class="eyebrow"><span class="pulse"></span> Windows 11 · 무료 · 로컬 전용</p>
-          <h1>대용량 CSV,<br><span class="grad">순식간에</span> 엽니다.</h1>
-          <p class="lede">1 GB가 넘는 CSV도 첫 페이지가 1초 안에. 파일 전체를 메모리에 올리지 않고 보이는 행만 그때그때 읽어, 파일이 커도 빠르고 가볍습니다.</p>
+          <p class="eyebrow"><span class="pulse"></span> <span data-i18n="hero.eyebrow">Windows 11 · 무료 · 로컬 전용</span></p>
+          <h1 data-i18n="hero.title">대용량 CSV,<br><span class="grad">순식간에</span> 엽니다.</h1>
+          <p class="lede" data-i18n="hero.lede">1 GB가 넘는 CSV도 첫 페이지가 1초 안에. 파일 전체를 메모리에 올리지 않고 보이는 행만 그때그때 읽어, 파일이 커도 빠르고 가볍습니다.</p>
           <div class="hero-actions">
-            <a class="btn btn-accent" href="#download">Windows용 다운로드</a>
-            <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer">GitHub에서 보기</a>
+            <a class="btn btn-accent" href="#download" data-i18n="hero.dl">Windows용 다운로드</a>
+            <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer" data-i18n="hero.github">GitHub에서 보기</a>
           </div>
           <div class="chips">
-            <span><b class="tick">✓</b> 한글 인코딩 자동(UTF-8·CP949)</span>
-            <span><b class="tick">✓</b> x64 · ARM64</span>
-            <span><b class="tick">✓</b> 라이트 / 다크</span>
+            <span><b class="tick">✓</b> <span data-i18n="hero.chip1">한글 인코딩 자동(UTF-8·CP949)</span></span>
+            <span><b class="tick">✓</b> <span data-i18n="hero.chip2">x64 · ARM64</span></span>
+            <span><b class="tick">✓</b> <span data-i18n="hero.chip3">라이트 / 다크</span></span>
           </div>
         </div>
 
@@ -346,9 +349,9 @@
             <span class="caption"><i>&#9472;</i><i>&#9633;</i><i class="x">&#10005;</i></span>
           </div>
           <div class="toolbar">
-            <span class="tb">열기</span>
+            <span class="tb" data-i18n="mock.open">열기</span>
             <span class="tb search">/2026-0\d/ · fuzzy:seoul</span>
-            <span class="tb accent">피벗</span>
+            <span class="tb accent" data-i18n="mock.pivot">피벗</span>
           </div>
           <div class="gridwrap">
             <table class="csv" aria-hidden="true">
@@ -378,55 +381,55 @@
 
     <section class="stats">
       <div class="wrap">
-        <div class="stat reveal"><div class="big">1<em>GB</em></div><div class="cap">파일도 첫 페이지가 <b>1초</b> 안에. 바이트 오프셋 인덱스 + 가상 렌더링.</div></div>
-        <div class="stat reveal"><div class="big">~2<em>GB/s</em></div><div class="cap">SIMD 바이트 스캔과 읽기·스캔 겹치기로 빠른 백그라운드 인덱싱.</div></div>
-        <div class="stat reveal"><div class="big">21<em>억 행</em></div><div class="cap">까지 표시. 적응형 메모리로 파일이 커도 사용량은 일정하게.</div></div>
+        <div class="stat reveal"><div class="big">1<em>GB</em></div><div class="cap" data-i18n="stat1.cap">파일도 첫 페이지가 <b>1초</b> 안에. 바이트 오프셋 인덱스 + 가상 렌더링.</div></div>
+        <div class="stat reveal"><div class="big">~2<em>GB/s</em></div><div class="cap" data-i18n="stat2.cap">SIMD 바이트 스캔과 읽기·스캔 겹치기로 빠른 백그라운드 인덱싱.</div></div>
+        <div class="stat reveal"><div class="big" data-i18n="stat3.big">21<em>억 행</em></div><div class="cap" data-i18n="stat3.cap">까지 표시. 적응형 메모리로 파일이 커도 사용량은 일정하게.</div></div>
       </div>
     </section>
 
     <section id="features" class="section">
       <div class="wrap">
         <div class="sec-head center reveal">
-          <p class="sec-eyebrow">기능</p>
-          <h2 class="sec-title">읽고, 거르고, 분석하는<br>모든 과정이 한 창 안에.</h2>
-          <p class="sec-lede">대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다.</p>
+          <p class="sec-eyebrow" data-i18n="feat.eyebrow">기능</p>
+          <h2 class="sec-title" data-i18n="feat.title">읽고, 거르고, 분석하는<br>모든 과정이 한 창 안에.</h2>
+          <p class="sec-lede" data-i18n="feat.lede">대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다.</p>
         </div>
         <div class="features">
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg></div>
-            <h3>대용량 즉시 열람</h3>
-            <p>파일 전체를 메모리에 적재하지 않고 보이는 행만 디코딩합니다. 백그라운드 인덱싱 중에도 자유롭게 스크롤하세요.</p>
-            <div class="tags"><b>가상 렌더링</b><b>진행 표시</b></div>
+            <h3 data-i18n="f1.h">대용량 즉시 열람</h3>
+            <p data-i18n="f1.p">파일 전체를 메모리에 적재하지 않고 보이는 행만 디코딩합니다. 백그라운드 인덱싱 중에도 자유롭게 스크롤하세요.</p>
+            <div class="tags"><b data-i18n="f1.t1">가상 렌더링</b><b data-i18n="f1.t2">진행 표시</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
-            <h3>한글 인코딩 자동</h3>
-            <p>BOM 확인 → UTF-8 검증 → CP949(EUC-KR) 폴백. 자동 감지가 틀리면 상태바에서 즉시 다시 디코딩(재인덱싱 불필요).</p>
+            <h3 data-i18n="f2.h">한글 인코딩 자동</h3>
+            <p data-i18n="f2.p">BOM 확인 → UTF-8 검증 → CP949(EUC-KR) 폴백. 자동 감지가 틀리면 상태바에서 즉시 다시 디코딩(재인덱싱 불필요).</p>
             <div class="tags"><b>UTF-8</b><b>CP949 / EUC-KR</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
-            <h3>적응형 검색</h3>
-            <p>평문 contains, 정규식 <code style="font-family:var(--mono);font-size:12px">/패턴/</code>, 퍼지 <code style="font-family:var(--mono);font-size:12px">fuzzy:</code>. 컬럼·셀값 필터와 조합됩니다.</p>
-            <div class="tags"><b>정규식</b><b>퍼지</b><b>AND 누적</b></div>
+            <h3 data-i18n="f3.h">적응형 검색</h3>
+            <p data-i18n="f3.p">평문 contains, 정규식 <code style="font-family:var(--mono);font-size:12px">/패턴/</code>, 퍼지 <code style="font-family:var(--mono);font-size:12px">fuzzy:</code>. 컬럼·셀값 필터와 조합됩니다.</p>
+            <div class="tags"><b data-i18n="f3.t1">정규식</b><b data-i18n="f3.t2">퍼지</b><b data-i18n="f3.t3">AND 누적</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5z"/></svg></div>
-            <h3>타입 배지 · 헤더 필터</h3>
-            <p>컬럼 추론 타입을 헤더에 배지로 표시하고, 범주형은 체크박스, 날짜는 범위로 헤더에서 바로 거릅니다.</p>
-            <div class="tags"><b>표현식 필터</b><b>날짜 범위</b></div>
+            <h3 data-i18n="f4.h">타입 배지 · 헤더 필터</h3>
+            <p data-i18n="f4.p">컬럼 추론 타입을 헤더에 배지로 표시하고, 범주형은 체크박스, 날짜는 범위로 헤더에서 바로 거릅니다.</p>
+            <div class="tags"><b data-i18n="f4.t1">표현식 필터</b><b data-i18n="f4.t2">날짜 범위</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></div>
-            <h3>엑셀식 복사 · 내보내기</h3>
-            <p>셀을 드래그·Shift·Ctrl로 선택해 TSV로 복사. 행/열 전체, 상세 패널 TEXT·JSON, 그리고 CSV·Markdown·JSON·HTML 내보내기.</p>
-            <div class="tags"><b>TSV 복사</b><b>4종 내보내기</b></div>
+            <h3 data-i18n="f5.h">엑셀식 복사 · 내보내기</h3>
+            <p data-i18n="f5.p">셀을 드래그·Shift·Ctrl로 선택해 TSV로 복사. 행/열 전체, 상세 패널 TEXT·JSON, 그리고 CSV·Markdown·JSON·HTML 내보내기.</p>
+            <div class="tags"><b data-i18n="f5.t1">TSV 복사</b><b data-i18n="f5.t2">4종 내보내기</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6"/></svg></div>
-            <h3>분석 · 통계</h3>
-            <p>수치 분포·날짜 히스토그램·중복·그룹별 집계와, 상관·t검정·카이제곱까지. 정확한 p값·신뢰구간을 PC에서 계산합니다.</p>
-            <div class="tags"><b>그룹바이</b><b>t검정 · χ²</b></div>
+            <h3 data-i18n="f6.h">분석 · 통계</h3>
+            <p data-i18n="f6.p">수치 분포·날짜 히스토그램·중복·그룹별 집계와, 상관·t검정·카이제곱까지. 정확한 p값·신뢰구간을 PC에서 계산합니다.</p>
+            <div class="tags"><b data-i18n="f6.t1">그룹바이</b><b data-i18n="f6.t2">t검정 · χ²</b></div>
           </article>
         </div>
       </div>
@@ -436,10 +439,10 @@
       <div class="wrap">
         <div class="pivot">
           <div class="reveal">
-            <p class="sec-eyebrow">피벗 빌더</p>
-            <h2 class="sec-title">필드를 끌어다 놓으면<br>표와 차트가 됩니다.</h2>
-            <p class="sec-lede">행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.</p>
-            <p class="sec-lede" style="margin-top:14px">차트는 <b>외부 라이브러리 없이 GDI+로 직접</b> 그립니다 — 막대·묶은막대·누적·꺾은선, 범례와 호버 툴팁까지. 단일 실행 파일·코드 서명에 영향이 없습니다.</p>
+            <p class="sec-eyebrow" data-i18n="piv.eyebrow">피벗 빌더</p>
+            <h2 class="sec-title" data-i18n="piv.title">필드를 끌어다 놓으면<br>표와 차트가 됩니다.</h2>
+            <p class="sec-lede" data-i18n="piv.lede1">행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.</p>
+            <p class="sec-lede" style="margin-top:14px" data-i18n="piv.lede2">차트는 <b>외부 라이브러리 없이 GDI+로 직접</b> 그립니다 — 막대·묶은막대·누적·꺾은선, 범례와 호버 툴팁까지. 단일 실행 파일·코드 서명에 영향이 없습니다.</p>
           </div>
           <div class="pivot-card reveal" aria-hidden="true">
             <div class="chart">
@@ -459,13 +462,13 @@
       <div class="wrap">
         <div class="band reveal">
           <div>
-            <h2>당신의 CSV는 PC를 떠나지 않습니다.</h2>
-            <p>로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다.</p>
+            <h2 data-i18n="band.title">당신의 CSV는 PC를 떠나지 않습니다.</h2>
+            <p data-i18n="band.p">로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다.</p>
           </div>
           <div class="ministats">
-            <div class="ms"><b>0</b><span>외부 전송 · 네트워크 의존성</span></div>
-            <div class="ms"><b>EV 코드 서명</b><span>설치본·포터블·설치되는 exe 모두 서명·타임스탬프</span></div>
-            <div class="ms"><b>.NET 10 · WinForms</b><span>외부 CSV 라이브러리 없이 직접 구현한 엔진</span></div>
+            <div class="ms"><b>0</b><span data-i18n="band.ms1s">외부 전송 · 네트워크 의존성</span></div>
+            <div class="ms"><b data-i18n="band.ms2b">EV 코드 서명</b><span data-i18n="band.ms2s">설치본·포터블·설치되는 exe 모두 서명·타임스탬프</span></div>
+            <div class="ms"><b>.NET 10 · WinForms</b><span data-i18n="band.ms3s">외부 CSV 라이브러리 없이 직접 구현한 엔진</span></div>
           </div>
         </div>
       </div>
@@ -474,29 +477,29 @@
     <section id="download" class="section" style="padding-top:0">
       <div class="wrap">
         <div class="sec-head center reveal">
-          <p class="sec-eyebrow">다운로드</p>
+          <p class="sec-eyebrow" data-i18n="dl.eyebrow">다운로드</p>
           <h2 class="sec-title">Nanum CSV Viewer v1.7.0</h2>
-          <p class="sec-lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
+          <p class="sec-lede" data-i18n="dl.lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
         </div>
         <div class="dl-grid">
           <div class="dl reveal">
-            <div class="arch"><span class="archname">Windows x64</span><span class="pill">대부분의 PC</span></div>
-            <p class="for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
+            <div class="arch"><span class="archname">Windows x64</span><span class="pill" data-i18n="dl.x64pill">대부분의 PC</span></div>
+            <p class="for" data-i18n="dl.x64for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-x64-setup.exe">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-x64-portable.exe">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
           <div class="dl reveal">
-            <div class="arch"><span class="archname">Windows ARM64</span><span class="pill">ARM PC</span></div>
-            <p class="for">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
+            <div class="arch"><span class="archname">Windows ARM64</span><span class="pill" data-i18n="dl.armpill">ARM PC</span></div>
+            <p class="for" data-i18n="dl.armfor">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-arm64-setup.exe">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-arm64-portable.exe">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.7.0/NanumCsvViewer-v1.7.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
         </div>
-        <p class="dl-note">
+        <p class="dl-note" data-i18n="dl.note">
           실행에는 <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Desktop Runtime</a>이 필요합니다 — <b>설치형은 없을 경우 자동으로 설치</b>하고, 포터블은 없으면 Windows가 안내합니다.<br>
           모든 파일은 EV 인증서로 코드 서명·타임스탬프되어 있습니다. · <a href="https://github.com/kimmingul/NanumCsvViewer/releases">모든 릴리즈 보기</a>
         </p>
@@ -514,6 +517,8 @@
   <script>
     (function () {
       var root = document.documentElement;
+
+      /* ---- theme ---- */
       try {
         var saved = localStorage.getItem('ncv-theme');
         if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
@@ -526,6 +531,97 @@
         try { localStorage.setItem('ncv-theme', next); } catch (e) {}
       });
 
+      /* ---- language (ko / en) ---- */
+      var I18N = {
+        'nav.features': { ko: '기능', en: 'Features' },
+        'nav.pivot': { ko: '피벗', en: 'Pivot' },
+        'nav.download': { ko: '다운로드', en: 'Download' },
+        'nav.dlbtn': { ko: '다운로드', en: 'Download' },
+        'hero.eyebrow': { ko: 'Windows 11 · 무료 · 로컬 전용', en: 'Windows 11 · Free · Local-only' },
+        'hero.title': { ko: '대용량 CSV,<br><span class="grad">순식간에</span> 엽니다.', en: 'Big CSV files,<br><span class="grad">opened fast.</span>' },
+        'hero.lede': { ko: '1 GB가 넘는 CSV도 첫 페이지가 1초 안에. 파일 전체를 메모리에 올리지 않고 보이는 행만 그때그때 읽어, 파일이 커도 빠르고 가볍습니다.', en: 'Even CSV files over 1 GB show their first page in under a second. Only the visible rows are read on demand, so big files stay fast and light.' },
+        'hero.dl': { ko: 'Windows용 다운로드', en: 'Download for Windows' },
+        'hero.github': { ko: 'GitHub에서 보기', en: 'View on GitHub' },
+        'hero.chip1': { ko: '한글 인코딩 자동(UTF-8·CP949)', en: 'Automatic Korean encoding (UTF-8 · CP949)' },
+        'hero.chip2': { ko: 'x64 · ARM64', en: 'x64 · ARM64' },
+        'hero.chip3': { ko: '라이트 / 다크', en: 'Light / Dark' },
+        'mock.open': { ko: '열기', en: 'Open' },
+        'mock.pivot': { ko: '피벗', en: 'Pivot' },
+        'stat1.cap': { ko: '파일도 첫 페이지가 <b>1초</b> 안에. 바이트 오프셋 인덱스 + 가상 렌더링.', en: 'file, first page in under <b>1 second</b>. Byte-offset index + virtual rendering.' },
+        'stat2.cap': { ko: 'SIMD 바이트 스캔과 읽기·스캔 겹치기로 빠른 백그라운드 인덱싱.', en: 'Fast background indexing with SIMD byte scanning and read/scan overlap.' },
+        'stat3.big': { ko: '21<em>억 행</em>', en: '2.1<em>B rows</em>' },
+        'stat3.cap': { ko: '까지 표시. 적응형 메모리로 파일이 커도 사용량은 일정하게.', en: 'supported. Adaptive memory keeps usage steady no matter the size.' },
+        'feat.eyebrow': { ko: '기능', en: 'Features' },
+        'feat.title': { ko: '읽고, 거르고, 분석하는<br>모든 과정이 한 창 안에.', en: 'Read, filter, and analyze —<br>all in a single window.' },
+        'feat.lede': { ko: '대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다.', en: 'Every tool for large CSV work, built without external dependencies. Your data never leaves your PC.' },
+        'f1.h': { ko: '대용량 즉시 열람', en: 'Large files, instantly' },
+        'f1.p': { ko: '파일 전체를 메모리에 적재하지 않고 보이는 행만 디코딩합니다. 백그라운드 인덱싱 중에도 자유롭게 스크롤하세요.', en: 'Only the visible rows are decoded — the whole file never loads into memory. Scroll freely even while indexing runs in the background.' },
+        'f1.t1': { ko: '가상 렌더링', en: 'Virtual rendering' },
+        'f1.t2': { ko: '진행 표시', en: 'Progress bar' },
+        'f2.h': { ko: '한글 인코딩 자동', en: 'Automatic Korean encoding' },
+        'f2.p': { ko: 'BOM 확인 → UTF-8 검증 → CP949(EUC-KR) 폴백. 자동 감지가 틀리면 상태바에서 즉시 다시 디코딩(재인덱싱 불필요).', en: 'BOM check → strict UTF-8 → CP949 (EUC-KR) fallback. If detection is wrong, re-decode instantly from the status bar — no re-indexing.' },
+        'f3.h': { ko: '적응형 검색', en: 'Adaptive search' },
+        'f3.p': { ko: '평문 contains, 정규식 <code style="font-family:var(--mono);font-size:12px">/패턴/</code>, 퍼지 <code style="font-family:var(--mono);font-size:12px">fuzzy:</code>. 컬럼·셀값 필터와 조합됩니다.', en: 'Plain contains, regex <code style="font-family:var(--mono);font-size:12px">/pattern/</code>, and fuzzy <code style="font-family:var(--mono);font-size:12px">fuzzy:</code> — combined with column and cell-value filters.' },
+        'f3.t1': { ko: '정규식', en: 'Regex' },
+        'f3.t2': { ko: '퍼지', en: 'Fuzzy' },
+        'f3.t3': { ko: 'AND 누적', en: 'AND-chained' },
+        'f4.h': { ko: '타입 배지 · 헤더 필터', en: 'Type badges · header filters' },
+        'f4.p': { ko: '컬럼 추론 타입을 헤더에 배지로 표시하고, 범주형은 체크박스, 날짜는 범위로 헤더에서 바로 거릅니다.', en: 'Inferred column types appear as header badges; filter categorical columns by checkbox and dates by range, right from the header.' },
+        'f4.t1': { ko: '표현식 필터', en: 'Expression filter' },
+        'f4.t2': { ko: '날짜 범위', en: 'Date range' },
+        'f5.h': { ko: '엑셀식 복사 · 내보내기', en: 'Excel-style copy · export' },
+        'f5.p': { ko: '셀을 드래그·Shift·Ctrl로 선택해 TSV로 복사. 행/열 전체, 상세 패널 TEXT·JSON, 그리고 CSV·Markdown·JSON·HTML 내보내기.', en: 'Drag, Shift, or Ctrl-select cells and copy as TSV. Copy whole rows or columns, the inspector as TEXT/JSON, and export to CSV, Markdown, JSON, or HTML.' },
+        'f5.t1': { ko: 'TSV 복사', en: 'TSV copy' },
+        'f5.t2': { ko: '4종 내보내기', en: '4 export formats' },
+        'f6.h': { ko: '분석 · 통계', en: 'Analysis · statistics' },
+        'f6.p': { ko: '수치 분포·날짜 히스토그램·중복·그룹별 집계와, 상관·t검정·카이제곱까지. 정확한 p값·신뢰구간을 PC에서 계산합니다.', en: 'Numeric distributions, date histograms, duplicates, and group-by — plus correlation, t-tests, and chi-square with accurate p-values and confidence intervals, all on your PC.' },
+        'f6.t1': { ko: '그룹바이', en: 'Group by' },
+        'f6.t2': { ko: 't검정 · χ²', en: 't-test · χ²' },
+        'piv.eyebrow': { ko: '피벗 빌더', en: 'Pivot builder' },
+        'piv.title': { ko: '필드를 끌어다 놓으면<br>표와 차트가 됩니다.', en: 'Assign fields,<br>get a table and a chart.' },
+        'piv.lede1': { ko: '행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.', en: 'Assign fields to Rows, Columns, Values, and Filters — with multiple measures, date grouping, and totals. Pick a day/week/month/year period for date dimensions and a type-aware aggregation for values, right on each chip.' },
+        'piv.lede2': { ko: '차트는 <b>외부 라이브러리 없이 GDI+로 직접</b> 그립니다 — 막대·묶은막대·누적·꺾은선, 범례와 호버 툴팁까지. 단일 실행 파일·코드 서명에 영향이 없습니다.', en: 'Charts are drawn <b>directly with GDI+, no external library</b> — bar, grouped, stacked, and line, with legends and hover tooltips. No impact on the single-file build or code signing.' },
+        'band.title': { ko: '당신의 CSV는 PC를 떠나지 않습니다.', en: 'Your CSV never leaves your PC.' },
+        'band.p': { ko: '로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다.', en: "It's a local desktop app. It reads only the files you open and builds indexes on your PC — no cloud needed to inspect or analyze your data." },
+        'band.ms1s': { ko: '외부 전송 · 네트워크 의존성', en: 'External transfers · network dependencies' },
+        'band.ms2b': { ko: 'EV 코드 서명', en: 'EV code signing' },
+        'band.ms2s': { ko: '설치본·포터블·설치되는 exe 모두 서명·타임스탬프', en: 'Installer, portable, and installed exe — all signed & timestamped' },
+        'band.ms3s': { ko: '외부 CSV 라이브러리 없이 직접 구현한 엔진', en: 'Engine built from scratch, with no external CSV library' },
+        'dl.eyebrow': { ko: '다운로드', en: 'Download' },
+        'dl.lede': { ko: '아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.', en: 'Pick the file for your architecture. The installer adds Start menu entries and uninstall; the portable runs straight after copying.' },
+        'dl.x64pill': { ko: '대부분의 PC', en: 'Most PCs' },
+        'dl.x64for': { ko: 'Intel · AMD 64비트 — 일반 데스크톱·노트북.', en: 'Intel · AMD 64-bit — typical desktops and laptops.' },
+        'dl.armpill': { ko: 'ARM PC', en: 'ARM PCs' },
+        'dl.armfor': { ko: 'Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.', en: 'Snapdragon and other ARM — Surface Pro X, Copilot+ PCs.' },
+        'dl.setup': { ko: '설치형 (setup)', en: 'Installer (setup)' },
+        'dl.portable': { ko: '포터블 (exe)', en: 'Portable (exe)' },
+        'dl.note': {
+          ko: '실행에는 <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Desktop Runtime</a>이 필요합니다 — <b>설치형은 없을 경우 자동으로 설치</b>하고, 포터블은 없으면 Windows가 안내합니다.<br>모든 파일은 EV 인증서로 코드 서명·타임스탬프되어 있습니다. · <a href="https://github.com/kimmingul/NanumCsvViewer/releases">모든 릴리즈 보기</a>',
+          en: 'Requires the <a href="https://dotnet.microsoft.com/download/dotnet/10.0">.NET 10 Desktop Runtime</a> — <b>the installer auto-installs it if missing</b>, and the portable lets Windows prompt you.<br>All files are code-signed and timestamped with an EV certificate. · <a href="https://github.com/kimmingul/NanumCsvViewer/releases">View all releases</a>'
+        }
+      };
+      var langBtn = document.getElementById('lang');
+      function applyLang(lang) {
+        root.setAttribute('lang', lang);
+        document.querySelectorAll('[data-i18n]').forEach(function (el) {
+          var t = I18N[el.getAttribute('data-i18n')];
+          if (t && t[lang] != null) el.innerHTML = t[lang];
+        });
+        langBtn.textContent = lang === 'ko' ? 'EN' : 'KO';
+        langBtn.setAttribute('aria-label', lang === 'ko' ? 'Switch to English' : '한국어로 전환');
+      }
+      var savedLang = null;
+      try { savedLang = localStorage.getItem('ncv-lang'); } catch (e) {}
+      var initLang = (savedLang === 'ko' || savedLang === 'en') ? savedLang
+        : ((navigator.language || '').toLowerCase().indexOf('ko') === 0 ? 'ko' : 'en');
+      applyLang(initLang);
+      langBtn.addEventListener('click', function () {
+        var next = (root.getAttribute('lang') === 'ko') ? 'en' : 'ko';
+        applyLang(next);
+        try { localStorage.setItem('ncv-lang', next); } catch (e) {}
+      });
+
+      /* ---- scroll reveal ---- */
       var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if ('IntersectionObserver' in window && !reduce) {
         var io = new IntersectionObserver(function (entries) {
