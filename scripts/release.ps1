@@ -1,21 +1,24 @@
 ﻿<#
 .SYNOPSIS
-  NanumCsvViewer 릴리즈 빌드: Portable(단일 exe) + Install(setup.exe) 2가지를 만들고,
+  NanumCsvViewer 릴리즈 빌드: Portable(단일 exe) + Install(setup.exe)를 만들고,
   SafeNet 토큰 인증서로 코드 서명(타임스탬프 포함)한 뒤 GitHub 릴리즈를 생성합니다.
+  기본적으로 x64 + arm64 두 아키텍처를 모두 빌드합니다.
 
 .DESCRIPTION
   두 산출물 모두 프레임워크 의존(.NET 미포함):
    - Portable : framework-dependent 단일 exe (복사 후 실행, .NET 10 Desktop Runtime 필요)
    - Install  : Inno Setup setup.exe (설치 중 .NET 10 점검·자동 설치 + 시작메뉴/제거)
 
-  흐름: publish(FD) → 앱 exe 서명 → portable 복사 → ISCC로 setup 컴파일 → setup 서명 → gh release
+  흐름(아키텍처별): publish(FD) → 앱 exe 서명 → portable 복사 → ISCC로 setup 컴파일 → setup 서명
+  → 모든 아키텍처 산출물을 gh release 한 번에 업로드.
   서명 단계는 토큰 PIN이 필요하므로 직접 실행하세요(자동화/CI 부적합).
   ※ 이 파일은 UTF-8 (BOM) 로 저장하세요(PowerShell 5.1 한글 보존).
 
   요구: .NET SDK, Inno Setup 6.3+ (winget install JRSoftware.InnoSetup),
         Windows SDK(signtool), GitHub CLI(gh, 로그인됨).
 
-.PARAMETER Version       릴리즈 버전(예: 1.4.0). 태그는 v$Version.
+.PARAMETER Version       릴리즈 버전(예: 1.7.0). 태그는 v$Version.
+.PARAMETER Arch          x64 | arm64 | both. 기본 both(둘 다 빌드).
 .PARAMETER Thumbprint    서명 인증서 thumbprint. 생략 시 코드사이닝 인증서 자동 필터/선택.
 .PARAMETER ShowAllCerts  코드사이닝 필터를 끄고 모든 개인키 인증서 표시.
 .PARAMETER TimestampUrl  RFC3161 타임스탬프 서버. 기본 DigiCert.
@@ -24,13 +27,14 @@
 .PARAMETER SkipRelease       GitHub 릴리즈 생성 생략(로컬 산출물만).
 
 .EXAMPLE
-  .\scripts\release.ps1 -Version 1.4.0
-  .\scripts\release.ps1 -Version 1.4.0 -SkipSign -SkipRelease
+  .\scripts\release.ps1 -Version 1.7.0                 # x64 + arm64 모두 빌드·서명·릴리즈
+  .\scripts\release.ps1 -Version 1.7.0 -Arch x64       # x64만
+  .\scripts\release.ps1 -Version 1.7.0 -SkipSign -SkipRelease
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $Version,
-    [ValidateSet('x64', 'arm64')] [string] $Arch = 'x64',
+    [ValidateSet('x64', 'arm64', 'both')] [string] $Arch = 'both',
     [string] $Thumbprint,
     [switch] $ShowAllCerts,
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
@@ -45,10 +49,8 @@ $repo     = Split-Path $PSScriptRoot -Parent
 $proj     = Join-Path $repo 'NanumCsvViewer\NanumCsvViewer.csproj'
 $iss      = Join-Path $repo 'installer\NanumCsvViewer.iss'
 $dist     = Join-Path $repo 'dist'
-$fdDir    = if ($Arch -eq 'arm64') { 'publish-fd-arm64' } else { 'publish-fd' }
-$fdExe    = Join-Path $repo "NanumCsvViewer\bin\Release\$fdDir\NanumCsvViewer.exe"
-$portable = Join-Path $dist "NanumCsvViewer-v$Version-win-$Arch-portable.exe"
-$setupOut = Join-Path $dist "NanumCsvViewer-v$Version-win-$Arch-setup.exe"
+$fileVer  = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
+$arches   = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -73,7 +75,7 @@ function Resolve-SignTool() {
 }
 
 function Resolve-Thumbprint() {
-    if ($Thumbprint) { return }
+    if ($Thumbprint) { $script:Thumbprint = $Thumbprint; return }
     $all = @(Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.HasPrivateKey })
     $certs = if ($ShowAllCerts) { $all }
              else { @($all | Where-Object { ($_.Subject -ne $_.Issuer) -and (Test-CodeSigning $_) }) }
@@ -111,85 +113,106 @@ function Resolve-ISCC() {
     return $i
 }
 
-# ---- 1) publish (framework-dependent) -----------------------------------
-Step "프레임워크 의존본 게시 중 ($Arch, 단일 파일)..."
-# 바이너리 버전을 릴리즈 버전과 일치(X.Y.Z → 파일/어셈블리 버전 X.Y.Z.0)
-$fileVer = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
-dotnet publish $proj -p:PublishProfile=win-$Arch-framework `
-    "-p:Version=$Version" "-p:FileVersion=$fileVer" "-p:AssemblyVersion=$fileVer"
-if ($LASTEXITCODE -ne 0) { throw 'publish 실패' }
-New-Item -ItemType Directory -Force -Path $dist | Out-Null
+# 한 아키텍처를 빌드·서명하고 [portable, setup] 경로를 반환.
+function Build-One([string] $arch, [string] $iscc) {
+    $fdDir    = if ($arch -eq 'arm64') { 'publish-fd-arm64' } else { 'publish-fd' }
+    $fdExe    = Join-Path $repo "NanumCsvViewer\bin\Release\$fdDir\NanumCsvViewer.exe"
+    $portable = Join-Path $dist "NanumCsvViewer-v$Version-win-$arch-portable.exe"
+    $setupOut = Join-Path $dist "NanumCsvViewer-v$Version-win-$arch-setup.exe"
 
-# ---- 2) 서명 준비 + 앱 exe 서명(설치본/포터블 공통) ----------------------
-if (-not $SkipSign) {
-    Resolve-SignTool
-    Resolve-Thumbprint
-    Sign $fdExe   # 설치 후 앱 exe + 포터블에 모두 반영됨
+    # ---- 1) publish (framework-dependent) ----
+    Step "프레임워크 의존본 게시 중 ($arch, 단일 파일)..."
+    dotnet publish $proj -p:PublishProfile=win-$arch-framework `
+        "-p:Version=$Version" "-p:FileVersion=$fileVer" "-p:AssemblyVersion=$fileVer"
+    if ($LASTEXITCODE -ne 0) { throw "publish 실패 ($arch)" }
+    New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+    # ---- 2) 앱 exe 서명(설치본/포터블 공통) ----
+    if (-not $SkipSign) { Sign $fdExe }
+
+    # ---- 3) Portable ----
+    Copy-Item $fdExe $portable -Force
+    Step "Portable: $(Split-Path $portable -Leaf)"
+
+    # ---- 4) Install (Inno Setup) ----
+    Step "설치본 컴파일: ISCC ($arch)"
+    & $iscc "/DMyAppVersion=$Version" "/DMyAppExe=$fdExe" "/DArch=$arch" "/O$dist" `
+            "/FNanumCsvViewer-v$Version-win-$arch-setup" $iss
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup 컴파일 실패 ($arch)" }
+    if (-not $SkipSign) { Sign $setupOut }
+
+    # ---- 4b) 설치된 exe 서명 검증(무인 설치 → verify → 제거) ----
+    $hostArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+    if ($arch -ne $hostArch) {
+        Step "설치된 exe 무인 검증 건너뜀: 대상($arch)이 호스트($hostArch)와 달라 실행/설치 불가(파일 서명은 검증됨)."
+    }
+    if (-not $SkipSign -and -not $SkipVerifyInstall -and $arch -eq $hostArch) {
+        $testDir = Join-Path $env:TEMP "nctest-$Version"
+        $instExe = Join-Path $testDir 'NanumCsvViewer.exe'
+        $uninst  = Join-Path $testDir 'unins000.exe'
+        if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Step '설치된 exe 서명 검증: 임시 무인 설치...'
+        Start-Process $setupOut -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART `"/DIR=$testDir`"" -Wait
+        if (-not (Test-Path $instExe)) { throw "무인 설치 실패(설치된 exe 없음): $instExe" }
+        & $script:SignTool verify /pa /v $instExe
+        if ($LASTEXITCODE -ne 0) { throw "설치된 exe 서명 검증 실패: $instExe" }
+        Step '설치된 exe 서명 확인됨 → 임시 설치 제거'
+        if (Test-Path $uninst) { Start-Process $uninst -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait }
+    }
+
+    # 네이티브 명령(dotnet/ISCC/signtool) stdout이 반환값에 섞이지 않도록 경로는 스크립트 스코프 리스트로 수집.
+    $script:Artifacts += $portable
+    $script:Artifacts += $setupOut
 }
 
-# ---- 3) Portable (서명된 FD exe 복사) -----------------------------------
-Copy-Item $fdExe $portable -Force
-Step "Portable: $(Split-Path $portable -Leaf)"
-
-# ---- 4) Install (Inno Setup 컴파일) -------------------------------------
+# ---- 준비(아키텍처 무관, 1회) ----
+if (-not $SkipSign) { Resolve-SignTool; Resolve-Thumbprint }
 $iscc = Resolve-ISCC
-Step "설치본 컴파일: ISCC"
-& $iscc "/DMyAppVersion=$Version" "/DMyAppExe=$fdExe" "/DArch=$Arch" "/O$dist" `
-        "/FNanumCsvViewer-v$Version-win-$Arch-setup" $iss
-if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 컴파일 실패' }
-if (-not $SkipSign) { Sign $setupOut }   # 설치 관리자도 서명(SmartScreen)
 
-# ---- 4b) 설치된 exe 서명 검증(무인 설치 → verify → 제거) -----------------
-# 요구사항 증명: setup이 설치하는 앱 exe도 서명되어 있어야 한다.
-# 관리자 권한 설치라 UAC가 뜰 수 있음. (.NET 10이 이미 있으면 자동설치 분기는 건너뜀)
-$hostArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-if ($Arch -ne $hostArch) {
-    Step "설치된 exe 무인 검증 건너뜀: 대상($Arch)이 호스트($hostArch)와 달라 실행/설치 불가(파일 서명은 검증됨)."
-}
-if (-not $SkipSign -and -not $SkipVerifyInstall -and $Arch -eq $hostArch) {
-    $testDir = Join-Path $env:TEMP "nctest-$Version"
-    $instExe = Join-Path $testDir 'NanumCsvViewer.exe'
-    $uninst  = Join-Path $testDir 'unins000.exe'
-    if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Step '설치된 exe 서명 검증: 임시 무인 설치...'
-    Start-Process $setupOut -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART `"/DIR=$testDir`"" -Wait
-    if (-not (Test-Path $instExe)) { throw "무인 설치 실패(설치된 exe 없음): $instExe" }
-    & $script:SignTool verify /pa /v $instExe
-    if ($LASTEXITCODE -ne 0) { throw "설치된 exe 서명 검증 실패: $instExe" }
-    Step '설치된 exe 서명 확인됨 → 임시 설치 제거'
-    if (Test-Path $uninst) { Start-Process $uninst -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait }
-}
+# ---- 아키텍처별 빌드 ----
+$script:Artifacts = @()
+foreach ($a in $arches) { Build-One $a $iscc }
 
 Step '산출물:'
-Get-Item $portable, $setupOut | Format-Table Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}} -AutoSize | Out-Host
+Get-Item $script:Artifacts | Format-Table Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}} -AutoSize | Out-Host
 
-# ---- 5) GitHub 릴리즈 ---------------------------------------------------
+# ---- 5) GitHub 릴리즈 ----
 if (-not $SkipRelease) {
     $notes = Join-Path $env:TEMP "relnotes-$Version.md"
+    $archLine = ($arches -join ', ')
     $body = @"
 NanumCsvViewer v$Version
 
 ## 다운로드
-- **NanumCsvViewer-v$Version-win-x64-portable.exe** — 설치 없이 실행하는 단일 실행 파일.
-- **NanumCsvViewer-v$Version-win-x64-setup.exe** — 설치 관리자(시작 메뉴 등록·제거 지원).
+아키텍처에 맞는 파일을 받으세요($archLine):
+- **NanumCsvViewer-v$Version-win-<arch>-portable.exe** — 설치 없이 실행하는 단일 실행 파일.
+- **NanumCsvViewer-v$Version-win-<arch>-setup.exe** — 설치 관리자(시작 메뉴 등록·제거 지원).
 
-두 버전 모두 **.NET 10 Desktop Runtime (x64)** 이 필요합니다. 설치 관리자는 없을 경우 자동으로 설치를 진행합니다.
+모두 **.NET 10 Desktop Runtime** 이 필요합니다. 설치 관리자는 없을 경우 자동으로 설치를 진행합니다.
 포터블 버전은 런타임이 없으면 Windows가 안내합니다 — 수동 설치: https://dotnet.microsoft.com/download/dotnet/10.0
 
-두 파일 모두 코드 서명되어 있습니다(타임스탬프 포함).
+모든 파일은 코드 서명되어 있습니다(타임스탬프 포함).
 "@
     [System.IO.File]::WriteAllText($notes, $body, (New-Object System.Text.UTF8Encoding($false)))
 
-    $p1 = "$portable#Portable ($Arch, 설치 불필요, .NET 10 런타임 필요)"
-    $p2 = "$setupOut#설치 관리자 ($Arch, .NET 10 자동 설치)"
+    # 산출물별 "경로#라벨" 생성
+    $assets = @()
+    foreach ($f in $script:Artifacts) {
+        $leaf = Split-Path $f -Leaf
+        $a    = if ($leaf -match 'arm64') { 'arm64' } else { 'x64' }
+        $lbl  = if ($leaf -match 'portable') { "Portable ($a, 설치 불필요, .NET 10 런타임 필요)" }
+                else { "설치 관리자 ($a, .NET 10 자동 설치)" }
+        $assets += "$f#$lbl"
+    }
+
     # cmd /c 로 감싸 stderr를 완전히 삼킴(PS 5.1의 NativeCommandError + Stop 종료 회피)
     cmd /c "gh release view v$Version 1>nul 2>nul"
     if ($LASTEXITCODE -eq 0) {
         Step "기존 릴리즈 v$Version 에 자산 업로드(덮어쓰기)"
-        gh release upload "v$Version" $p1 $p2 --clobber
+        gh release upload "v$Version" @assets --clobber
     } else {
         Step "GitHub 릴리즈 생성: v$Version"
-        gh release create "v$Version" --title "v$Version" --notes-file $notes $p1 $p2
+        gh release create "v$Version" --title "v$Version" --notes-file $notes @assets
     }
     if ($LASTEXITCODE -ne 0) { throw 'gh release 실패' }
     Step '릴리즈 완료'
