@@ -57,12 +57,18 @@ namespace NanumCsvViewer.Csv
         public bool InMemory => _ramBuffer is not null;
         public bool IsFiltered => _viewMap is not null;
 
+        // 영속 인덱스 캐시 검증 키(디스크 모드 재열기 시 인덱싱 생략용). 감지 시점 값으로 고정.
+        private readonly string _detectedEncodingName;
+        private readonly DateTime _lastWriteUtc;
+
         private VirtualCsvDocument(string path, EncodingDetectionResult det)
         {
             _path = path;
             _encoding = det.Encoding;
             _preamble = det.PreambleLength;
             EncodingName = det.DisplayName;
+            _detectedEncodingName = det.DisplayName;
+            try { _lastWriteUtc = File.GetLastWriteTimeUtc(path); } catch { _lastWriteUtc = DateTime.MinValue; }
             _diskSource = new FileByteSource(path);
             FileLength = _diskSource.Length;
             WillUseRam = FileLength <= RamBufferBudgetBytes;
@@ -127,6 +133,19 @@ namespace NanumCsvViewer.Csv
         {
             return Task.Run(async () =>
             {
+                // 디스크 모드: 유효한 영속 인덱스 캐시가 있으면 전체 스캔을 생략(RAM 모드는 버퍼 적재가 필요해 제외).
+                if (!WillUseRam)
+                {
+                    long[]? cached = IndexCache.TryLoad(_path, FileLength, _lastWriteUtc, _detectedEncodingName, _delim);
+                    if (cached is not null)
+                    {
+                        _index.BulkLoad(cached);
+                        IndexingComplete = true;
+                        progress.Report(new IndexProgress(FileLength, FileLength, _index.Count));
+                        return;
+                    }
+                }
+
                 using var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 20, FileOptions.SequentialScan);
                 var indexer = new CsvRecordIndexer(_index, FileLength, _delim, _preamble);
 
@@ -187,6 +206,7 @@ namespace NanumCsvViewer.Csv
                 _index.Publish(); // 최종 공개
                 IndexingComplete = true;
                 if (WillUseRam) _ramBuffer = _ramBufferPending; // 디스크→RAM 전환(이후 필터 스캔 가속)
+                else IndexCache.Save(_path, FileLength, _lastWriteUtc, _detectedEncodingName, _delim, _index); // 디스크 모드만 캐시
                 progress.Report(new IndexProgress(FileLength, FileLength, _index.Count));
             }, ct);
         }
@@ -419,6 +439,45 @@ namespace NanumCsvViewer.Csv
         }
 
         public void ClearView() => _viewMap = null;
+
+        /// <summary>
+        /// 한 컬럼의 고유값과 개수를 수집(헤더 필터·범주 선택용). 개수 내림차순→값 오름차순 정렬.
+        /// 빈 값은 ""로 보존한다. 캐시를 오염시키지 않도록 uncached 경로로 스캔하며 취소 가능.
+        /// </summary>
+        public IReadOnlyList<(string Value, int Count)> DistinctValues(int column, bool withinCurrentView, CancellationToken ct)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            void Tally(string[] row)
+            {
+                string v = column >= 0 && column < row.Length ? row[column] : string.Empty;
+                counts[v] = counts.TryGetValue(v, out int c) ? c + 1 : 1;
+            }
+
+            if (withinCurrentView && _viewMap is { } map)
+            {
+                for (int i = 0; i < map.Length; i++)
+                {
+                    if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                    Tally(GetDataRowUncached(map[i]));
+                }
+            }
+            else
+            {
+                int total = DataRowsAvailable;
+                for (int i = 0; i < total; i++)
+                {
+                    if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                    Tally(GetDataRowUncached(i));
+                }
+            }
+
+            return counts
+                .Select(kv => (kv.Key, kv.Value))
+                .OrderByDescending(t => t.Value)
+                .ThenBy(t => t.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         public void Dispose()
         {

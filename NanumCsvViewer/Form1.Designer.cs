@@ -497,7 +497,7 @@ namespace NanumCsvViewer
             grid.Dock = DockStyle.Fill;
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.Location = new Point(0, 0);
-            grid.MultiSelect = false;
+            grid.MultiSelect = true;
             grid.Name = "grid";
             grid.ReadOnly = true;
             grid.RowHeadersWidth = 80;

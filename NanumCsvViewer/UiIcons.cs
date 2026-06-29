@@ -227,6 +227,29 @@ namespace NanumCsvViewer
             return bmp;
         }
 
+        // ── Type badge toggle ─────────────────────────────────
+        public static Bitmap TypeBadge()
+        {
+            var bmp = New(out var g);
+            using (g)
+            {
+                // 둥근 라벨(배지) 모양 + 흰 점 — 헤더 타입 배지를 상징
+                using var b = new SolidBrush(Blue);
+                using var path = new GraphicsPath();
+                var r = new RectangleF(2.5f, 5f, 11f, 6f);
+                const float d = 3f;
+                path.AddArc(r.X, r.Y, d, d, 180, 90);
+                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                g.FillPath(b, path);
+                using var w = new SolidBrush(Color.White);
+                g.FillEllipse(w, 4.2f, 7f, 2f, 2f);
+            }
+            return bmp;
+        }
+
         // ── Theme toggle ──────────────────────────────────────
         public static Bitmap Sun()
         {
