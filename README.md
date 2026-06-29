@@ -25,6 +25,22 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### ✨ v1.7.0 신규 — 분석·탐색·생산성
+
+- **고급 검색** — 평문(contains)에 더해 정규식(`/패턴/` 또는 `regex:`)과 퍼지(`fuzzy:`) 검색을 지원합니다.
+- **표현식 필터** — `age > 30 AND city = "서울"` 처럼 `AND/OR/괄호`와 비교 연산을 쓰는 고급 필터(Edit ▸ Advanced Filter).
+- **헤더 타입 배지** — 인덱싱이 끝나면 컬럼명 옆에 추론 타입(`INT/FLT/DATE/BOOL/CAT/STR`)을 컬러 배지로 표시(보기 메뉴·툴바에서 켜고 끄기).
+- **헤더 필터** — 범주형/날짜 컬럼 헤더 우측의 깔때기로 값 체크박스(검색·개수)·날짜 범위 필터를 적용합니다(정렬과 분리).
+- **내보내기** — 현재 보기(필터·정렬·표시 컬럼)를 **CSV / Markdown / JSON / HTML**로 스트리밍 내보내기.
+- **분석** — 수치 분포(분위·히스토그램), 날짜 히스토그램(일/주/월/년), 중복 탐지, 그룹별 집계(Count/Sum/Mean/… ).
+- **통계** — 상관(Pearson/Spearman), 독립·대응 t검정, 카이제곱 검정(정확한 p값·신뢰구간).
+- **피벗 빌더 + 차트** — 행/열/값/필터에 필드를 배정하는 엑셀식 피벗(다중 측정·날짜 그룹핑·합계)과 **외부 라이브러리 없는 GDI+ 차트**(막대/묶은막대/누적/꺾은선). **피벗** 메뉴에서 표/차트로 진입.
+- **엑셀식 셀 선택·복사** — 드래그 사각 선택·`Shift`/`Ctrl` 선택, `Ctrl+C`로 전체 값 TSV 복사, 우클릭으로 행/열 전체 복사, 상세 패널 TEXT/JSON 복사.
+- **저장된 뷰** — 필터·정렬·숨김 컬럼·검색·컬럼 필터를 파일별로 저장/복원.
+- **가져오기 편의** — 클립보드(CSV 텍스트·경로·`file://`)·드래그앤드롭으로 바로 열기.
+- **성능 대시보드 · 영속 인덱스 캐시** — 처리량·저장 모드 등을 한눈에, 디스크 모드 재열기 시 인덱싱 생략.
+- **행으로 이동(Ctrl+G) · 컬럼 숨기기** — 원본 행번호로 점프, 컬럼 표시/숨김 체크리스트.
+
 ## 🧰 기술 스택
 
 | 항목 | 내용 |
@@ -71,10 +87,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.5.0
+.\scripts\release.ps1 -Version 1.7.0
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.5.0 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.7.0 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
@@ -100,6 +116,8 @@ dotnet test
 | `F3` / `Enter`(검색창) | 다음 찾기 |
 | `Enter`(필터창) | 필터 적용 |
 | `Ctrl+B` | 선택한 셀 값으로 필터(AND 누적) |
+| `Ctrl+G` | 행으로 이동(원본 행번호) |
+| `Ctrl+C` | 선택한 셀 전체 복사(TSV) |
 | `Ctrl+Shift+L` | 필터 해제 |
 | `Ctrl+Shift+S` | 정렬 해제 |
 | `F4` | 상세 패널 토글 |

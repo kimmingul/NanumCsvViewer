@@ -63,5 +63,24 @@ namespace NanumCsvViewer.Csv
                 return _segments[seg][within];
             }
         }
+
+        /// <summary>공개된 [0, Count) 오프셋의 연속 배열 스냅샷(영속 캐시 저장용).</summary>
+        public long[] SnapshotOffsets()
+        {
+            long count = Count;
+            var result = new long[count];
+            for (long i = 0; i < count; i++) result[i] = this[i];
+            return result;
+        }
+
+        /// <summary>
+        /// 영속 캐시에서 오프셋을 일괄 적재(작성자 스레드에서 인덱싱 대신 호출).
+        /// Add를 재사용해 세그먼트 구조를 동일하게 채운 뒤 <see cref="Publish"/>까지 수행.
+        /// </summary>
+        public void BulkLoad(ReadOnlySpan<long> offsets)
+        {
+            foreach (long off in offsets) Add(off);
+            Publish();
+        }
     }
 }

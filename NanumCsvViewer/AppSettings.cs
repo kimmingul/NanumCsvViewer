@@ -12,6 +12,12 @@ namespace NanumCsvViewer
         /// <summary>"auto"(OS 언어 따름) | "en" | "ko".</summary>
         public string Language { get; set; } = "auto";
 
+        /// <summary>그리드 헤더에 컬럼 타입 배지를 표시할지 여부.</summary>
+        public bool ShowTypeBadges { get; set; } = true;
+
+        /// <summary>CSV를 닫을 때(다른 파일 열기·종료) 해당 파일의 영속 인덱스 캐시를 삭제할지 여부.</summary>
+        public bool DeleteIndexOnClose { get; set; } = false;
+
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");
         private static string FilePath => Path.Combine(Dir, "settings.json");

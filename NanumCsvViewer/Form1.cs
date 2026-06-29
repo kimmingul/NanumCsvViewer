@@ -12,6 +12,7 @@ namespace NanumCsvViewer
         private ThemePalette _palette = ThemePalette.Light;
 
         private VirtualCsvDocument? _doc;
+        private string? _currentPath;
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _opCts;
         private CancellationTokenSource? _findCts;
@@ -34,7 +35,7 @@ namespace NanumCsvViewer
         // 다중 컬럼 정렬: 순서가 우선순위(앞이 1차). 헤더 클릭=단일 교체, Shift+클릭=차수 추가.
         private readonly List<SortKey> _sortKeys = new();
 
-        private bool HasAnyFilter => _textCondition is not null || _valueConditions.Count > 0;
+        private bool HasAnyFilter => _textCondition is not null || _valueConditions.Count > 0 || !_columnFilters.IsEmpty;
 
         // 멀티라인 셀 행 높이 계산용
         private int _singleLineHeight = 22;
@@ -53,6 +54,7 @@ namespace NanumCsvViewer
 
             BuildEncodingMenu();
             BuildLanguageMenu();
+            BuildFeatureMenus();
             ApplyIcons();
             ApplyLocalization();
 
@@ -60,6 +62,10 @@ namespace NanumCsvViewer
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
             _lineHeight = grid.Font.Height + 2;
             _singleLineHeight = Math.Max(grid.RowTemplate.Height, _lineHeight + 6);
+
+            // 헤더에 컬럼명 + 타입 배지를 한 줄로 그릴 공간 확보
+            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            grid.ColumnHeadersHeight = 30;
 
             try { splitContainer1.SplitterDistance = 26; } catch { /* 초기 크기에 따라 무시 */ }
 
@@ -178,6 +184,7 @@ namespace NanumCsvViewer
         // 메뉴/툴바/툴팁/컨텍스트 등 모든 정적 UI 텍스트를 현재 언어로 설정(코드가 단일 소스).
         private void ApplyLocalization()
         {
+            LocalizeFeatureMenus();
             // 메뉴
             fileToolStripMenuItem.Text = Loc.T("Menu_File");
             openToolStripMenuItem.Text = Loc.T("Menu_Open");
@@ -284,13 +291,16 @@ namespace NanumCsvViewer
                 // 진행 중인 인덱싱/필터/정렬/검색을 취소하고 완료까지 기다린 뒤에야 옛 문서를 해제한다.
                 // (검색 스레드가 해제된 _doc/디스크 핸들을 참조해 NRE/ObjectDisposedException 나는 것을 방지)
                 await CancelAndDrainAsync();
+                DeleteCurrentIndexIfRequested(); // 이전 파일을 닫기 전 캐시 정리(설정 시)
                 var old = _doc;
                 _doc = null;
                 old?.Dispose();
 
                 ResetView();
+                _hiddenColumns.Clear();
                 _userResizedRowHeader = false; // 새 파일에서는 자동 폭 조정 재개
                 _doc = VirtualCsvDocument.Open(path);
+                _currentPath = path;
 
                 BuildColumns(_doc.Header);
                 SyncEncodingUi(_doc.EncodingName);
@@ -392,6 +402,8 @@ namespace NanumCsvViewer
         {
             progressBar.Visible = false;
             progressLabel.Visible = false;
+            _lastIndexMs = ms;
+            ComputeColumnTypeTags();
             UpdateFeatureState();
 
             if (_doc is null) return;
@@ -444,7 +456,9 @@ namespace NanumCsvViewer
             try
             {
                 string[] row = _doc.GetDisplayRow(e.RowIndex);
-                e.Value = e.ColumnIndex < row.Length ? row[e.ColumnIndex] : string.Empty;
+                // 그리드 셀은 길이 제한 미리보기로 표시(긴 XML/CLOB의 비싼 텍스트 레이아웃 방지).
+                // 전체 값은 셀 값 표시줄·상세 패널(F4)에서 그대로 본다.
+                e.Value = e.ColumnIndex < row.Length ? PreviewCell(row[e.ColumnIndex]) : string.Empty;
             }
             catch (Exception ex)
             {
@@ -680,6 +694,20 @@ namespace NanumCsvViewer
             string term = findTextBox.Text;
             if (string.IsNullOrEmpty(term)) return;
 
+            // 입력을 검색 모드로 라우팅: /pat/·regex: → 정규식, fuzzy: → 퍼지, 그 외 → contains
+            CsvSearchMatcher matcher;
+            try
+            {
+                var query = CsvSearchQuery.FromUserInput(term, null);
+                if (query is null) return;
+                matcher = new CsvSearchMatcher(query);
+            }
+            catch (CsvSearchException ex)
+            {
+                statusLabel.Text = ex.Message;
+                return;
+            }
+
             int total = doc.DisplayRowCount;
             if (total == 0) return;
             int start = (grid.CurrentCell?.RowIndex ?? -1) + 1;
@@ -693,7 +721,7 @@ namespace NanumCsvViewer
             int found;
             try
             {
-                found = await Task.Run(() => SearchForward(doc, term, start, total, ct), ct);
+                found = await Task.Run(() => SearchForward(doc, matcher, start, total, ct), ct);
             }
             catch (OperationCanceledException) { return; }
             finally { SetBusy(false); }
@@ -712,28 +740,20 @@ namespace NanumCsvViewer
             }
         }
 
-        private static int SearchForward(VirtualCsvDocument doc, string term, int start, int total, CancellationToken ct)
+        private static int SearchForward(VirtualCsvDocument doc, CsvSearchMatcher matcher, int start, int total, CancellationToken ct)
         {
             // start..total-1 후 0..start-1 (랩어라운드)
             for (int i = start; i < total; i++)
             {
                 if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                if (RowContains(doc, i, term)) return i;
+                if (matcher.FirstMatch(doc.GetDisplayRow(i)) is not null) return i;
             }
             for (int i = 0; i < start && i < total; i++)
             {
                 if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                if (RowContains(doc, i, term)) return i;
+                if (matcher.FirstMatch(doc.GetDisplayRow(i)) is not null) return i;
             }
             return -1;
-        }
-
-        private static bool RowContains(VirtualCsvDocument doc, int viewRow, string term)
-        {
-            string[] row = doc.GetDisplayRow(viewRow);
-            foreach (string f in row)
-                if (f.Contains(term, StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
         }
 
         // ---------------------------------------------------------------- Filter (Phase 3)
@@ -835,11 +855,13 @@ namespace NanumCsvViewer
         {
             var text = _textCondition;
             var preds = _valueConditions.Select(v => v.pred).ToArray();
+            var colPred = _columnFilters.IsEmpty ? null : _columnFilters.Predicate();
             return row =>
             {
                 if (text is not null && !text(row)) return false;
                 for (int i = 0; i < preds.Length; i++)
                     if (!preds[i](row)) return false;
+                if (colPred is not null && !colPred(row)) return false;
                 return true;
             };
         }
@@ -868,6 +890,7 @@ namespace NanumCsvViewer
             var parts = new List<string>();
             if (_textCondition is not null) parts.Add(_textConditionDesc);
             parts.AddRange(_valueConditions.Select(v => v.desc));
+            parts.AddRange(_columnFilters.Descriptions(_doc.Header));
             statusLabel.Text = Loc.F("Status_FilterFmt", parts.Count, string.Join(Loc.T("Filter_And"), parts),
                 _doc.DisplayRowCount.ToString("N0"), _doc.DataRowsAvailable.ToString("N0"), size);
         }
@@ -893,6 +916,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
+            _columnFilters.Clear();
             _sortKeys.Clear();
             ClearSortGlyphs();
             _doc.ClearView();
@@ -907,6 +931,13 @@ namespace NanumCsvViewer
         private void OnColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy || e.ColumnIndex < 0) return;
+            // 우측 깔때기 영역(약 18px) 클릭은 정렬 대신 필터 팝오버. 그 외는 정렬.
+            if (e.Button == MouseButtons.Left && IsFilterableColumn(e.ColumnIndex) &&
+                e.X >= grid.Columns[e.ColumnIndex].Width - 18)
+            {
+                OpenColumnFilter(e.ColumnIndex);
+                return;
+            }
             bool additive = (ModifierKeys & Keys.Shift) == Keys.Shift;
             ToggleSortColumn(e.ColumnIndex, additive);
         }
@@ -1008,20 +1039,65 @@ namespace NanumCsvViewer
             grid.Invalidate();
         }
 
-        // 다중 컬럼 정렬 시 헤더 우측 상단에 우선순위 번호(1,2,3…)를 작게 표시.
+        // 컬럼 헤더를 직접 그린다: 컬럼명(상단) + 추론 타입 배지(하단) + 정렬 화살표·다중정렬 우선순위(우상단).
         // HeaderText는 손대지 않아 컬럼명 조회(필터/상세/주소)는 그대로 유지된다.
         private void OnGridCellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
-            if (e.RowIndex != -1 || e.ColumnIndex < 0 || _sortKeys.Count <= 1 || e.Graphics is null) return;
-            int priority = _sortKeys.FindIndex(s => s.Column == e.ColumnIndex);
-            if (priority < 0) return;
+            if (e.Graphics is null || e.RowIndex != -1 || e.ColumnIndex < 0) return;
+            var g = e.Graphics;
+            var b = e.CellBounds;
 
-            e.Paint(e.ClipBounds, e.PaintParts); // 기본 헤더(텍스트+정렬 화살표) 먼저
-            string badge = (priority + 1).ToString();
-            using var f = new Font(grid.Font.FontFamily, 6.5f, FontStyle.Bold);
-            Size sz = TextRenderer.MeasureText(badge, f);
-            var pt = new Point(e.CellBounds.Right - sz.Width - 1, e.CellBounds.Top + 1);
-            TextRenderer.DrawText(e.Graphics, badge, f, pt, Color.FromArgb(30, 110, 200));
+            e.PaintBackground(b, true); // 테마 배경(+선택)
+
+            var font = grid.ColumnHeadersDefaultCellStyle.Font ?? grid.Font;
+            string text = e.FormattedValue?.ToString() ?? grid.Columns[e.ColumnIndex].HeaderText;
+
+            // 우측에 정렬 화살표(+우선순위) + 필터 깔때기 공간 확보
+            int idx = _sortKeys.FindIndex(s => s.Column == e.ColumnIndex);
+            bool filterable = IsFilterableColumn(e.ColumnIndex);
+            bool filterActive = filterable && _columnFilters.HasFilterFor(e.ColumnIndex);
+            int funnelW = filterable ? 18 : 0;
+            int rightReserved = funnelW + (idx >= 0 ? (_sortKeys.Count > 1 ? 28 : 16) : 2);
+
+            // 배지는 컬럼명 바로 오른쪽에 인라인 배치(보기 설정으로 끌 수 있음)
+            bool hasBadge = _showTypeBadges && e.ColumnIndex < _columnSummaries.Length;
+            int badgeW = hasBadge ? MeasureBadgeWidth(g, _columnSummaries[e.ColumnIndex].InferredType) : 0;
+            int gap = hasBadge ? 6 : 0;
+
+            int nameLeft = b.Left + 6;
+            int maxNameW = b.Width - 6 - rightReserved - badgeW - gap - 2;
+            // 측정·그리기의 패딩을 일치시켜야 불필요한 생략부호(…)가 생기지 않음.
+            int nameSize = TextRenderer.MeasureText(g, text, font).Width;
+            int nameW = Math.Max(0, Math.Min(nameSize, maxNameW));
+
+            var textRect = new Rectangle(nameLeft, b.Top, nameW + 2, b.Height);
+            TextRenderer.DrawText(g, text, font, textRect, _palette.HeaderText,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            if (hasBadge)
+            {
+                int badgeX = Math.Min(nameLeft + nameW + gap, b.Right - rightReserved - badgeW);
+                if (badgeX >= nameLeft)
+                    DrawTypeBadge(g, new Point(badgeX, b.Top + (b.Height - 16) / 2), _columnSummaries[e.ColumnIndex].InferredType);
+            }
+
+            if (filterable)
+                DrawFunnel(g, new Rectangle(b.Right - 16, b.Top + (b.Height - 10) / 2, 11, 10), filterActive);
+
+            if (idx >= 0)
+            {
+                DrawSortArrow(g, new Rectangle(b.Right - 16 - funnelW, b.Top + (b.Height - 9) / 2, 10, 9), _sortKeys[idx].Ascending);
+                if (_sortKeys.Count > 1)
+                {
+                    using var pf = new Font(grid.Font.FontFamily, 6.5f, FontStyle.Bold);
+                    TextRenderer.DrawText(g, (idx + 1).ToString(), pf,
+                        new Point(b.Right - 28 - funnelW, b.Top + 3), _palette.Accent, TextFormatFlags.NoPadding);
+                }
+            }
+
+            using (var pen = new Pen(_palette.Border))
+                g.DrawLine(pen, b.Right - 1, b.Top, b.Right - 1, b.Bottom - 1);
+
             e.Handled = true;
         }
 
@@ -1110,6 +1186,7 @@ namespace NanumCsvViewer
             sortDescButton.Enabled = ready;
             clearSortButton.Enabled = ready;
 
+            UpdateFeatureMenuState();
             RefreshSignal();
         }
 
@@ -1130,6 +1207,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
+            _columnFilters.Clear();
             _sortKeys.Clear();
             ClearSortGlyphs();
         }
@@ -1139,6 +1217,7 @@ namespace NanumCsvViewer
             _textCondition = null;
             _textConditionDesc = "";
             _valueConditions.Clear();
+            _columnFilters.Clear();
             _sortKeys.Clear();
             ClearSortGlyphs();
             _doc?.ClearView();
@@ -1200,7 +1279,9 @@ namespace NanumCsvViewer
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             CancelAll();
+            DeleteCurrentIndexIfRequested(); // 종료 시 현재 파일 캐시 정리(설정 시)
             _doc?.Dispose();
+            CleanupTempImports();
             _detailBoldFont?.Dispose();
             _detailTimer?.Dispose();
             _rowCountTimer?.Dispose();
