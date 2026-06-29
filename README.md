@@ -81,6 +81,7 @@ dotnet test
 
 `scripts/release.ps1`이 게시 → **앱 exe 서명** → Portable 복사 → 설치 관리자 컴파일 → **setup 서명** → **설치된 exe 서명 검증**(임시 무인 설치·제거) → GitHub 릴리즈까지 수행합니다.
 
+- 기본적으로 **x64·arm64 두 아키텍처를 모두** 빌드·서명하고 한 릴리즈에 함께 업로드합니다. 한쪽만 만들려면 `-Arch x64` 또는 `-Arch arm64`.
 - Portable·setup·**설치되는 앱 exe** 모두 SafeNet 토큰의 EV 인증서로 서명·타임스탬프됩니다. (페이로드를 먼저 서명한 뒤 패키징하므로, Inno Setup이 바이트 보존하여 설치된 exe의 서명이 유지됩니다.)
 - `-p:Version`으로 바이너리 파일버전을 릴리즈 버전과 자동 일치시킵니다.
 - 서명 시 토큰 PIN 프롬프트가 뜹니다(연속 서명은 SafeNet single-logon 권장). 동일 버전 재실행 시 기존 릴리즈에 자산을 덮어씁니다.
