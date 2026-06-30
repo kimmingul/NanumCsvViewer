@@ -53,5 +53,39 @@ namespace NanumCsvViewer.Tests
         {
             Assert.Equal(expected, CsvDateParser.HeaderSuggestsDate(header));
         }
+
+        [Theory]
+        [InlineData("2024-01-15", TemporalKind.Date)]
+        [InlineData("2024-01", TemporalKind.Date)]
+        [InlineData("2024년 1월 15일", TemporalKind.Date)]
+        [InlineData("2024-01-15 13:45:00", TemporalKind.DateTime)]
+        [InlineData("2024-01-15 13:45", TemporalKind.DateTime)]
+        [InlineData("2024-01-15T13:45:00Z", TemporalKind.DateTime)]
+        [InlineData("13:45:00", TemporalKind.Time)]
+        [InlineData("9:05", TemporalKind.Time)]
+        public void ParseDetailed_classifies_granularity(string value, TemporalKind expected)
+        {
+            var parsed = CsvDateParser.ParseDetailed(value);
+            Assert.NotNull(parsed);
+            Assert.Equal(expected, parsed!.Value.Kind);
+        }
+
+        [Theory]
+        [InlineData("20240115", TemporalKind.Date)]
+        [InlineData("20240115134500", TemporalKind.DateTime)]
+        public void ParseDetailed_compact_numeric_with_flag(string value, TemporalKind expected)
+        {
+            var parsed = CsvDateParser.ParseDetailed(value, allowCompactNumeric: true);
+            Assert.NotNull(parsed);
+            Assert.Equal(expected, parsed!.Value.Kind);
+        }
+
+        [Theory]
+        [InlineData("30001231")]   // 연도 3000 → 타당 범위(1900~2100) 밖
+        [InlineData("18991231")]   // 연도 1899 → 범위 밖
+        public void Compact_numeric_out_of_year_range_rejected(string value)
+        {
+            Assert.Null(CsvDateParser.Parse(value, allowCompactNumeric: true));
+        }
     }
 }
