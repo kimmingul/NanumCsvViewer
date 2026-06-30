@@ -50,6 +50,7 @@ $proj     = Join-Path $repo 'NanumCsvViewer\NanumCsvViewer.csproj'
 $iss      = Join-Path $repo 'installer\NanumCsvViewer.iss'
 $dist     = Join-Path $repo 'dist'
 $fileVer  = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
+$relDate  = Get-Date -Format 'yyyy-MM-dd'   # 정보 창에 박힐 릴리즈 날짜
 $arches   = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -123,7 +124,7 @@ function Build-One([string] $arch, [string] $iscc) {
     # ---- 1) publish (framework-dependent) ----
     Step "프레임워크 의존본 게시 중 ($arch, 단일 파일)..."
     dotnet publish $proj -p:PublishProfile=win-$arch-framework `
-        "-p:Version=$Version" "-p:FileVersion=$fileVer" "-p:AssemblyVersion=$fileVer"
+        "-p:Version=$Version" "-p:FileVersion=$fileVer" "-p:AssemblyVersion=$fileVer" "-p:ReleaseDate=$relDate"
     if ($LASTEXITCODE -ne 0) { throw "publish 실패 ($arch)" }
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
 

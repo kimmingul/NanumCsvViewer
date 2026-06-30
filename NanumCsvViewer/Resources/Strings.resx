@@ -138,8 +138,9 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
   <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — Quick Guide
 
 [Open]
-• File ▸ Open (Ctrl+O), or the Open button, to open a .csv / .txt file.
+• File ▸ Open (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls) and SAS (.sas7bdat).
 • The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
+• Multi-sheet Excel workbooks switch via the sheet tabs at the bottom.
 
 [Encoding]
 • Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use View ▸ Encoding. No re-indexing needed.
@@ -148,14 +149,18 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Type in the Find box and press Enter, or F3, to jump to the next match (case-insensitive, wraps around).
 
 [Filter]
-• Choose a column (or All) + text, then Apply (or Enter).
-• Select a cell and use "Filter by Cell" (Ctrl+B) or right-click ▸ "Filter by this cell value" to add that value as a condition.
-• Conditions accumulate with AND (like Excel). Clear removes all.
+• Use the funnel icon on a header for type-aware filters: range for numbers/time, checkboxes for categories/booleans, text predicates (contains/regex/list/blank) for strings/identifiers.
+• Active conditions appear as chips above the grid — remove with ✕, click to edit, toggle ALL (AND) / ANY (OR).
+• Filter by Cell (Ctrl+B) and the Advanced expression filter (AND/OR/parentheses). Clear removes all.
 
 [Sort]
 • Click a column header to sort (click again to toggle direction).
 • Shift+Click headers to sort by multiple columns (priority shown on each header).
 • Equal values keep their original order (stable sort). Clear Sort restores file order.
+
+[Analysis]
+• Facets panel (F6): see per-column distributions (histogram / top values) and click a bar to filter instantly (cross-filtering).
+• Analyze / Statistics / Pivot menus: distributions, correlation, tests, group aggregation, pivot table/chart. Export: CSV/Markdown/JSON/HTML.
 
 [Detail Panel]
 • Toggle with the Details button or F4. Shows every column of the selected row as name + value — handy for cells with line breaks.
@@ -167,7 +172,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Use the theme toggle at the right of the toolbar to switch light/dark.
 
 [Shortcuts]
-Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next
+Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Row
 Ctrl+B Filter by Cell · Ctrl+Shift+L Clear Filter · Ctrl+Shift+S Clear Sort
-F4 Detail Panel · F1 This help</value></data>
+F4 Detail Panel · F6 Facets Panel · F1 This help</value></data>
 </root>
