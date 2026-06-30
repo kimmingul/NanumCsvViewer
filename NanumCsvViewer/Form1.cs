@@ -31,7 +31,8 @@ namespace NanumCsvViewer
         // 뷰 상태 — 다중 조건 필터(모두 AND) : 텍스트 조건 1개 + 셀값 조건 N개
         private Func<string[], bool>? _textCondition;
         private string _textConditionDesc = "";
-        private readonly List<(string desc, Func<string[], bool> pred)> _valueConditions = new();
+        // expr: 식 필터의 원본 표현식(재편집용). 셀값 등 식이 아닌 조건은 null.
+        private readonly List<(string desc, Func<string[], bool> pred, string? expr)> _valueConditions = new();
         // 다중 컬럼 정렬: 순서가 우선순위(앞이 1차). 헤더 클릭=단일 교체, Shift+클릭=차수 추가.
         private readonly List<SortKey> _sortKeys = new();
 
@@ -823,7 +824,7 @@ namespace NanumCsvViewer
             int capCol = col;
             string capVal = value;
             Func<string[], bool> pred = r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal);
-            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred));
+            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred, null));
 
             // 증분: 현재 뷰만 새 조건으로 좁힘(전체 재스캔 안 함). 정렬 순서 유지.
             await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), Loc.T("Status_CellFilterApplying"));

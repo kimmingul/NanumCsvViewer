@@ -749,7 +749,8 @@ namespace NanumCsvViewer
             for (int i = 0; i < _valueConditions.Count; i++)
             {
                 int idx = i;
-                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx), null));
+                Action? edit = _valueConditions[idx].expr is not null ? () => EditValueCondition(idx) : null;
+                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx), edit));
             }
             if (_doc is not null)
                 foreach (var (col, text) in _columnFilters.DescribeEntries(_doc.Header))
@@ -885,12 +886,22 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 고급(표현식) 필터 (C)
 
-        private async void ShowAdvancedFilter()
+        private async void ShowAdvancedFilter() => await ShowAdvancedFilterCore(null, -1);
+
+        // 칩에서 기존 식 조건을 다시 편집(원본 식을 미리 채우고 교체).
+        private async void EditValueCondition(int index)
+        {
+            if (index >= 0 && index < _valueConditions.Count && _valueConditions[index].expr is not null)
+                await ShowAdvancedFilterCore(_valueConditions[index].expr, index);
+        }
+
+        private async Task ShowAdvancedFilterCore(string? initial, int replaceIndex)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
             using var dlg = new ParamDialog(LT("Advanced Filter", "고급 필터"), _palette);
             dlg.AddNote(LT("e.g.  age > 30 AND city = \"서울\"", "예:  age > 30 AND city = \"서울\""));
             var input = dlg.AddText(LT("Expression", "표현식"));
+            if (initial is not null) input.Text = initial;
             if (!dlg.ShowOk(this)) return;
             string expr = input.Text.Trim();
             if (expr.Length == 0) return;
@@ -903,11 +914,21 @@ namespace NanumCsvViewer
                 return;
             }
 
-            // 현재 뷰를 표현식으로 좁힘(증분). 셀값 조건 목록에 설명을 추가.
-            _valueConditions.Add(($"⨍ {Trunc(expr)}", compiled.Predicate));
-            await RunViewOpAsync(p => _doc.FilterWithinViewAsync(compiled.Predicate, p, _opCts!.Token),
-                LT("Applying expression…", "표현식 적용 중…"));
-            UpdateFilterStatus();
+            var entry = ($"⨍ {Trunc(expr)}", compiled.Predicate, (string?)expr);
+            if (replaceIndex >= 0 && replaceIndex < _valueConditions.Count)
+            {
+                // 편집: 기존 조건 교체 후 전체 재적용(넓어질 수도 있어 증분 불가).
+                _valueConditions[replaceIndex] = entry;
+                await RebuildFilterAsync(LT("Applying expression…", "표현식 적용 중…"));
+            }
+            else
+            {
+                // 신규: 현재 뷰를 표현식으로 좁힘(증분).
+                _valueConditions.Add(entry);
+                await RunViewOpAsync(p => _doc.FilterWithinViewAsync(compiled.Predicate, p, _opCts!.Token),
+                    LT("Applying expression…", "표현식 적용 중…"));
+                UpdateFilterStatus();
+            }
         }
 
         // ---------------------------------------------------------------- 컬럼 표시/숨김 (G)
@@ -945,7 +966,7 @@ namespace NanumCsvViewer
                 "view", _textCondition is not null ? filterTextBox.Text : null,
                 filterCol < 0 ? (int?)null : filterCol,
                 _sortKeys, _hiddenColumns, CurrentSearchQuery(),
-                grid.CurrentCell?.ColumnIndex ?? 0, _columnFilters);
+                grid.CurrentCell?.ColumnIndex ?? 0, _columnFilters, _filterMatchAny);
             SavedViewStore.Save(_currentPath, view);
             statusLabel.Text = LT("View saved", "보기를 저장했습니다");
         }
@@ -967,6 +988,7 @@ namespace NanumCsvViewer
             // 컬럼 필터(값/시간/숫자/텍스트) 전부 복원 — 시간 정밀도(Kind)·숫자·텍스트 포함.
             if (view.ColumnFilters is { } cf) _columnFilters.CopyFrom(cf);
             else _columnFilters.Clear();
+            _filterMatchAny = view.MatchAny;   // 조건 결합 방식(AND/OR) 복원
 
             // 텍스트 필터 조건 구성(아직 적용 안 함)
             _textCondition = null;

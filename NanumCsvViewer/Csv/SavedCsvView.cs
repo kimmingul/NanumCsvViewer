@@ -19,6 +19,7 @@ namespace NanumCsvViewer.Csv
         public int? SearchColumn { get; set; }
         public int CurrentColumn { get; set; }
         public ColumnFilterState? ColumnFilters { get; set; }
+        public bool MatchAny { get; set; }   // 활성 조건 결합: false=AND(모두), true=OR(하나라도)
 
         [JsonIgnore]
         public IReadOnlyList<SortKey> Sort =>
@@ -27,7 +28,8 @@ namespace NanumCsvViewer.Csv
         public static SavedCsvView Create(
             string name, string? filterText, int? filterColumn,
             IReadOnlyList<SortKey> sortKeys, IEnumerable<int> hiddenColumns,
-            CsvSearchQuery? searchQuery, int currentColumn, ColumnFilterState? columnFilters = null)
+            CsvSearchQuery? searchQuery, int currentColumn, ColumnFilterState? columnFilters = null,
+            bool matchAny = false)
             => new()
             {
                 Name = name,
@@ -39,7 +41,8 @@ namespace NanumCsvViewer.Csv
                 SearchMode = searchQuery?.Mode,
                 SearchColumn = searchQuery?.Column,
                 CurrentColumn = Math.Max(0, currentColumn),
-                ColumnFilters = columnFilters is null || columnFilters.IsEmpty ? null : columnFilters
+                ColumnFilters = columnFilters is null || columnFilters.IsEmpty ? null : columnFilters,
+                MatchAny = matchAny
             };
     }
 
