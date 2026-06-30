@@ -412,6 +412,7 @@ namespace NanumCsvViewer
             statusLabel.Text = Loc.F("Status_ReadyFmt",
                 _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength), _doc.ColumnCount,
                 _doc.Delimiter, mode, ms.ToString("N0"), trunc);
+            RebuildFilterChips();
         }
 
         private void RefreshRowCount()
@@ -881,6 +882,7 @@ namespace NanumCsvViewer
         private void UpdateFilterStatus()
         {
             if (_doc is null) return;
+            RebuildFilterChips();
             string size = FormatBytes(_doc.FileLength);
             if (!HasAnyFilter)
             {
@@ -924,6 +926,7 @@ namespace NanumCsvViewer
             RefreshRowCount();
             grid.Invalidate();
             statusLabel.Text = Loc.F("Status_FilterClearedFmt", _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength));
+            RebuildFilterChips();
         }
 
         // ---------------------------------------------------------------- Sort (Phase 3)

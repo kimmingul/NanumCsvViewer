@@ -730,6 +730,79 @@ namespace NanumCsvViewer
             grid.Invalidate();
         }
 
+        // ---------------------------------------------------------------- 활성 필터 칩 바
+
+        private FlowLayoutPanel? _chipsBar;
+
+        // 활성 필터를 (라벨, 개별 제거 액션)으로 수집. 텍스트 조건·셀값 조건·컬럼 필터 모두 포함.
+        private List<(string Label, Action Remove)> ActiveFilterChips()
+        {
+            var list = new List<(string, Action)>();
+            if (_textCondition is not null)
+                list.Add((_textConditionDesc, () => { _textCondition = null; _textConditionDesc = ""; }));
+            for (int i = 0; i < _valueConditions.Count; i++)
+            {
+                int idx = i;
+                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx)));
+            }
+            if (_doc is not null)
+                foreach (var (col, text) in _columnFilters.DescribeEntries(_doc.Header))
+                {
+                    int c = col;
+                    list.Add((text, () => _columnFilters.Remove(c)));
+                }
+            return list;
+        }
+
+        private void RebuildFilterChips()
+        {
+            var chips = ActiveFilterChips();
+            if (_chipsBar is null)
+            {
+                if (chips.Count == 0) return; // 표시할 게 없으면 생성도 미룬다
+                _chipsBar = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    WrapContents = true,
+                    Padding = new Padding(4, 3, 4, 3),
+                    Margin = new Padding(0),
+                    BackColor = _palette.Surface,
+                };
+                splitContainer1.Panel2.Controls.Add(_chipsBar);
+                _chipsBar.BringToFront();
+            }
+
+            _chipsBar.SuspendLayout();
+            var old = _chipsBar.Controls.Cast<Control>().ToArray();
+            _chipsBar.Controls.Clear();
+            foreach (var c in old) c.Dispose();
+            foreach (var (label, remove) in chips)
+                _chipsBar.Controls.Add(MakeFilterChip(label, remove));
+            _chipsBar.Visible = chips.Count > 0;
+            _chipsBar.ResumeLayout();
+        }
+
+        private Control MakeFilterChip(string label, Action remove)
+        {
+            var chip = new Panel { AutoSize = true, Margin = new Padding(2), BackColor = _palette.Accent };
+            var flow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), Padding = new Padding(0) };
+            var text = new Label { Text = label, AutoSize = true, ForeColor = Color.White, Margin = new Padding(0), Padding = new Padding(7, 3, 3, 3) };
+            var close = new Label { Text = "✕", AutoSize = true, ForeColor = Color.White, Cursor = Cursors.Hand, Margin = new Padding(0), Padding = new Padding(2, 3, 7, 3), Font = new Font(Font, FontStyle.Bold) };
+            close.Click += async (_, _) =>
+            {
+                remove();
+                await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+                grid.Invalidate();
+                // RebuildFilterAsync → UpdateFilterStatus → RebuildFilterChips() 가 바를 다시 그린다.
+            };
+            flow.Controls.Add(text);
+            flow.Controls.Add(close);
+            chip.Controls.Add(flow);
+            return chip;
+        }
+
         // ---------------------------------------------------------------- 행으로 이동 (D)
 
         private async void GoToRow()

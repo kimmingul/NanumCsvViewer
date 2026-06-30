@@ -210,13 +210,17 @@ namespace NanumCsvViewer.Csv
         }
 
         public IEnumerable<string> Descriptions(IReadOnlyList<string> headers)
+            => DescribeEntries(headers).Select(e => e.Text);
+
+        /// <summary>활성 필터를 (출처 컬럼, 설명) 쌍으로 열거. 칩 바 등 개별 제거 UI에서 사용.</summary>
+        public IEnumerable<(int Column, string Text)> DescribeEntries(IReadOnlyList<string> headers)
         {
             string Name(int c) => c >= 0 && c < headers.Count && headers[c].Length > 0 ? headers[c] : $"Column{c + 1}";
 
             foreach (var f in ValueFilters)
             {
                 int n = f.Values.Count + (f.IncludeBlanks ? 1 : 0);
-                yield return $"{Name(f.Column)} ∈ {n}";
+                yield return (f.Column, $"{Name(f.Column)} ∈ {n}");
             }
             foreach (var f in DateFilters)
             {
@@ -228,13 +232,13 @@ namespace NanumCsvViewer.Csv
                 };
                 string s = f.Start?.ToString(fmt) ?? "…";
                 string e = f.End?.ToString(fmt) ?? "…";
-                yield return $"{Name(f.Column)} {s}~{e}";
+                yield return (f.Column, $"{Name(f.Column)} {s}~{e}");
             }
             foreach (var f in NumericFilters)
             {
                 string s = f.Min?.ToString(CultureInfo.InvariantCulture) ?? "…";
                 string e = f.Max?.ToString(CultureInfo.InvariantCulture) ?? "…";
-                yield return $"{Name(f.Column)} {s}~{e}";
+                yield return (f.Column, $"{Name(f.Column)} {s}~{e}");
             }
             foreach (var f in TextFilters)
             {
@@ -249,9 +253,9 @@ namespace NanumCsvViewer.Csv
                     TextFilterOp.IsNotBlank => "≠ ∅",
                     _ => "?"
                 };
-                yield return f.Op is TextFilterOp.IsBlank or TextFilterOp.IsNotBlank
+                yield return (f.Column, f.Op is TextFilterOp.IsBlank or TextFilterOp.IsNotBlank
                     ? $"{Name(f.Column)} {op}"
-                    : $"{Name(f.Column)} {op} \"{f.Value}\"";
+                    : $"{Name(f.Column)} {op} \"{f.Value}\"");
             }
         }
     }

@@ -227,6 +227,22 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public void Describe_entries_maps_each_filter_to_its_column()
+        {
+            var s = new ColumnFilterState();
+            s.SetValues(0, new[] { "A" }, false);
+            s.SetNumericRange(1, 0, 10);
+            s.SetText(2, TextFilterOp.Contains, "x", false);
+            var entries = s.DescribeEntries(new[] { "c0", "c1", "c2" }).ToList();
+            Assert.Equal(3, entries.Count);
+            Assert.Contains(entries, e => e.Column == 0);
+            Assert.Contains(entries, e => e.Column == 1);
+            Assert.Contains(entries, e => e.Column == 2);
+            // 설명 문자열은 DescribeEntries를 그대로 투영한다.
+            Assert.Equal(entries.Select(e => e.Text), s.Descriptions(new[] { "c0", "c1", "c2" }));
+        }
+
+        [Fact]
         public void New_filters_round_trip_through_json()
         {
             var s = new ColumnFilterState();
