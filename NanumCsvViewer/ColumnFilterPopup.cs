@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Drawing;
 using System.Windows.Forms;
 using NanumCsvViewer.Csv;
@@ -5,8 +6,9 @@ using NanumCsvViewer.Csv;
 namespace NanumCsvViewer
 {
     /// <summary>
-    /// 헤더 필터 팝오버. 범주형 컬럼은 검색+체크박스 목록, 날짜 컬럼은 날짜 범위. macOS ColumnFilterPopover 대응.
-    /// 경계 없는 모달 폼으로 헤더 아래에 표시한다.
+    /// 헤더 필터 팝오버(타입별 모드): 범주/불리언=검색+체크박스, 숫자=범위(min~max),
+    /// 시간계열=정밀도별 범위(날짜/일시/시각), 문자열·식별자=텍스트 술어(포함/일치/정규식/빈값 등).
+    /// 경계 없는 모달 폼으로 헤더 아래에 표시한다. macOS ColumnFilterPopover 대응.
     /// </summary>
     internal sealed class ColumnFilterPopup : Form
     {
@@ -17,9 +19,16 @@ namespace NanumCsvViewer
         public List<string> SelectedValues { get; private set; } = new();
         public bool IncludeBlanks { get; private set; }
         public bool SelectAll { get; private set; }
-        // 결과(날짜)
+        // 결과(시간 범위)
         public DateTime? RangeStart { get; private set; }
         public DateTime? RangeEnd { get; private set; }
+        // 결과(숫자 범위)
+        public double? NumMin { get; private set; }
+        public double? NumMax { get; private set; }
+        // 결과(텍스트 술어)
+        public TextFilterOp TextOp { get; private set; }
+        public string TextValue { get; private set; } = "";
+        public bool TextCaseSensitive { get; private set; }
 
         private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
 
@@ -44,11 +53,25 @@ namespace NanumCsvViewer
             BuildCategorical();
         }
 
-        public ColumnFilterPopup(string columnName, DateTime? start, DateTime? end, ThemePalette palette)
+        public ColumnFilterPopup(string columnName, DateTime? start, DateTime? end, TemporalFilterKind kind, ThemePalette palette)
         {
             _palette = palette;
             InitChrome(columnName);
-            BuildDate(start, end);
+            BuildTemporal(start, end, kind);
+        }
+
+        public ColumnFilterPopup(string columnName, double? min, double? max, ThemePalette palette)
+        {
+            _palette = palette;
+            InitChrome(columnName);
+            BuildNumeric(min, max);
+        }
+
+        public ColumnFilterPopup(string columnName, TextFilter? current, ThemePalette palette)
+        {
+            _palette = palette;
+            InitChrome(columnName);
+            BuildText(current);
         }
 
         private void InitChrome(string columnName)
@@ -152,16 +175,31 @@ namespace NanumCsvViewer
             for (int i = 0; i < _list!.Items.Count; i++) _list.SetItemChecked(i, value);
         }
 
-        // ---- 날짜 ----
+        // ---- 시간 범위(날짜 / 일시 / 시각) ----
 
-        private void BuildDate(DateTime? start, DateTime? end)
+        private void BuildTemporal(DateTime? start, DateTime? end, TemporalFilterKind kind)
         {
+            DateTimePicker MakePicker(int y, DateTime? val)
+            {
+                var p = new DateTimePicker { Location = new Point(78, y), Width = 160, Value = val ?? DateTime.Today };
+                switch (kind)
+                {
+                    case TemporalFilterKind.DateTime:
+                        p.Format = DateTimePickerFormat.Custom; p.CustomFormat = "yyyy-MM-dd HH:mm:ss"; break;
+                    case TemporalFilterKind.Time:
+                        p.Format = DateTimePickerFormat.Time; p.ShowUpDown = true; break;
+                    default:
+                        p.Format = DateTimePickerFormat.Short; break;
+                }
+                return p;
+            }
+
             var panel = new Panel { BackColor = _palette.Surface };
             var fromUse = new CheckBox { Text = LT("From", "시작"), Location = new Point(8, 12), AutoSize = true, Checked = start is not null, ForeColor = _palette.Text };
-            var fromPicker = new DateTimePicker { Format = DateTimePickerFormat.Short, Location = new Point(78, 8), Width = 160, Value = start ?? DateTime.Today };
+            var fromPicker = MakePicker(8, start);
             var toUse = new CheckBox { Text = LT("To", "끝"), Location = new Point(8, 48), AutoSize = true, Checked = end is not null, ForeColor = _palette.Text };
-            var toPicker = new DateTimePicker { Format = DateTimePickerFormat.Short, Location = new Point(78, 44), Width = 160, Value = end ?? DateTime.Today };
-            // 날짜를 바꾸면 해당 경계 체크박스를 자동으로 켠다.
+            var toPicker = MakePicker(44, end);
+            // 값을 바꾸면 해당 경계 체크박스를 자동으로 켠다.
             fromPicker.ValueChanged += (_, _) => fromUse.Checked = true;
             toPicker.ValueChanged += (_, _) => toUse.Checked = true;
             panel.Controls.AddRange(new Control[] { fromUse, fromPicker, toUse, toPicker });
@@ -172,8 +210,83 @@ namespace NanumCsvViewer
 
             ok.Click += (_, _) =>
             {
-                RangeStart = fromUse.Checked ? fromPicker.Value.Date : null;
-                RangeEnd = toUse.Checked ? toPicker.Value.Date : null;
+                // Date는 시각을 버리고, DateTime/Time은 시각을 보존한다.
+                RangeStart = fromUse.Checked ? (kind == TemporalFilterKind.Date ? fromPicker.Value.Date : fromPicker.Value) : null;
+                RangeEnd = toUse.Checked ? (kind == TemporalFilterKind.Date ? toPicker.Value.Date : toPicker.Value) : null;
+                DialogResult = DialogResult.OK;
+            };
+        }
+
+        // ---- 숫자 범위 ----
+
+        private void BuildNumeric(double? min, double? max)
+        {
+            var panel = new Panel { BackColor = _palette.Surface };
+            panel.Controls.Add(new Label { Text = LT("Min", "최소"), Location = new Point(8, 14), AutoSize = true, ForeColor = _palette.Text });
+            var minBox = new TextBox { Location = new Point(78, 10), Width = 160, BackColor = _palette.Surface, ForeColor = _palette.Text, BorderStyle = BorderStyle.FixedSingle, Text = min?.ToString(CultureInfo.InvariantCulture) ?? "" };
+            panel.Controls.Add(new Label { Text = LT("Max", "최대"), Location = new Point(8, 50), AutoSize = true, ForeColor = _palette.Text });
+            var maxBox = new TextBox { Location = new Point(78, 46), Width = 160, BackColor = _palette.Surface, ForeColor = _palette.Text, BorderStyle = BorderStyle.FixedSingle, Text = max?.ToString(CultureInfo.InvariantCulture) ?? "" };
+            panel.Controls.Add(minBox);
+            panel.Controls.Add(maxBox);
+            AddRow(panel, SizeType.Absolute, 82);
+
+            AddRow(ButtonRow(out var ok, LT("Apply", "적용")), SizeType.AutoSize);
+            Height = 24 + 82 + 44;
+
+            ok.Click += (_, _) =>
+            {
+                NumMin = ParseNullable(minBox.Text);
+                NumMax = ParseNullable(maxBox.Text);
+                DialogResult = DialogResult.OK;
+            };
+        }
+
+        private static double? ParseNullable(string s)
+            => double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double d) ? d : null;
+
+        // ---- 텍스트 술어(문자열 / 식별자) ----
+
+        private void BuildText(TextFilter? current)
+        {
+            var ops = new (TextFilterOp Op, string Label)[]
+            {
+                (TextFilterOp.Contains, LT("contains", "포함")),
+                (TextFilterOp.Equals, LT("equals", "일치")),
+                (TextFilterOp.StartsWith, LT("starts with", "~로 시작")),
+                (TextFilterOp.EndsWith, LT("ends with", "~로 끝남")),
+                (TextFilterOp.Regex, LT("regex", "정규식")),
+                (TextFilterOp.IsBlank, LT("is blank", "빈 값")),
+                (TextFilterOp.IsNotBlank, LT("is not blank", "비어있지 않음")),
+            };
+
+            var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(8, 8), Width = 230, BackColor = _palette.Surface, ForeColor = _palette.Text };
+            foreach (var o in ops) combo.Items.Add(o.Label);
+            int sel = current is null ? 0 : Array.FindIndex(ops, o => o.Op == current.Op);
+            combo.SelectedIndex = sel < 0 ? 0 : sel;
+
+            var valueBox = new TextBox { Location = new Point(8, 40), Width = 230, BackColor = _palette.Surface, ForeColor = _palette.Text, BorderStyle = BorderStyle.FixedSingle, Text = current?.Value ?? "" };
+            var caseChk = new CheckBox { Text = LT("Case sensitive", "대소문자 구분"), Location = new Point(8, 72), AutoSize = true, ForeColor = _palette.Text, Checked = current?.CaseSensitive ?? false };
+
+            void SyncEnabled()
+            {
+                var op = ops[combo.SelectedIndex].Op;
+                valueBox.Enabled = op is not (TextFilterOp.IsBlank or TextFilterOp.IsNotBlank);
+            }
+            combo.SelectedIndexChanged += (_, _) => SyncEnabled();
+            SyncEnabled();
+
+            var panel = new Panel { BackColor = _palette.Surface };
+            panel.Controls.AddRange(new Control[] { combo, valueBox, caseChk });
+            AddRow(panel, SizeType.Absolute, 100);
+
+            AddRow(ButtonRow(out var ok, LT("Apply", "적용")), SizeType.AutoSize);
+            Height = 24 + 100 + 44;
+
+            ok.Click += (_, _) =>
+            {
+                TextOp = ops[combo.SelectedIndex].Op;
+                TextValue = valueBox.Text;
+                TextCaseSensitive = caseChk.Checked;
                 DialogResult = DialogResult.OK;
             };
         }
