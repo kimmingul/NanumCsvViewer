@@ -56,6 +56,7 @@ namespace NanumCsvViewer
             BuildEncodingMenu();
             BuildLanguageMenu();
             BuildFacetsMenuItem();
+            FormClosed += (_, _) => DisposeWorkbook(); // 임시 변환 폴더 정리
             BuildFeatureMenus();
             ApplyIcons();
             ApplyLocalization();
@@ -301,23 +302,41 @@ namespace NanumCsvViewer
                 ResetView();
                 _hiddenColumns.Clear();
                 _userResizedRowHeader = false; // 새 파일에서는 자동 폭 조정 재개
-                _doc = VirtualCsvDocument.Open(path);
-                _currentPath = path;
+                DisposeWorkbook();
 
-                BuildColumns(_doc.Header);
-                SyncEncodingUi(_doc.EncodingName);
-
-                grid.RowCount = 0;
-                Text = $"{ProgramName}  -  {Path.GetFileName(path)}";
-
-                StartIndexing();
-                UpdateFeatureState();
+                if (Import.TabularImporter.IsImportable(path))
+                {
+                    // 엑셀/SAS: 시트별 임시 CSV로 변환 후 기존 엔진으로 연다.
+                    statusLabel.Text = LT("Importing…", "불러오는 중…");
+                    var wb = await Task.Run(() => Import.WorkbookSession.Create(path));
+                    _workbook = wb;
+                    BuildSheetTabs(wb);
+                    LoadSheet(0);
+                }
+                else
+                {
+                    HideSheetTabs();
+                    LoadDocument(path, Path.GetFileName(path));
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, Loc.T("Title_OpenFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 statusLabel.Text = Loc.T("Status_OpenFailed");
             }
+        }
+
+        // 실제 문서(파일/임시 CSV) 하나를 열고 인덱싱을 시작한다. 일반 열기·시트 전환 공용.
+        private void LoadDocument(string filePath, string title)
+        {
+            _doc = VirtualCsvDocument.Open(filePath);
+            _currentPath = filePath;
+            BuildColumns(_doc.Header);
+            SyncEncodingUi(_doc.EncodingName);
+            grid.RowCount = 0;
+            Text = $"{ProgramName}  -  {title}";
+            StartIndexing();
+            UpdateFeatureState();
         }
 
         private void BuildColumns(string[] header)

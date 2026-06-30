@@ -15,10 +15,15 @@
     <Product>Nanum CSV Viewer</Product>
     <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
     <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
-    <Version>1.8.1</Version>
-    <FileVersion>1.8.1.0</FileVersion>
-    <AssemblyVersion>1.8.1.0</AssemblyVersion>
+    <Version>1.9.0</Version>
+    <FileVersion>1.9.0.0</FileVersion>
+    <AssemblyVersion>1.9.0.0</AssemblyVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ExcelDataReader" Version="3.9.0" />
+    <PackageReference Include="SasReader" Version="1.0.6" />
+  </ItemGroup>
 
   <!--
     .NET 10부터 System.Text.Encoding.CodePages가 런타임에 포함되어 별도 PackageReference가 필요 없습니다.

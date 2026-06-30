@@ -881,6 +881,102 @@ namespace NanumCsvViewer
             return chip;
         }
 
+        // ---------------------------------------------------------------- 멀티시트(엑셀/SAS) 워크북
+
+        private Import.WorkbookSession? _workbook;
+        private FlowLayoutPanel? _sheetTabs;
+
+        private void DisposeWorkbook()
+        {
+            _workbook?.Dispose();
+            _workbook = null;
+            HideSheetTabs();
+        }
+
+        // 시트 전환: 현재 문서를 닫고 해당 시트의 임시 CSV를 연다.
+        private async void SwitchSheet(int index)
+        {
+            if (_workbook is null || _busy) return;
+            if (index < 0 || index >= _workbook.SheetNames.Count) return;
+            await CancelAndDrainAsync();
+            var old = _doc; _doc = null; old?.Dispose();
+            ResetView();
+            _hiddenColumns.Clear();
+            LoadSheet(index);
+        }
+
+        private void LoadSheet(int index)
+        {
+            if (_workbook is null) return;
+            string title = $"{Path.GetFileName(_workbook.SourcePath)}  [{_workbook.SheetNames[index]}]";
+            LoadDocument(_workbook.CsvPath(index), title);
+            HighlightSheetTab(index);
+        }
+
+        private void BuildSheetTabs(Import.WorkbookSession wb)
+        {
+            EnsureSheetTabs();
+            foreach (Control c in _sheetTabs!.Controls.Cast<Control>().ToArray()) c.Dispose();
+            _sheetTabs.SuspendLayout();
+            _sheetTabs.Controls.Clear();
+            for (int i = 0; i < wb.SheetNames.Count; i++)
+            {
+                int idx = i;
+                var b = new Button
+                {
+                    Text = wb.SheetNames[i],
+                    AutoSize = true,
+                    FlatStyle = FlatStyle.Flat,
+                    Margin = new Padding(1),
+                    Padding = new Padding(8, 1, 8, 1),
+                    BackColor = _palette.Surface,
+                    ForeColor = _palette.Text,
+                    TabStop = false,
+                    Cursor = Cursors.Hand,
+                };
+                b.FlatAppearance.BorderColor = _palette.Border;
+                b.Click += (_, _) => SwitchSheet(idx);
+                _sheetTabs.Controls.Add(b);
+            }
+            _sheetTabs.Visible = wb.SheetNames.Count > 1; // 시트가 하나면 탭을 숨긴다
+            _sheetTabs.ResumeLayout();
+            PerformLayout();
+        }
+
+        private void EnsureSheetTabs()
+        {
+            if (_sheetTabs is not null) return;
+            _sheetTabs = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 26,
+                AutoScroll = true,
+                WrapContents = false,
+                BackColor = _palette.Window,
+                Padding = new Padding(2, 1, 2, 1),
+            };
+            Controls.Add(_sheetTabs);
+            // 상태바 바로 위(상태바가 더 바깥/아래)에 놓는다.
+            Controls.SetChildIndex(_sheetTabs, Controls.GetChildIndex(statusStrip1));
+        }
+
+        private void HideSheetTabs()
+        {
+            if (_sheetTabs is not null) _sheetTabs.Visible = false;
+        }
+
+        private void HighlightSheetTab(int index)
+        {
+            if (_sheetTabs is null) return;
+            for (int i = 0; i < _sheetTabs.Controls.Count; i++)
+            {
+                var b = _sheetTabs.Controls[i];
+                bool active = i == index;
+                b.BackColor = active ? _palette.Accent : _palette.Surface;
+                b.ForeColor = active ? Color.White : _palette.Text;
+            }
+        }
+
         // ---------------------------------------------------------------- 패싯 분석 패널 (방안 C)
 
         private FlowLayoutPanel? _facetsPanel;

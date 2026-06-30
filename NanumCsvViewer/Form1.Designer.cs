@@ -594,7 +594,7 @@ namespace NanumCsvViewer
             // 
             // openFileDialog1
             // 
-            openFileDialog1.Filter = "CSV / Text File (*.csv;*.txt)|*.csv;*.txt|All Files (*.*)|*.*";
+            openFileDialog1.Filter = "All Supported|*.csv;*.txt;*.xlsx;*.xlsm;*.xls;*.sas7bdat|CSV / Text (*.csv;*.txt)|*.csv;*.txt|Excel (*.xlsx;*.xls)|*.xlsx;*.xlsm;*.xls|SAS (*.sas7bdat)|*.sas7bdat|All Files (*.*)|*.*";
             openFileDialog1.RestoreDirectory = true;
             // 
             // Form1
