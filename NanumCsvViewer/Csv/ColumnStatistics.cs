@@ -8,8 +8,11 @@ namespace NanumCsvViewer.Csv
         Integer,
         Float,
         Date,
+        DateTime,
+        Time,
         Boolean,
         Categorical,
+        Identifier,
         String,
         Empty
     }
@@ -22,12 +25,19 @@ namespace NanumCsvViewer.Csv
             ColumnValueType.Integer => "Integer",
             ColumnValueType.Float => "Float",
             ColumnValueType.Date => "Date",
+            ColumnValueType.DateTime => "DateTime",
+            ColumnValueType.Time => "Time",
             ColumnValueType.Boolean => "Boolean",
             ColumnValueType.Categorical => "Categorical",
+            ColumnValueType.Identifier => "Identifier",
             ColumnValueType.String => "String",
             ColumnValueType.Empty => "Empty",
             _ => "String"
         };
+
+        /// <summary>날짜 성분이 있는 타입(Date 또는 DateTime). 날짜 필터·날짜 그룹핑 대상 판정용.</summary>
+        public static bool HasDateComponent(this ColumnValueType type)
+            => type is ColumnValueType.Date or ColumnValueType.DateTime;
     }
 
     public readonly record struct NumericColumnSummary(
@@ -66,6 +76,34 @@ namespace NanumCsvViewer.Csv
             "true", "false", "yes", "no", "y", "n", "0", "1"
         };
 
+        private static readonly HashSet<string> IdHeaderTokens = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "id", "no", "code", "key", "num", "number", "uuid", "guid", "seq"
+        };
+
+        private static readonly string[] IdHeaderSubstrings = { "번호", "코드", "식별", "일련" };
+
+        // 헤더명이 식별자 컬럼을 암시하는지(영문 토큰 또는 한국어 부분문자열).
+        private static bool HeaderSuggestsIdentifier(string name)
+        {
+            foreach (var sub in IdHeaderSubstrings)
+                if (name.Contains(sub)) return true;
+            foreach (var token in TokenizeAlphanumeric(name.ToLowerInvariant()))
+                if (IdHeaderTokens.Contains(token)) return true;
+            return false;
+        }
+
+        private static IEnumerable<string> TokenizeAlphanumeric(string s)
+        {
+            int start = -1;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (char.IsLetterOrDigit(s[i])) { if (start < 0) start = i; }
+                else if (start >= 0) { yield return s[start..i]; start = -1; }
+            }
+            if (start >= 0) yield return s[start..];
+        }
+
         public static ColumnStatisticsReport Summarize(IReadOnlyList<string> headers, IReadOnlyList<string[]> rows)
         {
             int columnCount = headers.Count;
@@ -84,9 +122,15 @@ namespace NanumCsvViewer.Csv
             var numericValues = new List<double>();
             bool integerCompatible = true;
             bool floatCompatible = true;
-            bool dateCompatible = true;
             bool booleanCompatible = true;
-            bool allowCompactNumericDates = CsvDateParser.HeaderSuggestsDate(name);
+            bool temporalCompatible = true;
+            bool temporalHasDate = false;
+            bool temporalHasTime = false;
+            // 헤더가 날짜를 암시하지 않아도 컴팩트 숫자 날짜(yyyyMMdd 등)를 날짜로 인정한다.
+            const bool allowCompactNumericDates = true;
+            // 식별자(수량이 아닌 코드) 감지: 선행 0이 있는 숫자 또는 헤더 키워드(id·번호·코드…).
+            bool hasLeadingZero = false;
+            bool headerSuggestsId = HeaderSuggestsIdentifier(name);
 
             foreach (var row in rows)
             {
@@ -112,10 +156,21 @@ namespace NanumCsvViewer.Csv
                     floatCompatible = false;
                 }
 
-                if (dateCompatible && CsvDateParser.Parse(value, allowCompactNumericDates) is null)
-                    dateCompatible = false;
+                if (temporalCompatible)
+                {
+                    var temporal = CsvDateParser.ParseDetailed(value, allowCompactNumericDates);
+                    if (temporal is null)
+                        temporalCompatible = false;
+                    else
+                    {
+                        if (temporal.Value.Kind != TemporalKind.Time) temporalHasDate = true;
+                        if (temporal.Value.Kind != TemporalKind.Date) temporalHasTime = true;
+                    }
+                }
                 if (booleanCompatible && !BooleanTokens.Contains(value))
                     booleanCompatible = false;
+                if (!hasLeadingZero && value.Length > 1 && value[0] == '0' && value.All(char.IsAsciiDigit))
+                    hasLeadingZero = true;
             }
 
             int nonNullCount = values.Count;
@@ -124,8 +179,15 @@ namespace NanumCsvViewer.Csv
                 inferredType = ColumnValueType.Empty;
             else if (booleanCompatible)
                 inferredType = ColumnValueType.Boolean;
-            else if (dateCompatible && ((!integerCompatible && !floatCompatible) || allowCompactNumericDates))
-                inferredType = ColumnValueType.Date;
+            else if (temporalCompatible)
+                inferredType = (temporalHasDate, temporalHasTime) switch
+                {
+                    (true, true) => ColumnValueType.DateTime,
+                    (false, true) => ColumnValueType.Time,
+                    _ => ColumnValueType.Date,
+                };
+            else if (integerCompatible && (hasLeadingZero || headerSuggestsId))
+                inferredType = ColumnValueType.Identifier;
             else if (integerCompatible)
                 inferredType = ColumnValueType.Integer;
             else if (floatCompatible)
@@ -150,7 +212,9 @@ namespace NanumCsvViewer.Csv
                 NullCount = nullCount,
                 NonNullCount = nonNullCount,
                 UniqueCount = frequencies.Count,
-                Numeric = numericValues.Count == 0 ? null : SummarizeNumbers(numericValues),
+                // 식별자는 수량이 아니므로 평균/표준편차 등 수치 통계를 붙이지 않는다.
+                Numeric = (inferredType == ColumnValueType.Identifier || numericValues.Count == 0)
+                    ? null : SummarizeNumbers(numericValues),
                 TopValues = topValues
             };
         }
