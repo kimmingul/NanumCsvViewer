@@ -243,6 +243,52 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public void Copy_from_restores_all_filter_kinds()
+        {
+            var src = new ColumnFilterState();
+            src.SetValues(0, new[] { "A" }, true);
+            src.SetDateRange(1, new DateTime(2024, 1, 1, 9, 0, 0), new DateTime(2024, 1, 1, 17, 0, 0), TemporalFilterKind.DateTime);
+            src.SetNumericRange(2, 0, 100);
+            src.SetText(3, TextFilterOp.Contains, "x", true);
+
+            var dst = new ColumnFilterState();
+            dst.SetValues(9, new[] { "old" }, false); // 기존 내용은 대체되어야 함
+            dst.CopyFrom(src);
+
+            Assert.Single(dst.ValueFilters);
+            Assert.Single(dst.DateFilters);
+            Assert.Equal(TemporalFilterKind.DateTime, dst.DateFilters[0].Kind); // 정밀도 보존
+            Assert.Single(dst.NumericFilters);
+            Assert.Single(dst.TextFilters);
+            Assert.False(dst.HasFilterFor(9));
+        }
+
+        [Fact]
+        public void Text_in_list_matches_any_token()
+        {
+            var s = new ColumnFilterState();
+            s.SetText(0, TextFilterOp.InList, "A\nB\nC", caseSensitive: false);
+            var p = s.Predicate();
+            Assert.True(p(new[] { "a" }));   // 대소문자 무시
+            Assert.True(p(new[] { "B" }));
+            Assert.False(p(new[] { "D" }));
+        }
+
+        [Fact]
+        public void Individual_predicates_enable_or_semantics()
+        {
+            var s = new ColumnFilterState();
+            s.SetNumericRange(0, 0, 10);
+            s.SetText(1, TextFilterOp.Equals, "yes", false);
+            var preds = s.IndividualPredicates();
+            Assert.Equal(2, preds.Count);
+            bool Any(string[] row) => preds.Any(pr => pr(row));
+            Assert.True(Any(new[] { "5", "no" }));     // 첫 조건 충족
+            Assert.True(Any(new[] { "99", "yes" }));   // 둘째 조건 충족
+            Assert.False(Any(new[] { "99", "no" }));   // 둘 다 불충족
+        }
+
+        [Fact]
         public void New_filters_round_trip_through_json()
         {
             var s = new ColumnFilterState();

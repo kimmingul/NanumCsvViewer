@@ -255,6 +255,7 @@ namespace NanumCsvViewer
                 (TextFilterOp.StartsWith, LT("starts with", "~로 시작")),
                 (TextFilterOp.EndsWith, LT("ends with", "~로 끝남")),
                 (TextFilterOp.Regex, LT("regex", "정규식")),
+                (TextFilterOp.InList, LT("in list (one per line)", "목록(줄당 하나)")),
                 (TextFilterOp.IsBlank, LT("is blank", "빈 값")),
                 (TextFilterOp.IsNotBlank, LT("is not blank", "비어있지 않음")),
             };
@@ -264,8 +265,15 @@ namespace NanumCsvViewer
             int sel = current is null ? 0 : Array.FindIndex(ops, o => o.Op == current.Op);
             combo.SelectedIndex = sel < 0 ? 0 : sel;
 
-            var valueBox = new TextBox { Location = new Point(8, 40), Width = 230, BackColor = _palette.Surface, ForeColor = _palette.Text, BorderStyle = BorderStyle.FixedSingle, Text = current?.Value ?? "" };
-            var caseChk = new CheckBox { Text = LT("Case sensitive", "대소문자 구분"), Location = new Point(8, 72), AutoSize = true, ForeColor = _palette.Text, Checked = current?.CaseSensitive ?? false };
+            // 여러 줄 입력: InList는 줄당 하나, 그 외 연산은 첫 줄만 의미.
+            var valueBox = new TextBox
+            {
+                Location = new Point(8, 38), Width = 230, Height = 56,
+                Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical,
+                BackColor = _palette.Surface, ForeColor = _palette.Text, BorderStyle = BorderStyle.FixedSingle,
+                Text = current?.Value ?? ""
+            };
+            var caseChk = new CheckBox { Text = LT("Case sensitive", "대소문자 구분"), Location = new Point(8, 100), AutoSize = true, ForeColor = _palette.Text, Checked = current?.CaseSensitive ?? false };
 
             void SyncEnabled()
             {
@@ -277,10 +285,10 @@ namespace NanumCsvViewer
 
             var panel = new Panel { BackColor = _palette.Surface };
             panel.Controls.AddRange(new Control[] { combo, valueBox, caseChk });
-            AddRow(panel, SizeType.Absolute, 100);
+            AddRow(panel, SizeType.Absolute, 126);
 
             AddRow(ButtonRow(out var ok, LT("Apply", "적용")), SizeType.AutoSize);
-            Height = 24 + 100 + 44;
+            Height = 24 + 126 + 44;
 
             ok.Click += (_, _) =>
             {

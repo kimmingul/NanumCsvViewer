@@ -854,15 +854,22 @@ namespace NanumCsvViewer
 
         private Func<string[], bool> BuildCombinedPredicate()
         {
-            var text = _textCondition;
-            var preds = _valueConditions.Select(v => v.pred).ToArray();
-            var colPred = _columnFilters.IsEmpty ? null : _columnFilters.Predicate();
+            // 모든 활성 조건을 개별 술어로 평탄화 → AND(모두) 또는 OR(하나라도)로 결합.
+            var preds = new List<Func<string[], bool>>();
+            if (_textCondition is not null) preds.Add(_textCondition);
+            preds.AddRange(_valueConditions.Select(v => v.pred));
+            preds.AddRange(_columnFilters.IndividualPredicates());
+            var arr = preds.ToArray();
+            bool any = _filterMatchAny;
             return row =>
             {
-                if (text is not null && !text(row)) return false;
-                for (int i = 0; i < preds.Length; i++)
-                    if (!preds[i](row)) return false;
-                if (colPred is not null && !colPred(row)) return false;
+                if (arr.Length == 0) return true;
+                if (any)
+                {
+                    foreach (var p in arr) if (p(row)) return true;
+                    return false;
+                }
+                foreach (var p in arr) if (!p(row)) return false;
                 return true;
             };
         }

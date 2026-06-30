@@ -28,6 +28,8 @@ namespace NanumCsvViewer
 
         // 구조화 컬럼 필터(헤더 깔때기 → 범주/날짜 필터)
         private readonly ColumnFilterState _columnFilters = new();
+        // 활성 조건 결합 방식: false = 모두 만족(AND), true = 하나라도 만족(OR).
+        private bool _filterMatchAny;
 
         // 언어 전환 시 다시 라벨링하기 위한 메뉴 참조
         private ToolStripMenuItem? _exportMenu, _clipboardOpenMenu, _gotoRowMenu, _advFilterMenu,
@@ -630,6 +632,10 @@ namespace NanumCsvViewer
         private bool IsFilterableColumn(int c)
             => c < _columnSummaries.Length && _columnSummaries[c].InferredType != ColumnValueType.Empty;
 
+        // 고유값이 임계 이하면 범위보다 체크박스 선택이 유용(상태 코드 등). 표본 기준이라 근사치.
+        private bool IsLowCardinality(int c)
+            => c < _columnSummaries.Length && _columnSummaries[c].UniqueCount is > 0 and <= 12;
+
         // 헤더 우측의 깔때기 아이콘. 활성 필터면 악센트로 채움.
         private void DrawFunnel(Graphics g, Rectangle r, bool active)
         {
@@ -666,8 +672,8 @@ namespace NanumCsvViewer
 
             var type = col < _columnSummaries.Length ? _columnSummaries[col].InferredType : ColumnValueType.String;
 
-            // 숫자 범위(Integer / Float)
-            if (type is ColumnValueType.Integer or ColumnValueType.Float)
+            // 숫자 범위(Integer / Float) — 고유값이 적으면 체크박스가 더 유용하므로 폴백.
+            if (type is ColumnValueType.Integer or ColumnValueType.Float && !IsLowCardinality(col))
             {
                 var existing = _columnFilters.NumericFilters.FirstOrDefault(f => f.Column == col);
                 using var popup = new ColumnFilterPopup(name, existing?.Min, existing?.Max, _palette);
@@ -734,22 +740,22 @@ namespace NanumCsvViewer
 
         private FlowLayoutPanel? _chipsBar;
 
-        // 활성 필터를 (라벨, 개별 제거 액션)으로 수집. 텍스트 조건·셀값 조건·컬럼 필터 모두 포함.
-        private List<(string Label, Action Remove)> ActiveFilterChips()
+        // 활성 필터를 (라벨, 제거, 편집?)으로 수집. 컬럼 필터는 클릭 시 해당 팝업을 다시 연다.
+        private List<(string Label, Action Remove, Action? Edit)> ActiveFilterChips()
         {
-            var list = new List<(string, Action)>();
+            var list = new List<(string, Action, Action?)>();
             if (_textCondition is not null)
-                list.Add((_textConditionDesc, () => { _textCondition = null; _textConditionDesc = ""; }));
+                list.Add((_textConditionDesc, () => { _textCondition = null; _textConditionDesc = ""; }, null));
             for (int i = 0; i < _valueConditions.Count; i++)
             {
                 int idx = i;
-                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx)));
+                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx), null));
             }
             if (_doc is not null)
                 foreach (var (col, text) in _columnFilters.DescribeEntries(_doc.Header))
                 {
                     int c = col;
-                    list.Add((text, () => _columnFilters.Remove(c)));
+                    list.Add((text, () => _columnFilters.Remove(c), () => OpenColumnFilter(c)));
                 }
             return list;
         }
@@ -778,17 +784,46 @@ namespace NanumCsvViewer
             var old = _chipsBar.Controls.Cast<Control>().ToArray();
             _chipsBar.Controls.Clear();
             foreach (var c in old) c.Dispose();
-            foreach (var (label, remove) in chips)
-                _chipsBar.Controls.Add(MakeFilterChip(label, remove));
+            // 조건이 둘 이상일 때만 결합 방식(AND/OR) 토글을 보여준다.
+            if (chips.Count >= 2) _chipsBar.Controls.Add(MakeModeToggle());
+            foreach (var (label, remove, edit) in chips)
+                _chipsBar.Controls.Add(MakeFilterChip(label, remove, edit));
             _chipsBar.Visible = chips.Count > 0;
             _chipsBar.ResumeLayout();
         }
 
-        private Control MakeFilterChip(string label, Action remove)
+        private Control MakeModeToggle()
+        {
+            string label = _filterMatchAny ? LT("ANY (OR)", "하나라도(OR)") : LT("ALL (AND)", "모두(AND)");
+            var b = new Button
+            {
+                Text = label,
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = _palette.Surface,
+                ForeColor = _palette.Accent,
+                Margin = new Padding(2),
+                Padding = new Padding(6, 2, 6, 2),
+                Cursor = Cursors.Hand,
+                TabStop = false,
+                Font = new Font(Font, FontStyle.Bold),
+            };
+            b.FlatAppearance.BorderColor = _palette.Accent;
+            b.Click += async (_, _) =>
+            {
+                _filterMatchAny = !_filterMatchAny;
+                await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+                grid.Invalidate();
+            };
+            return b;
+        }
+
+        private Control MakeFilterChip(string label, Action remove, Action? edit)
         {
             var chip = new Panel { AutoSize = true, Margin = new Padding(2), BackColor = _palette.Accent };
             var flow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), Padding = new Padding(0) };
             var text = new Label { Text = label, AutoSize = true, ForeColor = Color.White, Margin = new Padding(0), Padding = new Padding(7, 3, 3, 3) };
+            if (edit is not null) { text.Cursor = Cursors.Hand; text.Click += (_, _) => edit(); } // 클릭 시 해당 필터 팝업 재오픈
             var close = new Label { Text = "✕", AutoSize = true, ForeColor = Color.White, Cursor = Cursors.Hand, Margin = new Padding(0), Padding = new Padding(2, 3, 7, 3), Font = new Font(Font, FontStyle.Bold) };
             close.Click += async (_, _) =>
             {
@@ -929,13 +964,9 @@ namespace NanumCsvViewer
             // 검색어 복원
             if (view.SearchText is not null) findTextBox.Text = view.SearchText;
 
-            // 컬럼 필터(범주/날짜) 복원
-            _columnFilters.Clear();
-            if (view.ColumnFilters is { } cf)
-            {
-                foreach (var f in cf.ValueFilters) _columnFilters.SetValues(f.Column, f.Values, f.IncludeBlanks);
-                foreach (var f in cf.DateFilters) _columnFilters.SetDateRange(f.Column, f.Start, f.End);
-            }
+            // 컬럼 필터(값/시간/숫자/텍스트) 전부 복원 — 시간 정밀도(Kind)·숫자·텍스트 포함.
+            if (view.ColumnFilters is { } cf) _columnFilters.CopyFrom(cf);
+            else _columnFilters.Clear();
 
             // 텍스트 필터 조건 구성(아직 적용 안 함)
             _textCondition = null;

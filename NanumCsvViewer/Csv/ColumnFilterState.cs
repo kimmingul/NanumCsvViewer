@@ -15,7 +15,7 @@ namespace NanumCsvViewer.Csv
     public enum TemporalFilterKind { Date, DateTime, Time }
 
     /// <summary>텍스트 필터 연산.</summary>
-    public enum TextFilterOp { Contains, Equals, StartsWith, EndsWith, Regex, IsBlank, IsNotBlank }
+    public enum TextFilterOp { Contains, Equals, StartsWith, EndsWith, Regex, IsBlank, IsNotBlank, InList }
 
     /// <summary>특정 컬럼의 시간 범위 필터(양끝 포함, 빈 경계는 무한). Kind에 따라 날짜/일시/시각 정밀도로 비교.</summary>
     public sealed class DateRangeFilter
@@ -108,6 +108,20 @@ namespace NanumCsvViewer.Csv
             TextFilters.Clear();
         }
 
+        /// <summary>다른 상태의 모든 필터(값/시간/숫자/텍스트)를 깊은 복사로 대체. 저장된 뷰 복원에 사용.</summary>
+        public void CopyFrom(ColumnFilterState other)
+        {
+            Clear();
+            ValueFilters.AddRange(other.ValueFilters.Select(f =>
+                new SelectedValuesFilter { Column = f.Column, Values = new List<string>(f.Values), IncludeBlanks = f.IncludeBlanks }));
+            DateFilters.AddRange(other.DateFilters.Select(f =>
+                new DateRangeFilter { Column = f.Column, Start = f.Start, End = f.End, Kind = f.Kind }));
+            NumericFilters.AddRange(other.NumericFilters.Select(f =>
+                new NumericRangeFilter { Column = f.Column, Min = f.Min, Max = f.Max }));
+            TextFilters.AddRange(other.TextFilters.Select(f =>
+                new TextFilter { Column = f.Column, Op = f.Op, Value = f.Value, CaseSensitive = f.CaseSensitive }));
+        }
+
         public bool HasFilterFor(int column)
             => ValueFilters.Any(f => f.Column == column) || DateFilters.Any(f => f.Column == column)
             || NumericFilters.Any(f => f.Column == column) || TextFilters.Any(f => f.Column == column);
@@ -115,47 +129,60 @@ namespace NanumCsvViewer.Csv
         /// <summary>모든 컬럼 필터를 AND로 결합한 행 술어.</summary>
         public Func<string[], bool> Predicate()
         {
-            // 스냅샷(스레드 안전): 셋·정규식을 미리 만든다.
-            var valueFilters = ValueFilters
-                .Select(f => (f.Column, Set: new HashSet<string>(f.Values, StringComparer.Ordinal), f.IncludeBlanks))
-                .ToArray();
-            var dateFilters = DateFilters
-                .Select(f => (f.Column, f.Start, f.End, f.Kind))
-                .ToArray();
-            var numericFilters = NumericFilters
-                .Select(f => (f.Column, f.Min, f.Max))
-                .ToArray();
-            var textFilters = TextFilters
-                .Select(f => (f.Column, f.Op, f.Value, f.CaseSensitive, Regex: CompileRegex(f)))
-                .ToArray();
-
+            var preds = IndividualPredicates();
             return row =>
             {
-                foreach (var (col, set, includeBlanks) in valueFilters)
+                for (int i = 0; i < preds.Count; i++)
+                    if (!preds[i](row)) return false;
+                return true;
+            };
+        }
+
+        /// <summary>필터 하나당 술어를 하나씩 컴파일한 목록. AND는 Predicate(), OR(any)는 호출부에서 결합.</summary>
+        public IReadOnlyList<Func<string[], bool>> IndividualPredicates()
+            => CompileFilters().ToArray();
+
+        private IEnumerable<Func<string[], bool>> CompileFilters()
+        {
+            // 각 술어는 자신의 스냅샷을 클로저로 캡처(스레드 안전).
+            foreach (var f in ValueFilters)
+            {
+                int col = f.Column;
+                var set = new HashSet<string>(f.Values, StringComparer.Ordinal);
+                bool includeBlanks = f.IncludeBlanks;
+                yield return row =>
                 {
                     string v = Cell(row, col);
-                    if (v.Length == 0) { if (!includeBlanks) return false; }
-                    else if (!set.Contains(v)) return false;
-                }
-                foreach (var (col, start, end, kind) in dateFilters)
+                    return v.Length == 0 ? includeBlanks : set.Contains(v);
+                };
+            }
+            foreach (var f in DateFilters)
+            {
+                int col = f.Column; var start = f.Start; var end = f.End; var kind = f.Kind;
+                yield return row =>
                 {
                     var parsed = CsvDateParser.ParseDetailed(Cell(row, col), allowCompactNumeric: true);
-                    if (parsed is null) return false;
-                    if (!InTemporalRange(parsed.Value.Value, start, end, kind)) return false;
-                }
-                foreach (var (col, min, max) in numericFilters)
+                    return parsed is not null && InTemporalRange(parsed.Value.Value, start, end, kind);
+                };
+            }
+            foreach (var f in NumericFilters)
+            {
+                int col = f.Column; var min = f.Min; var max = f.Max;
+                yield return row =>
                 {
                     if (!double.TryParse(Cell(row, col), NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
                         return false;
                     if (min is double mn && d < mn) return false;
                     if (max is double mx && d > mx) return false;
-                }
-                foreach (var (col, op, value, caseSensitive, regex) in textFilters)
-                {
-                    if (!TextMatches(Cell(row, col), op, value, caseSensitive, regex)) return false;
-                }
-                return true;
-            };
+                    return true;
+                };
+            }
+            foreach (var f in TextFilters)
+            {
+                int col = f.Column; var op = f.Op; var value = f.Value; bool cs = f.CaseSensitive;
+                var regex = CompileRegex(f); var list = BuildList(f);
+                yield return row => TextMatches(Cell(row, col), op, value, cs, regex, list);
+            }
         }
 
         private static string Cell(string[] row, int col)
@@ -193,7 +220,17 @@ namespace NanumCsvViewer.Csv
             catch (ArgumentException) { return null; } // 잘못된 정규식 → 매칭 없음
         }
 
-        private static bool TextMatches(string v, TextFilterOp op, string value, bool caseSensitive, Regex? regex)
+        // InList: 값을 줄바꿈/쉼표로 분리한 집합. 그 외 연산은 null.
+        private static HashSet<string>? BuildList(TextFilter f)
+        {
+            if (f.Op != TextFilterOp.InList) return null;
+            var set = new HashSet<string>(f.CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+            foreach (var tok in f.Value.Split(new[] { '\n', '\r', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                set.Add(tok);
+            return set;
+        }
+
+        private static bool TextMatches(string v, TextFilterOp op, string value, bool caseSensitive, Regex? regex, HashSet<string>? list)
         {
             var cmp = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
             return op switch
@@ -205,6 +242,7 @@ namespace NanumCsvViewer.Csv
                 TextFilterOp.StartsWith => v.StartsWith(value, cmp),
                 TextFilterOp.EndsWith => v.EndsWith(value, cmp),
                 TextFilterOp.Regex => regex is not null && regex.IsMatch(v),
+                TextFilterOp.InList => list is not null && list.Contains(v),
                 _ => true
             };
         }
@@ -251,11 +289,18 @@ namespace NanumCsvViewer.Csv
                     TextFilterOp.Regex => "/./",
                     TextFilterOp.IsBlank => "= ∅",
                     TextFilterOp.IsNotBlank => "≠ ∅",
+                    TextFilterOp.InList => "∈",
                     _ => "?"
                 };
-                yield return (f.Column, f.Op is TextFilterOp.IsBlank or TextFilterOp.IsNotBlank
-                    ? $"{Name(f.Column)} {op}"
-                    : $"{Name(f.Column)} {op} \"{f.Value}\"");
+                if (f.Op is TextFilterOp.IsBlank or TextFilterOp.IsNotBlank)
+                    yield return (f.Column, $"{Name(f.Column)} {op}");
+                else if (f.Op is TextFilterOp.InList)
+                {
+                    int n = f.Value.Split(new[] { '\n', '\r', ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                    yield return (f.Column, $"{Name(f.Column)} {op} {n}");
+                }
+                else
+                    yield return (f.Column, $"{Name(f.Column)} {op} \"{f.Value}\"");
             }
         }
     }
