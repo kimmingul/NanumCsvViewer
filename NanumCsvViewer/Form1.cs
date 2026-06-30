@@ -55,6 +55,7 @@ namespace NanumCsvViewer
 
             BuildEncodingMenu();
             BuildLanguageMenu();
+            BuildFacetsMenuItem();
             BuildFeatureMenus();
             ApplyIcons();
             ApplyLocalization();
@@ -891,6 +892,7 @@ namespace NanumCsvViewer
         {
             if (_doc is null) return;
             RebuildFilterChips();
+            if (_facetsVisible) BuildFacets();   // 필터 변경 시 패싯 재계산(크로스필터링)
             string size = FormatBytes(_doc.FileLength);
             if (!HasAnyFilter)
             {

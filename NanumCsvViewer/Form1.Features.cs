@@ -839,6 +839,130 @@ namespace NanumCsvViewer
             return chip;
         }
 
+        // ---------------------------------------------------------------- 패싯 분석 패널 (방안 C)
+
+        private FlowLayoutPanel? _facetsPanel;
+        private bool _facetsVisible;
+        private const int FacetSampleCap = 50_000;
+
+        private void BuildFacetsMenuItem()
+        {
+            var item = new ToolStripMenuItem(LT("Facets Panel", "패싯 패널"))
+            {
+                ShortcutKeys = Keys.F6,
+                ShowShortcutKeys = true,
+            };
+            item.Click += (_, _) => ToggleFacets();
+            viewToolStripMenuItem.DropDownItems.Add(item);
+        }
+
+        private void ToggleFacets()
+        {
+            EnsureFacetsPanel();
+            _facetsVisible = !_facetsVisible;
+            _facetsPanel!.Visible = _facetsVisible;
+            if (_facetsVisible) BuildFacets();
+        }
+
+        private void EnsureFacetsPanel()
+        {
+            if (_facetsPanel is not null) return;
+            _facetsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                Width = 232,
+                AutoScroll = true,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                BackColor = _palette.Surface,
+                Padding = new Padding(2, 2, 2, 2),
+                Visible = false,
+            };
+            splitContainer1.Panel2.Controls.Add(_facetsPanel);
+            _facetsPanel.BringToFront();
+        }
+
+        // 현재(필터된) 뷰의 표본으로 컬럼별 분포를 다시 계산 → 크로스필터링.
+        private void BuildFacets()
+        {
+            if (_facetsPanel is null || !_facetsVisible || _doc is null) return;
+
+            int total = Math.Min(_doc.DisplayRowCount, FacetSampleCap);
+            var rows = new List<string[]>(total);
+            for (int i = 0; i < total; i++)
+            {
+                try { rows.Add(_doc.GetDisplayRow(i)); } catch { }
+            }
+
+            _facetsPanel.SuspendLayout();
+            var old = _facetsPanel.Controls.Cast<Control>().ToArray();
+            _facetsPanel.Controls.Clear();
+            foreach (var c in old) c.Dispose();
+
+            for (int col = 0; col < _doc.ColumnCount; col++)
+            {
+                if (_hiddenColumns.Contains(col) || col >= _columnSummaries.Length) continue;
+                var facetRows = BuildFacetRows(col, _columnSummaries[col].InferredType, rows);
+                if (facetRows.Count == 0) continue;
+                string name = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
+                _facetsPanel.Controls.Add(new FacetView(name, _palette, facetRows));
+            }
+            _facetsPanel.ResumeLayout();
+        }
+
+        private List<(string, int, Action)> BuildFacetRows(int col, ColumnValueType type, List<string[]> rows)
+        {
+            var list = new List<(string, int, Action)>();
+            if (type is ColumnValueType.Integer or ColumnValueType.Float)
+            {
+                var vals = new List<double>();
+                foreach (var r in rows)
+                    if (col < r.Length && double.TryParse(r[col].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
+                        vals.Add(d);
+                if (vals.Count == 0) return list;
+                var dist = CsvAnalytics.NumericDistributionOf(vals, col, 6);
+                foreach (var b in dist.Bins)
+                {
+                    double lo = b.LowerBound, hi = b.UpperBound;
+                    list.Add(($"{ShortNum(lo)}–{ShortNum(hi)}", b.Count, () =>
+                    {
+                        _columnFilters.SetNumericRange(col, lo, hi);
+                        _ = ApplyFacetFilterAsync();
+                    }));
+                }
+            }
+            else
+            {
+                var freq = new Dictionary<string, int>();
+                foreach (var r in rows)
+                {
+                    string v = col < r.Length ? r[col] : string.Empty;
+                    freq[v] = freq.TryGetValue(v, out int f) ? f + 1 : 1;
+                }
+                foreach (var kv in freq.OrderByDescending(k => k.Value).ThenBy(k => k.Key, StringComparer.OrdinalIgnoreCase).Take(6))
+                {
+                    string val = kv.Key;
+                    string label = val.Length == 0 ? LT("(blank)", "(빈 값)") : val;
+                    list.Add((label, kv.Value, () =>
+                    {
+                        if (val.Length == 0) _columnFilters.SetValues(col, Array.Empty<string>(), includeBlanks: true);
+                        else _columnFilters.SetValues(col, new[] { val }, includeBlanks: false);
+                        _ = ApplyFacetFilterAsync();
+                    }));
+                }
+            }
+            return list;
+        }
+
+        private async Task ApplyFacetFilterAsync()
+        {
+            await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+            grid.Invalidate();
+            // RebuildFilterAsync → UpdateFilterStatus → (보이면) BuildFacets 로 크로스필터 갱신.
+        }
+
+        private static string ShortNum(double v) => Math.Abs(v) >= 1000 ? v.ToString("N0") : v.ToString("0.##");
+
         // ---------------------------------------------------------------- 행으로 이동 (D)
 
         private async void GoToRow()
