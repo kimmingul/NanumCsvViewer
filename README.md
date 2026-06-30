@@ -25,6 +25,12 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### 🐞 v1.8.1 — 필터 칩 바 수정
+
+- 활성 필터 칩 바를 **툴바 아래 별도 띠**로 도킹해, 칩이 그리드 컬럼 헤더를 덮던 문제를 해결.
+- 칩 높이가 비정상적으로 커지던 레이아웃 버그 수정(고정 크기 렌더링).
+- 칩 바 배경을 앱 기본 테마색으로 맞추고, **모두(AND)/하나라도(OR)** 토글 높이를 칩과 일치.
+
 ### ✨ v1.8.0 신규 — 타입 인식 필터링·패싯 분석
 
 - **컬럼 타입 확장** — 기존 `INT/FLT/DATE/BOOL/CAT/STR`에 더해 **`DateTime`·`Time`·`Identifier`**를 자동 추론합니다. `2024-01-01 14:30`은 DateTime, `14:30:00`은 Time으로 구분하고, `yyyyMMdd` 컴팩트 날짜는 헤더와 무관하게 날짜로 인식합니다(연도 1900~2100 가드). **식별자**(선행 0 숫자·`id`/`번호`/`코드` 헤더)는 수량이 아니므로 평균 등 무의미한 수치 통계를 자동 억제합니다.
@@ -95,10 +101,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.8.0
+.\scripts\release.ps1 -Version 1.8.1
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.8.0 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.8.1 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).

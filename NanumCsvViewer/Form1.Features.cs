@@ -767,18 +767,22 @@ namespace NanumCsvViewer
             if (_chipsBar is null)
             {
                 if (chips.Count == 0) return; // 표시할 게 없으면 생성도 미룬다
+                // 그리드 패널 안에서 Fill 위에 Top을 얹으면 런타임 재배치가 불안정해 헤더를 덮는다.
+                // 그래서 폼 최상위에서 outerSplit 바로 위에 도킹한다(툴바·메뉴와 동일한 검증된 방식).
                 _chipsBar = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Top,
-                    AutoSize = true,
-                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                    WrapContents = true,
-                    Padding = new Padding(4, 3, 4, 3),
+                    Height = 34,
+                    AutoSize = false,
+                    WrapContents = false,
+                    AutoScroll = true,
+                    Padding = new Padding(4, 4, 4, 4),
                     Margin = new Padding(0),
-                    BackColor = _palette.Surface,
+                    BackColor = _palette.Window, // 앱 기본 배경(테마 전환 시에도 ApplyToControls와 일치)
                 };
-                splitContainer1.Panel2.Controls.Add(_chipsBar);
-                _chipsBar.BringToFront();
+                Controls.Add(_chipsBar);
+                // outerSplit(=Fill) 바로 앞에 두어, 메뉴·툴바 아래·콘텐츠 위의 띠가 되게 한다.
+                Controls.SetChildIndex(_chipsBar, Controls.GetChildIndex(outerSplit) + 1);
             }
 
             _chipsBar.SuspendLayout();
@@ -791,23 +795,31 @@ namespace NanumCsvViewer
                 _chipsBar.Controls.Add(MakeFilterChip(label, remove, edit));
             _chipsBar.Visible = chips.Count > 0;
             _chipsBar.ResumeLayout();
+            PerformLayout(); // 칩 바 표시/숨김에 따라 콘텐츠가 즉시 재배치되도록 강제.
         }
+
+        // 칩과 토글이 같은 높이를 쓰도록 공용 계산.
+        private int ChipRowHeight() => TextRenderer.MeasureText("Ag", Font).Height + 7;
 
         private Control MakeModeToggle()
         {
             string label = _filterMatchAny ? LT("ANY (OR)", "하나라도(OR)") : LT("ALL (AND)", "모두(AND)");
+            var boldFont = new Font(Font, FontStyle.Bold);
+            int h = ChipRowHeight();                                  // 칩과 동일 높이
+            int w = TextRenderer.MeasureText(label, boldFont).Width + 16;
             var b = new Button
             {
                 Text = label,
-                AutoSize = true,
+                AutoSize = false,
+                Size = new Size(w, h),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = _palette.Surface,
                 ForeColor = _palette.Accent,
                 Margin = new Padding(2),
-                Padding = new Padding(6, 2, 6, 2),
+                Padding = new Padding(0),
                 Cursor = Cursors.Hand,
                 TabStop = false,
-                Font = new Font(Font, FontStyle.Bold),
+                Font = boldFont,
             };
             b.FlatAppearance.BorderColor = _palette.Accent;
             b.Click += async (_, _) =>
@@ -821,11 +833,41 @@ namespace NanumCsvViewer
 
         private Control MakeFilterChip(string label, Action remove, Action? edit)
         {
-            var chip = new Panel { AutoSize = true, Margin = new Padding(2), BackColor = _palette.Accent };
-            var flow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), Padding = new Padding(0) };
-            var text = new Label { Text = label, AutoSize = true, ForeColor = Color.White, Margin = new Padding(0), Padding = new Padding(7, 3, 3, 3) };
+            // 중첩 AutoSize 컨테이너는 측정 버그(기본 100px 잔존)를 유발하므로, 텍스트 폭으로
+            // 측정한 고정 크기 Panel + 좌표 지정 라벨로 결정적으로 그린다.
+            var boldFont = new Font(Font, FontStyle.Bold);
+            int h = ChipRowHeight();
+            int textW = TextRenderer.MeasureText(label, Font).Width;
+            int xW = TextRenderer.MeasureText("✕", boldFont).Width;
+            const int padL = 8, gap = 5, padR = 8;
+
+            var chip = new Panel
+            {
+                Size = new Size(padL + textW + gap + xW + padR, h),
+                Margin = new Padding(2),
+                BackColor = _palette.Accent,
+            };
+
+            var text = new Label
+            {
+                Text = label,
+                AutoSize = false,
+                Bounds = new Rectangle(padL, 0, textW + 2, h),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
             if (edit is not null) { text.Cursor = Cursors.Hand; text.Click += (_, _) => edit(); } // 클릭 시 해당 필터 팝업 재오픈
-            var close = new Label { Text = "✕", AutoSize = true, ForeColor = Color.White, Cursor = Cursors.Hand, Margin = new Padding(0), Padding = new Padding(2, 3, 7, 3), Font = new Font(Font, FontStyle.Bold) };
+
+            var close = new Label
+            {
+                Text = "✕",
+                AutoSize = false,
+                Bounds = new Rectangle(padL + textW + gap, 0, xW + padR, h),
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                Font = boldFont,
+                TextAlign = ContentAlignment.MiddleCenter,
+            };
             close.Click += async (_, _) =>
             {
                 remove();
@@ -833,9 +875,9 @@ namespace NanumCsvViewer
                 grid.Invalidate();
                 // RebuildFilterAsync → UpdateFilterStatus → RebuildFilterChips() 가 바를 다시 그린다.
             };
-            flow.Controls.Add(text);
-            flow.Controls.Add(close);
-            chip.Controls.Add(flow);
+
+            chip.Controls.Add(close);
+            chip.Controls.Add(text);
             return chip;
         }
 
