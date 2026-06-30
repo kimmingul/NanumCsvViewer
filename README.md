@@ -25,6 +25,13 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### ✨ v1.8.0 신규 — 타입 인식 필터링·패싯 분석
+
+- **컬럼 타입 확장** — 기존 `INT/FLT/DATE/BOOL/CAT/STR`에 더해 **`DateTime`·`Time`·`Identifier`**를 자동 추론합니다. `2024-01-01 14:30`은 DateTime, `14:30:00`은 Time으로 구분하고, `yyyyMMdd` 컴팩트 날짜는 헤더와 무관하게 날짜로 인식합니다(연도 1900~2100 가드). **식별자**(선행 0 숫자·`id`/`번호`/`코드` 헤더)는 수량이 아니므로 평균 등 무의미한 수치 통계를 자동 억제합니다.
+- **전 타입 헤더 필터** — `Empty`를 제외한 모든 컬럼에 타입별 필터를 제공합니다: 숫자·시간계열은 **범위(min~max, 시각 정밀도 인식)**, 범주·불리언은 **체크박스**, 문자열·식별자는 **텍스트 술어**(포함·일치·시작·끝·정규식·빈값·목록 붙여넣기). 고유값이 적은 숫자 컬럼은 범위 대신 체크박스로 폴백합니다.
+- **활성 필터 칩 바** — 모든 활성 조건을 그리드 위 칩으로 표시하고, 각 칩의 **✕로 개별 제거**·**클릭으로 재편집**합니다. 조건이 둘 이상이면 **모두(AND)/하나라도(OR) 결합 토글**을 제공하며, 결합 방식은 저장된 뷰에 함께 저장됩니다. 중첩 부울 `(A AND B) OR C`는 고급 식 필터로 표현할 수 있습니다.
+- **패싯 분석 패널(F6)** — 우측 패널에서 컬럼별 분포를 한눈에: 숫자는 히스토그램, 그 외는 상위 값 빈도를 가로 막대로 표시합니다. 막대를 클릭하면 그 구간/값으로 즉시 필터되고, 필터가 바뀌면 분포가 다시 계산됩니다(**크로스필터링**).
+
 ### ✨ v1.7.0 신규 — 분석·탐색·생산성
 
 - **고급 검색** — 평문(contains)에 더해 정규식(`/패턴/` 또는 `regex:`)과 퍼지(`fuzzy:`) 검색을 지원합니다.
@@ -88,10 +95,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.7.0
+.\scripts\release.ps1 -Version 1.8.0
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.7.0 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.8.0 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).

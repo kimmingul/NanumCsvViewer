@@ -31,7 +31,8 @@ namespace NanumCsvViewer
         // 뷰 상태 — 다중 조건 필터(모두 AND) : 텍스트 조건 1개 + 셀값 조건 N개
         private Func<string[], bool>? _textCondition;
         private string _textConditionDesc = "";
-        private readonly List<(string desc, Func<string[], bool> pred)> _valueConditions = new();
+        // expr: 식 필터의 원본 표현식(재편집용). 셀값 등 식이 아닌 조건은 null.
+        private readonly List<(string desc, Func<string[], bool> pred, string? expr)> _valueConditions = new();
         // 다중 컬럼 정렬: 순서가 우선순위(앞이 1차). 헤더 클릭=단일 교체, Shift+클릭=차수 추가.
         private readonly List<SortKey> _sortKeys = new();
 
@@ -54,6 +55,7 @@ namespace NanumCsvViewer
 
             BuildEncodingMenu();
             BuildLanguageMenu();
+            BuildFacetsMenuItem();
             BuildFeatureMenus();
             ApplyIcons();
             ApplyLocalization();
@@ -412,6 +414,7 @@ namespace NanumCsvViewer
             statusLabel.Text = Loc.F("Status_ReadyFmt",
                 _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength), _doc.ColumnCount,
                 _doc.Delimiter, mode, ms.ToString("N0"), trunc);
+            RebuildFilterChips();
         }
 
         private void RefreshRowCount()
@@ -822,7 +825,7 @@ namespace NanumCsvViewer
             int capCol = col;
             string capVal = value;
             Func<string[], bool> pred = r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal);
-            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred));
+            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred, null));
 
             // 증분: 현재 뷰만 새 조건으로 좁힘(전체 재스캔 안 함). 정렬 순서 유지.
             await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), Loc.T("Status_CellFilterApplying"));
@@ -853,15 +856,22 @@ namespace NanumCsvViewer
 
         private Func<string[], bool> BuildCombinedPredicate()
         {
-            var text = _textCondition;
-            var preds = _valueConditions.Select(v => v.pred).ToArray();
-            var colPred = _columnFilters.IsEmpty ? null : _columnFilters.Predicate();
+            // 모든 활성 조건을 개별 술어로 평탄화 → AND(모두) 또는 OR(하나라도)로 결합.
+            var preds = new List<Func<string[], bool>>();
+            if (_textCondition is not null) preds.Add(_textCondition);
+            preds.AddRange(_valueConditions.Select(v => v.pred));
+            preds.AddRange(_columnFilters.IndividualPredicates());
+            var arr = preds.ToArray();
+            bool any = _filterMatchAny;
             return row =>
             {
-                if (text is not null && !text(row)) return false;
-                for (int i = 0; i < preds.Length; i++)
-                    if (!preds[i](row)) return false;
-                if (colPred is not null && !colPred(row)) return false;
+                if (arr.Length == 0) return true;
+                if (any)
+                {
+                    foreach (var p in arr) if (p(row)) return true;
+                    return false;
+                }
+                foreach (var p in arr) if (!p(row)) return false;
                 return true;
             };
         }
@@ -881,6 +891,8 @@ namespace NanumCsvViewer
         private void UpdateFilterStatus()
         {
             if (_doc is null) return;
+            RebuildFilterChips();
+            if (_facetsVisible) BuildFacets();   // 필터 변경 시 패싯 재계산(크로스필터링)
             string size = FormatBytes(_doc.FileLength);
             if (!HasAnyFilter)
             {
@@ -924,6 +936,7 @@ namespace NanumCsvViewer
             RefreshRowCount();
             grid.Invalidate();
             statusLabel.Text = Loc.F("Status_FilterClearedFmt", _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength));
+            RebuildFilterChips();
         }
 
         // ---------------------------------------------------------------- Sort (Phase 3)
