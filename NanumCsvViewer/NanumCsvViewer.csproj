@@ -15,14 +15,21 @@
     <Product>Nanum CSV Viewer</Product>
     <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
     <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
-    <Version>1.9.0</Version>
-    <FileVersion>1.9.0.0</FileVersion>
-    <AssemblyVersion>1.9.0.0</AssemblyVersion>
+    <Version>1.9.1</Version>
+    <FileVersion>1.9.1.0</FileVersion>
+    <AssemblyVersion>1.9.1.0</AssemblyVersion>
+    <!-- 릴리즈 날짜: release.ps1이 publish 시 -p:ReleaseDate로 주입. 미지정(dev 빌드)이면 빌드일. -->
+    <ReleaseDate Condition="'$(ReleaseDate)' == ''">$([System.DateTime]::Now.ToString("yyyy-MM-dd"))</ReleaseDate>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="ExcelDataReader" Version="3.9.0" />
     <PackageReference Include="SasReader" Version="1.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 정보 창이 AppInfo.ReleaseDate로 읽는다. -->
+    <AssemblyMetadata Include="ReleaseDate" Value="$(ReleaseDate)" />
   </ItemGroup>
 
   <!--

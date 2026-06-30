@@ -25,6 +25,11 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### 🐞 v1.9.1 — 도움말 갱신·버전 정보 연동
+
+- **사용법(F1)·정보 창** 내용을 최신 기능(엑셀·SAS 열기, 타입 인식 필터, 칩 바, 패싯 패널)으로 갱신.
+- **정보 창에 버전·릴리즈 날짜를 자동 표시** — `release.ps1`이 빌드 시 버전과 날짜를 어셈블리 메타데이터에 함께 주입(`-p:Version`·`-p:ReleaseDate`)하고, 정보 창은 `AppInfo`로 이를 읽습니다. 표시되는 정보가 **실제 릴리즈한 버전/날짜와 항상 일치**하며 수동 편집이 필요 없습니다.
+
 ### ✨ v1.9.0 신규 — 엑셀·SAS 열기 (멀티시트)
 
 - **엑셀(.xlsx/.xls)·SAS(.sas7bdat) 지원** — 파일을 열면 시트/데이터셋을 자동으로 읽어 들이고, 멀티시트 워크북은 **하단 시트 탭**으로 전환합니다. 열린 뒤에는 CSV와 동일하게 필터·정렬·타입 배지·패싯·내보내기를 모두 사용할 수 있습니다.
@@ -106,10 +111,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.9.0
+.\scripts\release.ps1 -Version 1.9.1
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.9.0 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.9.1 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).

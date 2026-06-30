@@ -15,6 +15,12 @@ namespace NanumCsvViewer
         public About()
         {
             InitializeComponent();
+
+            // 버전·릴리즈 날짜는 어셈블리 메타데이터(AppInfo)에서 동적으로 채운다.
+            label5.Text = $"Nanum CSV Viewer (64-bit)  ·  v{AppInfo.Version}";
+            label6.Text = "This program is available for free use by anyone.";
+            label7.Text = string.IsNullOrWhiteSpace(AppInfo.ReleaseDate)
+                ? "" : $"Released  {AppInfo.ReleaseDate}";
         }
 
         private void button1_Click(object sender, EventArgs e)
