@@ -414,7 +414,7 @@ namespace NanumCsvViewer
 
         private string ColName(int i) => i >= 0 && i < _headers.Length && _headers[i].Length > 0 ? _headers[i] : $"Column{i + 1}";
         private string ColLabel(int i) => i < _summaries.Length ? $"{ColName(i)}  [{_summaries[i].InferredType.DisplayName()}]" : ColName(i);
-        private bool IsDate(int i) => i < _summaries.Length && _summaries[i].InferredType == ColumnValueType.Date;
+        private bool IsDate(int i) => i < _summaries.Length && _summaries[i].InferredType.HasDateComponent();
         private bool IsNumeric(int i) => i < _summaries.Length && (_summaries[i].InferredType == ColumnValueType.Integer || _summaries[i].InferredType == ColumnValueType.Float);
 
         private void AddSelectedTo(List<DimItem> dims, Action refresh)

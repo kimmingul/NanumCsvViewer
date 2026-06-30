@@ -320,8 +320,11 @@ namespace NanumCsvViewer
             ColumnValueType.Integer => "INT",
             ColumnValueType.Float => "FLT",
             ColumnValueType.Date => "DATE",
+            ColumnValueType.DateTime => "DTTM",
+            ColumnValueType.Time => "TIME",
             ColumnValueType.Boolean => "BOOL",
             ColumnValueType.Categorical => "CAT",
+            ColumnValueType.Identifier => "ID",
             ColumnValueType.String => "STR",
             ColumnValueType.Empty => "—",
             _ => "STR"
@@ -332,8 +335,11 @@ namespace NanumCsvViewer
             ColumnValueType.Integer => Color.FromArgb(46, 111, 176),     // 파랑
             ColumnValueType.Float => Color.FromArgb(27, 158, 119),       // 청록
             ColumnValueType.Date => Color.FromArgb(123, 94, 167),        // 보라
+            ColumnValueType.DateTime => Color.FromArgb(101, 79, 140),    // 진보라
+            ColumnValueType.Time => Color.FromArgb(150, 111, 196),       // 연보라
             ColumnValueType.Boolean => Color.FromArgb(210, 105, 30),     // 주황
             ColumnValueType.Categorical => Color.FromArgb(184, 134, 11), // 황금
+            ColumnValueType.Identifier => Color.FromArgb(96, 125, 139),  // 청회색
             ColumnValueType.String => Color.FromArgb(120, 120, 120),     // 회색
             ColumnValueType.Empty => Color.FromArgb(160, 160, 160),      // 연회색
             _ => Color.FromArgb(120, 120, 120)
@@ -368,7 +374,7 @@ namespace NanumCsvViewer
         private int FirstDateColumn()
         {
             for (int c = 0; c < _columnSummaries.Length; c++)
-                if (_columnSummaries[c].InferredType == ColumnValueType.Date) return c;
+                if (_columnSummaries[c].InferredType.HasDateComponent()) return c;
             return 0;
         }
 
@@ -620,9 +626,9 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 헤더 필터 (범주/날짜)
 
+        // Empty(비-널 값 없음)를 제외한 모든 타입에 타입별 필터를 제공한다.
         private bool IsFilterableColumn(int c)
-            => c < _columnSummaries.Length &&
-               _columnSummaries[c].InferredType is ColumnValueType.Categorical or ColumnValueType.Boolean or ColumnValueType.Date;
+            => c < _columnSummaries.Length && _columnSummaries[c].InferredType != ColumnValueType.Empty;
 
         // 헤더 우측의 깔때기 아이콘. 활성 필터면 악센트로 채움.
         private void DrawFunnel(Graphics g, Rectangle r, bool active)
@@ -658,25 +664,61 @@ namespace NanumCsvViewer
             Rectangle rect = grid.GetCellDisplayRectangle(col, -1, true);
             Point screenPt = grid.PointToScreen(new Point(rect.Left, rect.Bottom));
 
-            bool isDate = col < _columnSummaries.Length && _columnSummaries[col].InferredType == ColumnValueType.Date;
-            if (isDate)
+            var type = col < _columnSummaries.Length ? _columnSummaries[col].InferredType : ColumnValueType.String;
+
+            // 숫자 범위(Integer / Float)
+            if (type is ColumnValueType.Integer or ColumnValueType.Float)
             {
-                var existing = _columnFilters.DateFilters.FirstOrDefault(f => f.Column == col);
-                using var popup = new ColumnFilterPopup(name, existing?.Start, existing?.End, _palette);
+                var existing = _columnFilters.NumericFilters.FirstOrDefault(f => f.Column == col);
+                using var popup = new ColumnFilterPopup(name, existing?.Min, existing?.Max, _palette);
                 if (!popup.ShowAt(this, screenPt)) return;
-                _columnFilters.SetDateRange(col, popup.RangeStart, popup.RangeEnd);
+                _columnFilters.SetNumericRange(col, popup.NumMin, popup.NumMax);
                 await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
                 grid.Invalidate();
                 return;
             }
 
-            // 범주형: 전체 데이터에서 고유값 수집(백그라운드)
+            // 시간 범위(Date / DateTime / Time) — 정밀도 인식
+            if (type.HasDateComponent() || type == ColumnValueType.Time)
+            {
+                var kind = type switch
+                {
+                    ColumnValueType.DateTime => TemporalFilterKind.DateTime,
+                    ColumnValueType.Time => TemporalFilterKind.Time,
+                    _ => TemporalFilterKind.Date
+                };
+                var existing = _columnFilters.DateFilters.FirstOrDefault(f => f.Column == col);
+                using var popup = new ColumnFilterPopup(name, existing?.Start, existing?.End, kind, _palette);
+                if (!popup.ShowAt(this, screenPt)) return;
+                _columnFilters.SetDateRange(col, popup.RangeStart, popup.RangeEnd, kind);
+                await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+                grid.Invalidate();
+                return;
+            }
+
+            // 텍스트 술어(String / Identifier)
+            if (type is ColumnValueType.String or ColumnValueType.Identifier)
+            {
+                var existing = _columnFilters.TextFilters.FirstOrDefault(f => f.Column == col);
+                using var popup = new ColumnFilterPopup(name, existing, _palette);
+                if (!popup.ShowAt(this, screenPt)) return;
+                _columnFilters.SetText(col, popup.TextOp, popup.TextValue, popup.TextCaseSensitive);
+                await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+                grid.Invalidate();
+                return;
+            }
+
+            // 범주형 / 불리언: 전체 데이터에서 고유값 수집(백그라운드) 후 체크박스
             SetBusy(true);
             statusLabel.Text = LT("Loading values…", "값 불러오는 중…");
             IReadOnlyList<(string Value, int Count)> distinct;
             try { distinct = await Task.Run(() => doc.DistinctValues(col, withinCurrentView: false, CancellationToken.None)); }
             catch { distinct = Array.Empty<(string, int)>(); }
             finally { SetBusy(false); }
+
+            // 로딩이 끝났으니 "값 불러오는 중…"을 현재 필터 상태로 되돌린다.
+            // (팝업을 취소해도 상태줄에 메시지가 남지 않도록)
+            UpdateFilterStatus();
 
             var current = _columnFilters.ValueFilters.FirstOrDefault(f => f.Column == col);
             using var pop = new ColumnFilterPopup(name, distinct, current, _palette);
