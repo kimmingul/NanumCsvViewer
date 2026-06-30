@@ -25,6 +25,11 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### ✨ v1.9.0 신규 — 엑셀·SAS 열기 (멀티시트)
+
+- **엑셀(.xlsx/.xls)·SAS(.sas7bdat) 지원** — 파일을 열면 시트/데이터셋을 자동으로 읽어 들이고, 멀티시트 워크북은 **하단 시트 탭**으로 전환합니다. 열린 뒤에는 CSV와 동일하게 필터·정렬·타입 배지·패싯·내보내기를 모두 사용할 수 있습니다.
+- 내부적으로 각 시트를 임시 CSV로 변환해 기존 엔진에 얹는 방식이며, 엑셀은 [ExcelDataReader](https://github.com/ExcelDataReader/ExcelDataReader), SAS는 [SasReader](https://www.nuget.org/packages/SasReader)(EPAM parso 포팅)를 사용합니다. (대용량 바이트 오프셋 즉시열람은 여전히 CSV/TXT 전용입니다.)
+
 ### 🐞 v1.8.1 — 필터 칩 바 수정
 
 - 활성 필터 칩 바를 **툴바 아래 별도 띠**로 도킹해, 칩이 그리드 컬럼 헤더를 덮던 문제를 해결.
@@ -101,10 +106,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.8.1
+.\scripts\release.ps1 -Version 1.9.0
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.8.1 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.9.0 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
@@ -156,7 +161,7 @@ dotnet test
 
 ## ⚠️ 제한 사항
 
-- 대용량 고속 모드는 **CSV/TXT 전용**입니다(Excel `.xls/.xlsx` 미지원).
+- 엑셀(`.xlsx/.xls`)·SAS(`.sas7bdat`)는 **열 때 시트별 CSV로 변환**해 지원합니다(시트 탭으로 전환). 단, 바이트 오프셋 **대용량 즉시열람**은 CSV/TXT 전용입니다.
 - **UTF-16/UTF-32**는 대용량 모드에서 지원하지 않습니다(BOM 감지 시 안내).
 - 매우 느린 HDD에서 디스크 모드(>약 1.5 GB)일 때 스크롤에 미세한 지연이 있을 수 있습니다.
 
