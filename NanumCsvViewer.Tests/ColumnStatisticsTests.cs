@@ -135,5 +135,73 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(ColumnValueType.Integer, s.InferredType);
             Assert.NotNull(s.Numeric);
         }
+
+        [Theory]
+        [InlineData("₩1,000", "₩2,500", "₩900")]     // 원(KRW)
+        [InlineData("$10.50", "$3.25", "$99.00")]      // 달러(USD)
+        [InlineData("¥1200", "¥800", "¥1500")]         // 엔/위안
+        [InlineData("€5", "€12", "€3")]                // 유로
+        [InlineData("£7", "£2", "£9")]                 // 파운드
+        public void Currency_symbols_infer_currency(string a, string b, string c)
+        {
+            var s = Summarize("price", a, b, c);
+            Assert.Equal(ColumnValueType.Currency, s.InferredType);
+            Assert.NotNull(s.Numeric);   // 밑에 깔린 숫자로 통계 산출
+        }
+
+        [Fact]
+        public void Percent_infers_percent_with_numeric_stats()
+        {
+            var s = Summarize("rate", "25%", "50%", "12.5%");
+            Assert.Equal(ColumnValueType.Percent, s.InferredType);
+            Assert.NotNull(s.Numeric);
+        }
+
+        [Fact]
+        public void Mixed_bare_and_affixed_not_classified_as_percent_or_currency()
+        {
+            // 기호 없는 값이 섞이면 통화/퍼센트로 오분류하지 않는다(표시 스킨이 값을 왜곡하는 것 방지).
+            Assert.NotEqual(ColumnValueType.Percent, Summarize("m", "10", "20", "50%").InferredType);
+            Assert.NotEqual(ColumnValueType.Currency, Summarize("m", "₩1,000", "500", "₩900").InferredType);
+        }
+
+        [Fact]
+        public void Scientific_notation_infers_scientific()
+        {
+            var s = Summarize("v", "1.2e3", "3.4E5", "5e-2");
+            Assert.Equal(ColumnValueType.Scientific, s.InferredType);
+        }
+
+        [Fact]
+        public void Plain_number_without_affix_is_not_currency_or_percent()
+        {
+            // 기호 없는 숫자는 통화/퍼센트로 오인되면 안 된다(회귀 방지).
+            Assert.Equal(ColumnValueType.Integer, Summarize("n", "1000", "2000", "3000").InferredType);
+        }
+
+        [Theory]
+        [InlineData('$', "1000", "$1,000")]      // 선언 통화(원시 숫자)에 기호+천단위
+        [InlineData('₩', "5000", "₩5,000")]
+        [InlineData('¥', "1200.5", "¥1,200.5")]
+        public void CellDisplay_currency_adds_symbol(char sym, string raw, string expected)
+            => Assert.Equal(expected, CellDisplay.Format(ColumnValueType.Currency, sym, false, raw));
+
+        [Fact]
+        public void CellDisplay_currency_without_symbol_left_as_is()
+            => Assert.Equal("₩1,000", CellDisplay.Format(ColumnValueType.Currency, null, false, "₩1,000"));
+
+        [Theory]
+        [InlineData(false, "25", "25%")]         // SPSS PCT: 정수값 저장
+        [InlineData(true, "0.25", "25%")]        // SAS PERCENT: 분수 저장 → ×100
+        [InlineData(false, "12.5%", "12.5%")]    // 이미 %가 붙은 추론 텍스트는 그대로
+        public void CellDisplay_percent(bool isFraction, string raw, string expected)
+            => Assert.Equal(expected, CellDisplay.Format(ColumnValueType.Percent, null, isFraction, raw));
+
+        [Fact]
+        public void CellDisplay_non_currency_percent_unchanged()
+        {
+            Assert.Equal("42", CellDisplay.Format(ColumnValueType.Integer, null, false, "42"));
+            Assert.Equal("", CellDisplay.Format(ColumnValueType.Currency, '$', false, ""));
+        }
     }
 }

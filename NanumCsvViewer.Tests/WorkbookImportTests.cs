@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using Curiosity.SPSS.DataReader;
 using Curiosity.SPSS.SpssDataset;
+using NanumCsvViewer.Csv;
 using NanumCsvViewer.Import;
 
 namespace NanumCsvViewer.Tests
@@ -29,6 +30,96 @@ namespace NanumCsvViewer.Tests
         [InlineData("a@b", "a@b")]                             // 선행이 아닌 '@'는 건드리지 않음
         public void SpssHeaderName_strips_only_leading_at(string input, string expected)
             => Assert.Equal(expected, TabularImporter.SpssHeaderName(input));
+
+        [Fact]
+        public void MapSpss_dollar_format_is_currency()
+        {
+            var v = NumericVar("sal", FormatType.DOLLAR);
+            var hint = FormatMappers.MapSpss(v);
+            Assert.Equal(ColumnValueType.Currency, hint!.Type);
+            Assert.Equal('$', hint.CurrencySymbol);
+        }
+
+        [Fact]
+        public void MapSpss_pct_format_is_percent_whole()
+        {
+            var hint = FormatMappers.MapSpss(NumericVar("rate", FormatType.PCT));
+            Assert.Equal(ColumnValueType.Percent, hint!.Type);
+            Assert.False(hint.PercentIsFraction); // SPSS PCT는 정수값 저장
+        }
+
+        [Fact]
+        public void MapSpss_scientific_format_is_scientific()
+            => Assert.Equal(ColumnValueType.Scientific, FormatMappers.MapSpss(NumericVar("v", FormatType.E))!.Type);
+
+        [Fact]
+        public void MapSpss_value_labels_make_categorical_ordinal()
+        {
+            var nominal = NumericVar("sex", FormatType.F);
+            nominal.MeasurementType = MeasurementType.Nominal;
+            nominal.ValueLabels = new Dictionary<double, string> { { 1, "남" }, { 2, "여" } };
+            Assert.Equal(ColumnValueType.Categorical, FormatMappers.MapSpss(nominal)!.Type);
+
+            var ordinal = NumericVar("grade", FormatType.F);
+            ordinal.MeasurementType = MeasurementType.Ordinal;
+            Assert.Equal(ColumnValueType.Ordinal, FormatMappers.MapSpss(ordinal)!.Type);
+        }
+
+        [Fact]
+        public void MapSpss_plain_numeric_is_integer_overriding_identifier_heuristic()
+        {
+            // 선언된 F 숫자는 정수. 헤더가 'id'라도 Identifier 추론에 넘기지 않고 파일 명시를 존중.
+            Assert.Equal(ColumnValueType.Integer, FormatMappers.MapSpss(NumericVar("id", FormatType.F))!.Type);
+            Assert.Equal(ColumnValueType.Float, FormatMappers.MapSpss(NumericVar("x", FormatType.F, 2))!.Type);
+        }
+
+        [Fact]
+        public void MapSpss_date_formats_map_to_temporal()
+        {
+            Assert.Equal(ColumnValueType.Date, FormatMappers.MapSpss(NumericVar("d", FormatType.DATE))!.Type);
+            Assert.Equal(ColumnValueType.DateTime, FormatMappers.MapSpss(NumericVar("ts", FormatType.DATETIME))!.Type);
+            Assert.Equal(ColumnValueType.Time, FormatMappers.MapSpss(NumericVar("t", FormatType.TIME))!.Type);
+        }
+
+        private static Variable NumericVar(string name, FormatType fmt, int dec = 0) => new(name)
+        {
+            Type = DataType.Numeric,
+            MeasurementType = MeasurementType.Scale,
+            PrintFormat = new OutputFormat(fmt, 8, dec),
+            WriteFormat = new OutputFormat(fmt, 8, dec),
+        };
+
+        [Fact]
+        public void Import_sav_carries_declared_type_hints_and_drops_them_in_label_mode()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_savhint_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string sav = Path.Combine(dir, "clinic.sav");
+                var salary = NumericVar("salary", FormatType.DOLLAR);
+                var sex = NumericVar("sex", FormatType.F);
+                sex.MeasurementType = MeasurementType.Nominal;
+                sex.ValueLabels = new Dictionary<double, string> { { 1, "남" }, { 2, "여" } };
+                using (var os = File.Create(sav))
+                using (var w = new SpssWriter(os, new List<Variable> { salary, sex },
+                    Array.Empty<Mrset>(), new SpssOptions(), leaveOpen: false))
+                {
+                    var r = w.CreateRecord(); r[0] = 1000.0; r[1] = 1.0; w.WriteRecord(r);
+                    w.EndFile();
+                }
+
+                var hints = TabularImporter.Import(sav, Path.Combine(dir, "raw"), showLabels: false)[0].Hints;
+                Assert.NotNull(hints);
+                Assert.Equal(ColumnValueType.Currency, hints![0]!.Type);      // DOLLAR → 통화
+                Assert.Equal('$', hints[0]!.CurrencySymbol);
+                Assert.Equal(ColumnValueType.Categorical, hints[1]!.Type);    // 값라벨+명목 → 범주
+
+                // 라벨 표시 모드에선 코드가 라벨 텍스트로 치환되므로 선언 힌트는 사용하지 않는다.
+                Assert.Null(TabularImporter.Import(sav, Path.Combine(dir, "lbl"), showLabels: true)[0].Hints);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
 
         [Fact]
         public void Imports_sav_raw_mode_keeps_codes_and_decodes_dates()
