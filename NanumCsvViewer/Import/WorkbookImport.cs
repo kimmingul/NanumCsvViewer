@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using Curiosity.SPSS.DataReader;
+using Curiosity.SPSS.SpssDataset;
 using ExcelDataReader;
 using SasReader;
 
@@ -29,17 +30,31 @@ namespace NanumCsvViewer.Import
         public static bool IsImportable(string path)
             => Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
-        /// <summary>각 시트를 tempDir 안의 CSV로 변환하고 (이름, CSV 경로) 목록을 반환.</summary>
-        public static IReadOnlyList<ImportedSheet> Import(string path, string tempDir)
+        /// <summary>SPSS·SAS처럼 변수/변수라벨이 있는 포맷인지(필드 라벨 토글 대상).</summary>
+        public static bool SupportsFieldLabels(string path)
+        {
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            return ext is ".sav" or ".sas7bdat";
+        }
+
+        /// <summary>
+        /// 각 시트를 tempDir 안의 CSV로 변환하고 (이름, CSV 경로) 목록을 반환.
+        /// showLabels=true면 SPSS·SAS에서 변수 라벨을 헤더로 쓰고, SPSS는 값 라벨로 코드를 치환한다.
+        /// </summary>
+        public static IReadOnlyList<ImportedSheet> Import(string path, string tempDir, bool showLabels = false)
         {
             Directory.CreateDirectory(tempDir);
             return Path.GetExtension(path).ToLowerInvariant() switch
             {
-                ".sas7bdat" => ImportSas(path, tempDir),
-                ".sav" => ImportSpss(path, tempDir),
+                ".sas7bdat" => ImportSas(path, tempDir, showLabels),
+                ".sav" => ImportSpss(path, tempDir, showLabels),
                 _ => ImportExcel(path, tempDir),
             };
         }
+
+        // 필드 라벨 표시 모드면 라벨(있을 때)을, 아니면 원래 이름을 헤더로 쓴다. SPSS·SAS 공통.
+        private static string ResolveHeader(string name, string? label, bool showLabels)
+            => showLabels && !string.IsNullOrWhiteSpace(label) ? label! : name;
 
         private static List<ImportedSheet> ImportExcel(string path, string tempDir)
         {
@@ -70,7 +85,9 @@ namespace NanumCsvViewer.Import
             return sheets;
         }
 
-        private static List<ImportedSheet> ImportSas(string path, string tempDir)
+        // SAS는 변수 라벨은 있으나 값 라벨은 파일 밖(.sas7bcat 카탈로그)에 있어 코드 치환 불가.
+        // showLabels는 헤더를 변수 라벨로 바꾸는 데만 쓴다. 날짜는 리더가 이미 DateTime으로 반환.
+        private static List<ImportedSheet> ImportSas(string path, string tempDir, bool showLabels)
         {
             using var stream = File.OpenRead(path);
             var reader = new SasFileReaderImpl(stream);
@@ -82,7 +99,8 @@ namespace NanumCsvViewer.Import
             using (var writer = NewCsvWriter(csv))
             {
                 var columns = reader.getColumns();
-                writer.WriteLine(string.Join(",", columns.Select(col => Escape(col.getName()))));
+                writer.WriteLine(string.Join(",", columns.Select(col =>
+                    Escape(ResolveHeader(col.getName(), col.getLabel(), showLabels)))));
                 long rowCount = props.getRowCount();
                 for (long i = 0; i < rowCount; i++)
                 {
@@ -98,7 +116,7 @@ namespace NanumCsvViewer.Import
 
         // SPSS(.sav)는 단일 데이터셋 → 시트 1개. 헤더는 변수명, 값은 원값(코드)을 그대로 내보내
         // 기존 타입 추론이 정상 동작하게 한다. Value Label 전개·Variable Label 노출은 후속(Phase 2).
-        private static List<ImportedSheet> ImportSpss(string path, string tempDir)
+        private static List<ImportedSheet> ImportSpss(string path, string tempDir, bool showLabels)
         {
             using var stream = File.OpenRead(path);
             using var reader = new SpssReader(stream);
@@ -108,15 +126,27 @@ namespace NanumCsvViewer.Import
 
             using (var writer = NewCsvWriter(csv))
             {
-                writer.WriteLine(string.Join(",", vars.Select(v => Escape(SpssHeaderName(v.Name)))));
+                writer.WriteLine(string.Join(",", vars.Select(v =>
+                    Escape(ResolveHeader(SpssHeaderName(v.Name), v.Label, showLabels)))));
                 foreach (var record in reader.Records)
                 {
                     var cells = new string[vars.Count];
-                    for (int c = 0; c < vars.Count; c++) cells[c] = Escape(FormatCell(record.GetValue(vars[c])));
+                    for (int c = 0; c < vars.Count; c++)
+                        cells[c] = Escape(FormatSpssCell(record.GetValue(vars[c]), vars[c], showLabels));
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
             return new List<ImportedSheet> { new(name, csv) };
+        }
+
+        // 라벨 모드에서 값 라벨이 있으면 코드를 라벨로 치환(예: 1→"남"). 없으면 원값 포맷.
+        // 날짜 변수는 리더가 DateTime을 돌려주므로 FormatCell이 그대로 yyyy-MM-dd로 출력한다.
+        private static string FormatSpssCell(object? value, Variable variable, bool showLabels)
+        {
+            if (showLabels && value is double d && variable.ValueLabels is { } labels
+                && labels.TryGetValue(d, out var label) && !string.IsNullOrEmpty(label))
+                return label;
+            return FormatCell(value);
         }
 
         // Curiosity.SPSS는 숫자로 시작하는 변수명에 '@'를 접두한다(SPSS 식별자 규칙 표현).
@@ -151,27 +181,32 @@ namespace NanumCsvViewer.Import
     {
         public string SourcePath { get; }
         public IReadOnlyList<string> SheetNames { get; }
+        /// <summary>필드 라벨 표시 모드로 임포트되었는지.</summary>
+        public bool ShowLabels { get; }
+        /// <summary>이 워크북이 변수/변수라벨을 가진 포맷(SPSS·SAS)이라 라벨 토글이 의미 있는지.</summary>
+        public bool SupportsFieldLabels => TabularImporter.SupportsFieldLabels(SourcePath);
         private readonly string[] _csvPaths;
         private readonly string _tempDir;
 
-        private WorkbookSession(string sourcePath, string tempDir, IReadOnlyList<ImportedSheet> sheets)
+        private WorkbookSession(string sourcePath, string tempDir, IReadOnlyList<ImportedSheet> sheets, bool showLabels)
         {
             SourcePath = sourcePath;
             _tempDir = tempDir;
+            ShowLabels = showLabels;
             SheetNames = sheets.Select(s => s.Name).ToArray();
             _csvPaths = sheets.Select(s => s.CsvPath).ToArray();
         }
 
-        public static WorkbookSession Create(string path)
+        public static WorkbookSession Create(string path, bool showLabels = false)
         {
             string tempDir = Path.Combine(Path.GetTempPath(), "ncv_wb_" + Guid.NewGuid().ToString("N"));
-            var sheets = TabularImporter.Import(path, tempDir);
+            var sheets = TabularImporter.Import(path, tempDir, showLabels);
             if (sheets.Count == 0)
             {
                 try { Directory.Delete(tempDir, true); } catch { }
                 throw new InvalidDataException("열 수 있는 시트가 없습니다.");
             }
-            return new WorkbookSession(path, tempDir, sheets);
+            return new WorkbookSession(path, tempDir, sheets, showLabels);
         }
 
         public string CsvPath(int sheetIndex) => _csvPaths[sheetIndex];
