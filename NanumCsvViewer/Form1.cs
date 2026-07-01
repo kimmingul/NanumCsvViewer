@@ -306,9 +306,9 @@ namespace NanumCsvViewer
 
                 if (Import.TabularImporter.IsImportable(path))
                 {
-                    // 엑셀/SAS: 시트별 임시 CSV로 변환 후 기존 엔진으로 연다.
+                    // 엑셀/SAS/SPSS: 시트별 임시 CSV로 변환 후 기존 엔진으로 연다. SPSS·SAS는 설정된 라벨 모드로.
                     statusLabel.Text = LT("Importing…", "불러오는 중…");
-                    var wb = await Task.Run(() => Import.WorkbookSession.Create(path));
+                    var wb = await Task.Run(() => Import.WorkbookSession.Create(path, _settings.ShowFieldLabels));
                     _workbook = wb;
                     BuildSheetTabs(wb);
                     LoadSheet(0);
@@ -318,6 +318,7 @@ namespace NanumCsvViewer
                     HideSheetTabs();
                     LoadDocument(path, Path.GetFileName(path));
                 }
+                UpdateFieldLabelsMenu();
             }
             catch (Exception ex)
             {

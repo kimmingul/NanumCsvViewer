@@ -31,6 +31,76 @@ namespace NanumCsvViewer.Tests
             => Assert.Equal(expected, TabularImporter.SpssHeaderName(input));
 
         [Fact]
+        public void Imports_sav_raw_mode_keeps_codes_and_decodes_dates()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_savraw_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string sav = Path.Combine(dir, "survey.sav");
+                CreateLabeledSav(sav);
+
+                var sheets = TabularImporter.Import(sav, Path.Combine(dir, "out"), showLabels: false);
+
+                var lines = File.ReadAllText(sheets[0].CsvPath).Replace("\r\n", "\n").Trim().Split('\n');
+                Assert.Equal("sex,visit", lines[0]);        // 헤더 = 변수명
+                Assert.Equal("1,2020-01-15", lines[1]);     // 원값(코드) + 날짜는 원값 모드에서도 디코딩
+                Assert.Equal("2,2020-01-15", lines[2]);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        [Fact]
+        public void Imports_sav_label_mode_uses_value_and_variable_labels()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_savlbl_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string sav = Path.Combine(dir, "survey.sav");
+                CreateLabeledSav(sav);
+
+                var sheets = TabularImporter.Import(sav, Path.Combine(dir, "out"), showLabels: true);
+
+                var lines = File.ReadAllText(sheets[0].CsvPath).Replace("\r\n", "\n").Trim().Split('\n');
+                Assert.Equal("성별,방문일", lines[0]);        // 헤더 = 변수 라벨
+                Assert.Equal("남,2020-01-15", lines[1]);      // 값 라벨로 치환(1→남), 날짜 유지
+                Assert.Equal("여,2020-01-15", lines[2]);      // 2→여
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        // sex(값라벨 1남/2여, 변수라벨 "성별") + visit(DATE 포맷, 변수라벨 "방문일"), 2행.
+        private static void CreateLabeledSav(string path)
+        {
+            var sex = new Variable("sex")
+            {
+                Type = DataType.Numeric,
+                MeasurementType = MeasurementType.Nominal,
+                Label = "성별",
+                PrintFormat = new OutputFormat(FormatType.F, 8, 0),
+                WriteFormat = new OutputFormat(FormatType.F, 8, 0),
+                ValueLabels = new Dictionary<double, string> { { 1, "남" }, { 2, "여" } },
+            };
+            var visit = new Variable("visit")
+            {
+                Type = DataType.Numeric,
+                MeasurementType = MeasurementType.Scale,
+                Label = "방문일",
+                PrintFormat = new OutputFormat(FormatType.DATE, 11, 0),
+                WriteFormat = new OutputFormat(FormatType.DATE, 11, 0),
+            };
+            double visitSeconds = (new DateTime(2020, 1, 15) - new DateTime(1582, 10, 14)).TotalSeconds;
+
+            using var os = File.Create(path);
+            using var writer = new SpssWriter(os, new List<Variable> { sex, visit },
+                Array.Empty<Mrset>(), new SpssOptions(), leaveOpen: false);
+            var r1 = writer.CreateRecord(); r1[0] = 1.0; r1[1] = visitSeconds; writer.WriteRecord(r1);
+            var r2 = writer.CreateRecord(); r2[0] = 2.0; r2[1] = visitSeconds; writer.WriteRecord(r2);
+            writer.EndFile();
+        }
+
+        [Fact]
         public void Imports_sav_with_values_and_maps_sysmis_to_empty()
         {
             string dir = Path.Combine(Path.GetTempPath(), "ncv_savtest_" + Guid.NewGuid().ToString("N"));

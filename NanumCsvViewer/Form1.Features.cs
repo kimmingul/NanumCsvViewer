@@ -23,6 +23,12 @@ namespace NanumCsvViewer
         private ToolStripMenuItem? _showBadgesMenu;
         private ToolStripButton? _badgeToggleButton;
         private bool _syncingBadgeToggle;
+
+        // SPSS·SAS 필드 라벨 표시 토글(보기 메뉴). 현재 워크북을 재임포트·재로드한다.
+        private ToolStripMenuItem? _fieldLabelsMenu;
+        private int _currentSheetIndex;
+        private bool _reimporting;        // 라벨 모드 재임포트 진행 중(재진입 직렬화)
+        private bool _syncingFieldLabels; // 체크 상태를 코드로 되돌릴 때 CheckedChanged 억제
         private readonly HashSet<int> _hiddenColumns = new();
         private readonly List<string> _tempImportFiles = new();
 
@@ -84,6 +90,12 @@ namespace NanumCsvViewer
             _showBadgesMenu.CheckedChanged += (_, _) => { if (!_syncingBadgeToggle) SetShowTypeBadges(_showBadgesMenu.Checked); };
             RegisterLabel(_showBadgesMenu, "Show Type Badges", "타입 배지 표시");
             viewToolStripMenuItem.DropDownItems.Add(_showBadgesMenu);
+
+            // SPSS·SAS 필드 라벨 표시 토글. 라벨 대상 파일이 열렸을 때만 활성.
+            _fieldLabelsMenu = new ToolStripMenuItem { CheckOnClick = true, Checked = _settings.ShowFieldLabels, Enabled = false };
+            _fieldLabelsMenu.CheckedChanged += (_, _) => { if (!_syncingFieldLabels) SetShowFieldLabels(_fieldLabelsMenu.Checked); };
+            RegisterLabel(_fieldLabelsMenu, "Show Field Labels", "필드 라벨 표시");
+            viewToolStripMenuItem.DropDownItems.Add(_fieldLabelsMenu);
 
             _saveViewMenu = MakeItem("Save Current View", "현재 보기 저장", (_, _) => SaveCurrentView());
             viewToolStripMenuItem.DropDownItems.Add(_saveViewMenu);
@@ -227,6 +239,9 @@ namespace NanumCsvViewer
             if (_perfMenu is not null) _perfMenu.Enabled = _doc is not null;
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
+            // 필드 라벨 토글: 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
+            if (_fieldLabelsMenu is not null)
+                _fieldLabelsMenu.Enabled = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
 
             bool open = _doc is not null && !_busy;
             if (_copyCellsMenu is not null) _copyCellsMenu.Enabled = open;
@@ -908,9 +923,78 @@ namespace NanumCsvViewer
         private void LoadSheet(int index)
         {
             if (_workbook is null) return;
+            _currentSheetIndex = index;
             string title = $"{Path.GetFileName(_workbook.SourcePath)}  [{_workbook.SheetNames[index]}]";
             LoadDocument(_workbook.CsvPath(index), title);
             HighlightSheetTab(index);
+        }
+
+        // SPSS·SAS 필드 라벨 표시 토글. 라벨 대상 워크북이면 그 모드로 재임포트·재로드하고,
+        // 성공했을 때만 설정을 영속화한다. 실패·무의미한 토글에는 체크 상태를 실제 모드로 되돌린다.
+        private async void SetShowFieldLabels(bool show)
+        {
+            // 라벨 대상 파일이 아니면 설정만 저장(다음 열기 기본값). 메뉴는 보통 비활성이라 방어적 경로.
+            if (_workbook is null || !_workbook.SupportsFieldLabels)
+            {
+                _settings.ShowFieldLabels = show;
+                _settings.Save();
+                return;
+            }
+            if (_workbook.ShowLabels == show) return; // 변화 없음
+            if (_reimporting || _busy)                // 진행 중이면 체크를 실제 모드로 되돌리고 무시
+            {
+                SyncFieldLabelsChecked(_workbook.ShowLabels);
+                return;
+            }
+
+            _reimporting = true;
+            UpdateFieldLabelsMenu();
+            string path = _workbook.SourcePath;
+            int sheet = _currentSheetIndex;
+            try
+            {
+                statusLabel.Text = LT("Importing…", "불러오는 중…");
+                // 새 워크북을 먼저 만든 뒤에야 기존 문서를 교체 → 실패해도 현재 화면이 보존된다.
+                var wb = await Task.Run(() => Import.WorkbookSession.Create(path, show));
+                await CancelAndDrainAsync();
+                var old = _doc; _doc = null; old?.Dispose();
+                ResetView();
+                _hiddenColumns.Clear();
+                DisposeWorkbook();
+                _workbook = wb;
+                BuildSheetTabs(wb);
+                LoadSheet(Math.Min(sheet, wb.SheetNames.Count - 1));
+                _settings.ShowFieldLabels = show;   // 성공 시에만 영속화
+                _settings.Save();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, Loc.T("Title_OpenFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                statusLabel.Text = Loc.T("Status_OpenFailed");
+                SyncFieldLabelsChecked(_workbook?.ShowLabels ?? show); // 체크 되돌림
+            }
+            finally
+            {
+                _reimporting = false;
+                UpdateFieldLabelsMenu();
+            }
+        }
+
+        // 체크 상태를 코드로 설정(핸들러 재진입 억제).
+        private void SyncFieldLabelsChecked(bool value)
+        {
+            if (_fieldLabelsMenu is null || _fieldLabelsMenu.Checked == value) return;
+            _syncingFieldLabels = true;
+            _fieldLabelsMenu.Checked = value;
+            _syncingFieldLabels = false;
+        }
+
+        // 라벨 토글 메뉴의 체크 상태를 현재 워크북(없으면 설정)에 맞춘다. 활성/비활성은 UpdateFeatureMenuState가 담당.
+        private void UpdateFieldLabelsMenu()
+        {
+            bool capable = _workbook?.SupportsFieldLabels == true;
+            SyncFieldLabelsChecked(capable ? _workbook!.ShowLabels : _settings.ShowFieldLabels);
+            UpdateFeatureMenuState();
         }
 
         private void BuildSheetTabs(Import.WorkbookSession wb)

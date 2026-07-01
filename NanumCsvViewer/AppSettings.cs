@@ -15,6 +15,9 @@ namespace NanumCsvViewer
         /// <summary>그리드 헤더에 컬럼 타입 배지를 표시할지 여부.</summary>
         public bool ShowTypeBadges { get; set; } = true;
 
+        /// <summary>SPSS·SAS를 열 때 변수/값 라벨을 표시할지 여부(끄면 원값·변수명).</summary>
+        public bool ShowFieldLabels { get; set; } = false;
+
         /// <summary>CSV를 닫을 때(다른 파일 열기·종료) 해당 파일의 영속 인덱스 캐시를 삭제할지 여부.</summary>
         public bool DeleteIndexOnClose { get; set; } = false;
 

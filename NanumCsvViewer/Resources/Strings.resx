@@ -141,6 +141,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • File ▸ Open (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls), SAS (.sas7bdat), and SPSS (.sav).
 • The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
 • Multi-sheet Excel workbooks switch via the sheet tabs at the bottom.
+• For SPSS/SAS, View ▸ Show Field Labels swaps codes and names for value labels and variable labels.
 
 [Encoding]
 • Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use View ▸ Encoding. No re-indexing needed.
