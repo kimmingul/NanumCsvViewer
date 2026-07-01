@@ -14,6 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 테스트에서 픽스처 .sav를 직접 생성하기 위해 임포터와 동일한 SPSS 라이브러리를 참조. -->
+    <PackageReference Include="Curiosity.SPSS" Version="1.3.2" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
