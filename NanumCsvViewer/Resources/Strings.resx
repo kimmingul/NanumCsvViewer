@@ -142,6 +142,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
 • Multi-sheet Excel workbooks switch via the sheet tabs at the bottom.
 • For SPSS/SAS, View ▸ Show Field Labels swaps codes and names for value labels and variable labels.
+• SPSS/SAS declared types (currency, percent, date, categorical, ordinal…) are matched automatically; currency and percent columns show their symbols.
 
 [Encoding]
 • Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use View ▸ Encoding. No re-indexing needed.
