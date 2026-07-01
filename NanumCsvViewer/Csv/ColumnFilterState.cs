@@ -170,7 +170,7 @@ namespace NanumCsvViewer.Csv
                 int col = f.Column; var min = f.Min; var max = f.Max;
                 yield return row =>
                 {
-                    if (!double.TryParse(Cell(row, col), NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
+                    if (!NumericAffix.TryParseNumber(Cell(row, col), out double d))
                         return false;
                     if (min is double mn && d < mn) return false;
                     if (max is double mx && d > mx) return false;

@@ -481,7 +481,10 @@ namespace NanumCsvViewer
                 string[] row = _doc.GetDisplayRow(e.RowIndex);
                 // 그리드 셀은 길이 제한 미리보기로 표시(긴 XML/CLOB의 비싼 텍스트 레이아웃 방지).
                 // 전체 값은 셀 값 표시줄·상세 패널(F4)에서 그대로 본다.
-                e.Value = e.ColumnIndex < row.Length ? PreviewCell(row[e.ColumnIndex]) : string.Empty;
+                // 통화·퍼센트 컬럼은 표시 스킨(기호/%)을 입힌다(밑값은 그대로 보존).
+                e.Value = e.ColumnIndex < row.Length
+                    ? PreviewCell(FormatDisplayCell(e.ColumnIndex, row[e.ColumnIndex]))
+                    : string.Empty;
             }
             catch (Exception ex)
             {

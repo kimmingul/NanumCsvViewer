@@ -289,6 +289,25 @@ namespace NanumCsvViewer
             var report = ColumnStatisticsBuilder.Summarize(doc.Header, sample);
             _columnSummaries = report.Columns.ToArray();
 
+            // SAS/SPSS가 파일에 명시한 선언 타입이 있으면 추론을 오버라이드(지정된 타입으로 매칭).
+            var hints = _workbook?.ColumnHints(_currentSheetIndex);
+            if (hints is not null)
+            {
+                for (int c = 0; c < _columnSummaries.Length && c < hints.Count; c++)
+                {
+                    var hint = hints[c];
+                    if (hint is null) continue;
+                    _columnSummaries[c] = _columnSummaries[c] with
+                    {
+                        InferredType = hint.Type,
+                        CurrencySymbol = hint.CurrencySymbol,
+                        PercentIsFraction = hint.PercentIsFraction,
+                        // 범주/순서형 등 비숫자로 재지정되면 코드의 평균 등 무의미한 수치 통계를 제거.
+                        Numeric = hint.Type.IsNumeric() ? _columnSummaries[c].Numeric : null,
+                    };
+                }
+            }
+
             for (int c = 0; c < grid.Columns.Count && c < _columnSummaries.Length; c++)
             {
                 var s = _columnSummaries[c];
@@ -356,11 +375,15 @@ namespace NanumCsvViewer
         {
             ColumnValueType.Integer => "INT",
             ColumnValueType.Float => "FLT",
+            ColumnValueType.Currency => "CUR",
+            ColumnValueType.Percent => "PCT",
+            ColumnValueType.Scientific => "SCI",
             ColumnValueType.Date => "DATE",
             ColumnValueType.DateTime => "DTTM",
             ColumnValueType.Time => "TIME",
             ColumnValueType.Boolean => "BOOL",
             ColumnValueType.Categorical => "CAT",
+            ColumnValueType.Ordinal => "ORD",
             ColumnValueType.Identifier => "ID",
             ColumnValueType.String => "STR",
             ColumnValueType.Empty => "—",
@@ -371,11 +394,15 @@ namespace NanumCsvViewer
         {
             ColumnValueType.Integer => Color.FromArgb(46, 111, 176),     // 파랑
             ColumnValueType.Float => Color.FromArgb(27, 158, 119),       // 청록
+            ColumnValueType.Currency => Color.FromArgb(0, 137, 123),     // 짙은 청록(통화)
+            ColumnValueType.Percent => Color.FromArgb(56, 142, 60),      // 초록(퍼센트)
+            ColumnValueType.Scientific => Color.FromArgb(0, 121, 145),   // 하늘청록(지수)
             ColumnValueType.Date => Color.FromArgb(123, 94, 167),        // 보라
             ColumnValueType.DateTime => Color.FromArgb(101, 79, 140),    // 진보라
             ColumnValueType.Time => Color.FromArgb(150, 111, 196),       // 연보라
             ColumnValueType.Boolean => Color.FromArgb(210, 105, 30),     // 주황
             ColumnValueType.Categorical => Color.FromArgb(184, 134, 11), // 황금
+            ColumnValueType.Ordinal => Color.FromArgb(160, 120, 30),     // 짙은 황금(순서형)
             ColumnValueType.Identifier => Color.FromArgb(96, 125, 139),  // 청회색
             ColumnValueType.String => Color.FromArgb(120, 120, 120),     // 회색
             ColumnValueType.Empty => Color.FromArgb(160, 160, 160),      // 연회색
@@ -398,9 +425,15 @@ namespace NanumCsvViewer
         }
 
         private bool IsNumericColumn(int c)
-            => c < _columnSummaries.Length &&
-               (_columnSummaries[c].InferredType == ColumnValueType.Integer ||
-                _columnSummaries[c].InferredType == ColumnValueType.Float);
+            => c < _columnSummaries.Length && _columnSummaries[c].InferredType.IsNumeric();
+
+        // 통화·퍼센트 컬럼의 표시 스킨(정렬·통계·복사는 밑값 사용, 표시 전용). 로직은 CellDisplay에서 검증.
+        private string FormatDisplayCell(int col, string raw)
+        {
+            if (col >= _columnSummaries.Length) return raw;
+            var s = _columnSummaries[col];
+            return CellDisplay.Format(s.InferredType, s.CurrencySymbol, s.PercentIsFraction, raw);
+        }
 
         private int FirstNumericColumn()
         {
@@ -707,8 +740,8 @@ namespace NanumCsvViewer
 
             var type = col < _columnSummaries.Length ? _columnSummaries[col].InferredType : ColumnValueType.String;
 
-            // 숫자 범위(Integer / Float) — 고유값이 적으면 체크박스가 더 유용하므로 폴백.
-            if (type is ColumnValueType.Integer or ColumnValueType.Float && !IsLowCardinality(col))
+            // 숫자 범위(Integer/Float/Currency/Percent/Scientific) — 고유값이 적으면 체크박스가 더 유용하므로 폴백.
+            if (type.IsNumeric() && !IsLowCardinality(col))
             {
                 var existing = _columnFilters.NumericFilters.FirstOrDefault(f => f.Column == col);
                 using var popup = new ColumnFilterPopup(name, existing?.Min, existing?.Max, _palette);

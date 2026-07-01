@@ -4,12 +4,13 @@ using System.Text;
 using Curiosity.SPSS.DataReader;
 using Curiosity.SPSS.SpssDataset;
 using ExcelDataReader;
+using NanumCsvViewer.Csv;
 using SasReader;
 
 namespace NanumCsvViewer.Import
 {
-    /// <summary>임포트된 한 시트(=엑셀 시트, SAS 데이터셋, 또는 SPSS 데이터셋)의 이름과 변환된 임시 CSV 경로.</summary>
-    public sealed record ImportedSheet(string Name, string CsvPath);
+    /// <summary>임포트된 한 시트의 이름·변환된 임시 CSV 경로·컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).</summary>
+    public sealed record ImportedSheet(string Name, string CsvPath, IReadOnlyList<ColumnTypeHint?>? Hints = null);
 
     /// <summary>
     /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav) 파일을 시트별 UTF-8 CSV로 변환한다.
@@ -96,9 +97,12 @@ namespace NanumCsvViewer.Import
                 ? Path.GetFileNameWithoutExtension(path) : props.getName();
             string csv = Path.Combine(tempDir, "sheet_0.csv");
 
+            var columns = reader.getColumns();
+            // SAS 값은 라벨 표시 모드에서도 바뀌지 않으므로(헤더만 변경) 선언 힌트는 항상 유효.
+            var hints = columns.Select(FormatMappers.MapSas).ToArray();
+
             using (var writer = NewCsvWriter(csv))
             {
-                var columns = reader.getColumns();
                 writer.WriteLine(string.Join(",", columns.Select(col =>
                     Escape(ResolveHeader(col.getName(), col.getLabel(), showLabels)))));
                 long rowCount = props.getRowCount();
@@ -111,7 +115,7 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv) };
+            return new List<ImportedSheet> { new(name, csv, hints) };
         }
 
         // SPSS(.sav)는 단일 데이터셋 → 시트 1개. 헤더는 변수명, 값은 원값(코드)을 그대로 내보내
@@ -123,6 +127,10 @@ namespace NanumCsvViewer.Import
             var vars = reader.Variables.ToList();
             string name = Path.GetFileNameWithoutExtension(path);
             string csv = Path.Combine(tempDir, "sheet_0.csv");
+
+            // 라벨 표시 모드면 값 라벨로 코드를 치환하므로 선언 타입 힌트는 무의미(문자 표시) → null.
+            var hints = showLabels ? null
+                : vars.Select(FormatMappers.MapSpss).ToArray();
 
             using (var writer = NewCsvWriter(csv))
             {
@@ -136,7 +144,7 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv) };
+            return new List<ImportedSheet> { new(name, csv, hints) };
         }
 
         // 라벨 모드에서 값 라벨이 있으면 코드를 라벨로 치환(예: 1→"남"). 없으면 원값 포맷.
@@ -186,6 +194,7 @@ namespace NanumCsvViewer.Import
         /// <summary>이 워크북이 변수/변수라벨을 가진 포맷(SPSS·SAS)이라 라벨 토글이 의미 있는지.</summary>
         public bool SupportsFieldLabels => TabularImporter.SupportsFieldLabels(SourcePath);
         private readonly string[] _csvPaths;
+        private readonly IReadOnlyList<ColumnTypeHint?>?[] _hints;
         private readonly string _tempDir;
 
         private WorkbookSession(string sourcePath, string tempDir, IReadOnlyList<ImportedSheet> sheets, bool showLabels)
@@ -195,7 +204,12 @@ namespace NanumCsvViewer.Import
             ShowLabels = showLabels;
             SheetNames = sheets.Select(s => s.Name).ToArray();
             _csvPaths = sheets.Select(s => s.CsvPath).ToArray();
+            _hints = sheets.Select(s => s.Hints).ToArray();
         }
+
+        /// <summary>해당 시트의 컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).</summary>
+        public IReadOnlyList<ColumnTypeHint?>? ColumnHints(int sheetIndex)
+            => sheetIndex >= 0 && sheetIndex < _hints.Length ? _hints[sheetIndex] : null;
 
         public static WorkbookSession Create(string path, bool showLabels = false)
         {
