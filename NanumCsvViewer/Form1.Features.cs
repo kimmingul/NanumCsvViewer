@@ -24,8 +24,9 @@ namespace NanumCsvViewer
         private ToolStripButton? _badgeToggleButton;
         private bool _syncingBadgeToggle;
 
-        // SPSS·SAS 필드 라벨 표시 토글(보기 메뉴). 현재 워크북을 재임포트·재로드한다.
+        // SPSS·SAS 필드 라벨 표시 토글(보기 메뉴 + 툴바 버튼). 현재 워크북을 재임포트·재로드한다.
         private ToolStripMenuItem? _fieldLabelsMenu;
+        private ToolStripButton? _fieldLabelsToggleButton;
         private int _currentSheetIndex;
         private bool _reimporting;        // 라벨 모드 재임포트 진행 중(재진입 직렬화)
         private bool _syncingFieldLabels; // 체크 상태를 코드로 되돌릴 때 CheckedChanged 억제
@@ -160,6 +161,22 @@ namespace NanumCsvViewer
             _badgeToggleButton.CheckedChanged += (_, _) => { if (!_syncingBadgeToggle) SetShowTypeBadges(_badgeToggleButton.Checked); };
             toolStrip1.Items.Add(_badgeToggleButton);
 
+            // 필드 라벨 토글 툴바 버튼 — 배지 버튼 뒤에 추가하면 우측 정렬상 배지 버튼 왼쪽에 놓인다.
+            // SPSS·SAS일 때만 활성(UpdateFeatureMenuState가 관리). 메뉴와 한 상태를 공유.
+            _fieldLabelsToggleButton = new ToolStripButton
+            {
+                CheckOnClick = true,
+                Checked = _settings.ShowFieldLabels,
+                Enabled = false,
+                Alignment = ToolStripItemAlignment.Right,
+                DisplayStyle = ToolStripItemDisplayStyle.Image,
+                ImageScaling = ToolStripItemImageScaling.None,
+                Image = UiIcons.FieldLabels(),
+                Name = "fieldLabelsToggleButton",
+            };
+            _fieldLabelsToggleButton.CheckedChanged += (_, _) => { if (!_syncingFieldLabels) SetShowFieldLabels(_fieldLabelsToggleButton.Checked); };
+            toolStrip1.Items.Add(_fieldLabelsToggleButton);
+
             // 드래그앤드롭 가져오기
             AllowDrop = true;
             DragEnter += OnFeatureDragEnter;
@@ -210,6 +227,8 @@ namespace NanumCsvViewer
                 item.Text = LT(en, ko);
             if (_badgeToggleButton is not null)
                 _badgeToggleButton.ToolTipText = LT("Toggle type badges", "타입 배지 표시 전환");
+            if (_fieldLabelsToggleButton is not null)
+                _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
@@ -239,9 +258,10 @@ namespace NanumCsvViewer
             if (_perfMenu is not null) _perfMenu.Enabled = _doc is not null;
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
-            // 필드 라벨 토글: 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
-            if (_fieldLabelsMenu is not null)
-                _fieldLabelsMenu.Enabled = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
+            // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
+            bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
+            if (_fieldLabelsMenu is not null) _fieldLabelsMenu.Enabled = labelToggleReady;
+            if (_fieldLabelsToggleButton is not null) _fieldLabelsToggleButton.Enabled = labelToggleReady;
 
             bool open = _doc is not null && !_busy;
             if (_copyCellsMenu is not null) _copyCellsMenu.Enabled = open;
@@ -980,12 +1000,12 @@ namespace NanumCsvViewer
             }
         }
 
-        // 체크 상태를 코드로 설정(핸들러 재진입 억제).
+        // 체크 상태를 코드로 설정(메뉴+툴바 버튼 동기화, 핸들러 재진입 억제).
         private void SyncFieldLabelsChecked(bool value)
         {
-            if (_fieldLabelsMenu is null || _fieldLabelsMenu.Checked == value) return;
             _syncingFieldLabels = true;
-            _fieldLabelsMenu.Checked = value;
+            if (_fieldLabelsMenu is not null) _fieldLabelsMenu.Checked = value;
+            if (_fieldLabelsToggleButton is not null) _fieldLabelsToggleButton.Checked = value;
             _syncingFieldLabels = false;
         }
 

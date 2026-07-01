@@ -250,6 +250,35 @@ namespace NanumCsvViewer
             return bmp;
         }
 
+        // ── Field labels toggle ───────────────────────────────
+        public static Bitmap FieldLabels()
+        {
+            var bmp = New(out var g);
+            using (g)
+            {
+                // 태그 윤곽선 + 안쪽 텍스트 두 줄 — '라벨(텍스트)'을 상징.
+                // 배지(솔리드 파랑 알약 + 흰 점)와 색(초록)·형태(윤곽선)·내용(텍스트 줄)이 모두 달라 혼동을 없앤다.
+                using var pen = Stroke(Green, 1.4f);
+                using var path = new GraphicsPath();
+                path.AddLines(new[]
+                {
+                    new PointF(3f, 8f),      // 왼쪽 뾰족한 끝
+                    new PointF(7f, 4.2f),
+                    new PointF(13f, 4.2f),
+                    new PointF(13f, 11.8f),
+                    new PointF(7f, 11.8f),
+                });
+                path.CloseFigure();
+                g.DrawPath(pen, path);
+                using var dot = new SolidBrush(Green);
+                g.FillEllipse(dot, 4.9f, 7.2f, 1.6f, 1.6f);      // 태그 구멍
+                using var line = Stroke(Green, 1.2f);
+                g.DrawLine(line, 8.4f, 7f, 11.9f, 7f);            // 라벨 텍스트 줄 1
+                g.DrawLine(line, 8.4f, 9.2f, 10.9f, 9.2f);        // 라벨 텍스트 줄 2(짧게)
+            }
+            return bmp;
+        }
+
         // ── Theme toggle ──────────────────────────────────────
         public static Bitmap Sun()
         {
