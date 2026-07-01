@@ -138,7 +138,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
   <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — Quick Guide
 
 [Open]
-• File ▸ Open (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls) and SAS (.sas7bdat).
+• File ▸ Open (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls), SAS (.sas7bdat), and SPSS (.sav).
 • The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
 • Multi-sheet Excel workbooks switch via the sheet tabs at the bottom.
 

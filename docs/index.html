@@ -433,9 +433,9 @@
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg></div>
-            <h3 data-i18n="f7.h">엑셀 · SAS · 멀티시트</h3>
-            <p data-i18n="f7.p">엑셀(.xlsx/.xls)과 SAS(.sas7bdat)를 바로 엽니다. 여러 시트는 하단 탭으로 전환하고, 열린 뒤에는 CSV처럼 필터·정렬·분석·내보내기를 그대로 씁니다.</p>
-            <div class="tags"><b data-i18n="f7.t1">.xlsx · .xls</b><b data-i18n="f7.t2">.sas7bdat</b></div>
+            <h3 data-i18n="f7.h">엑셀 · SAS · SPSS</h3>
+            <p data-i18n="f7.p">엑셀(.xlsx/.xls)·SAS(.sas7bdat)·SPSS(.sav)를 바로 엽니다. 여러 시트는 하단 탭으로 전환하고, 열린 뒤에는 CSV처럼 필터·정렬·분석·내보내기를 그대로 씁니다.</p>
+            <div class="tags"><b data-i18n="f7.t1">.xlsx · .xls</b><b data-i18n="f7.t2">.sas7bdat</b><b data-i18n="f7.t3">.sav</b></div>
           </article>
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg></div>
@@ -496,7 +496,7 @@
       <div class="wrap">
         <div class="sec-head center reveal">
           <p class="sec-eyebrow" data-i18n="dl.eyebrow">다운로드</p>
-          <h2 class="sec-title">Nanum CSV Viewer v1.9.1</h2>
+          <h2 class="sec-title">Nanum CSV Viewer v1.10.0</h2>
           <p class="sec-lede" data-i18n="dl.lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
         </div>
         <div class="dl-grid">
@@ -504,16 +504,16 @@
             <div class="arch"><span class="archname">Windows x64</span><span class="pill" data-i18n="dl.x64pill">대부분의 PC</span></div>
             <p class="for" data-i18n="dl.x64for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.9.1/NanumCsvViewer-v1.9.1-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.9.1/NanumCsvViewer-v1.9.1-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.10.0/NanumCsvViewer-v1.10.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.10.0/NanumCsvViewer-v1.10.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
           <div class="dl reveal">
             <div class="arch"><span class="archname">Windows ARM64</span><span class="pill" data-i18n="dl.armpill">ARM PC</span></div>
             <p class="for" data-i18n="dl.armfor">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.9.1/NanumCsvViewer-v1.9.1-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.9.1/NanumCsvViewer-v1.9.1-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.10.0/NanumCsvViewer-v1.10.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.10.0/NanumCsvViewer-v1.10.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
         </div>
@@ -595,10 +595,11 @@
         'f6.p': { ko: '패싯 패널로 컬럼별 분포를 보고 막대 클릭으로 즉시 필터. 수치 분포·날짜 히스토그램·중복·그룹별 집계와 상관·t검정·카이제곱까지, 정확한 p값·신뢰구간을 PC에서 계산합니다.', en: 'See per-column distributions in the facets panel and click a bar to filter instantly. Numeric distributions, date histograms, duplicates, group-by — plus correlation, t-tests, and chi-square with accurate p-values, all on your PC.' },
         'f6.t1': { ko: '그룹바이', en: 'Group by' },
         'f6.t2': { ko: 't검정 · χ²', en: 't-test · χ²' },
-        'f7.h': { ko: '엑셀 · SAS · 멀티시트', en: 'Excel · SAS · multi-sheet' },
-        'f7.p': { ko: '엑셀(.xlsx/.xls)과 SAS(.sas7bdat)를 바로 엽니다. 여러 시트는 하단 탭으로 전환하고, 열린 뒤에는 CSV처럼 필터·정렬·분석·내보내기를 그대로 씁니다.', en: 'Open Excel (.xlsx/.xls) and SAS (.sas7bdat) directly. Switch sheets via tabs at the bottom; once open, use the same filter, sort, analysis, and export as CSV.' },
+        'f7.h': { ko: '엑셀 · SAS · SPSS', en: 'Excel · SAS · SPSS' },
+        'f7.p': { ko: '엑셀(.xlsx/.xls)·SAS(.sas7bdat)·SPSS(.sav)를 바로 엽니다. 여러 시트는 하단 탭으로 전환하고, 열린 뒤에는 CSV처럼 필터·정렬·분석·내보내기를 그대로 씁니다.', en: 'Open Excel (.xlsx/.xls), SAS (.sas7bdat), and SPSS (.sav) directly. Switch sheets via tabs at the bottom; once open, use the same filter, sort, analysis, and export as CSV.' },
         'f7.t1': { ko: '.xlsx · .xls', en: '.xlsx · .xls' },
         'f7.t2': { ko: '.sas7bdat', en: '.sas7bdat' },
+        'f7.t3': { ko: '.sav', en: '.sav' },
         'f8.h': { ko: '상세 패널 · 원본 행번호', en: 'Inspector · source row #' },
         'f8.p': { ko: 'F4 우측 상세 패널로 선택한 행의 모든 컬럼을 컬럼명+값으로 봅니다. 행 헤더의 원본 행번호로 필터·정렬해도 위치를 추적하고, 셀 내 줄바꿈도 여러 줄로 표시합니다.', en: 'The F4 inspector shows every column of the selected row as name + value. Source row numbers in the row header track positions through filter and sort, and multi-line cells display across lines.' },
         'f8.t1': { ko: 'F4 인스펙터', en: 'F4 inspector' },

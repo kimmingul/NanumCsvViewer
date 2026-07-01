@@ -138,7 +138,7 @@ UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
   <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — 빠른 사용 안내
 
 [열기]
-• File ▸ Open (Ctrl+O)로 .csv / .txt 와 함께 엑셀(.xlsx/.xls)·SAS(.sas7bdat)도 엽니다.
+• File ▸ Open (Ctrl+O)로 .csv / .txt 와 함께 엑셀(.xlsx/.xls)·SAS(.sas7bdat)·SPSS(.sav)도 엽니다.
 • 첫 페이지는 즉시 표시되고 나머지는 백그라운드로 인덱싱됩니다(하단 진행바). 인덱싱 중에도 스크롤할 수 있습니다.
 • 시트가 여러 개인 엑셀은 하단 시트 탭으로 전환합니다.
 
