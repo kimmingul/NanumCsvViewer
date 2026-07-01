@@ -47,21 +47,38 @@ namespace NanumCsvViewer.Import
             return new ColumnTypeHint(dec > 0 ? ColumnValueType.Float : ColumnValueType.Integer);
         }
 
-        /// <summary>SAS 컬럼 → 타입 힌트(없으면 null). SAS 값 라벨은 외부 카탈로그라 범주는 다루지 않는다.</summary>
+        // SAS 일반 숫자 포맷의 기본 이름(정확 매칭). 날짜 포맷(DATE·YYMMDD…)과 겹치지 않도록 StartsWith 대신 정확 매칭.
+        private static readonly HashSet<string> PlainNumericSasFormats =
+            new(StringComparer.Ordinal) { "BEST", "BESTD", "COMMA", "COMMAX", "F", "Z", "D", "NUMX" };
+
+        /// <summary>SAS 컬럼 → 타입 힌트(없으면 null). 값 라벨은 외부 카탈로그(.sas7bcat)라 다루지 않는다(문자는 추론 위임).</summary>
         public static ColumnTypeHint? MapSas(Column col)
         {
-            string fmt = (col.getFormat()?.getName() ?? string.Empty).ToUpperInvariant();
-            if (fmt.Length == 0) return null;
+            var f = col.getFormat();
+            return MapSasFormat(col.getType()?.Name, f?.getName(), f?.getPrecision() ?? 0);
+        }
 
-            if (fmt.StartsWith("WON")) return new ColumnTypeHint(ColumnValueType.Currency, '₩');
-            if (fmt.StartsWith("YEN")) return new ColumnTypeHint(ColumnValueType.Currency, '¥');
-            if (fmt.StartsWith("EURO")) return new ColumnTypeHint(ColumnValueType.Currency, '€');
-            if (fmt.StartsWith("DOLLAR") || fmt.StartsWith("NLMNY")) return new ColumnTypeHint(ColumnValueType.Currency, '$');
-            // SAS PERCENT: 리더 반환값의 스케일이 환경마다 다를 수 있어 표시 ×100을 하지 않는다
-            // (표시·필터·통계를 한 스케일로 통일). 값에 그대로 '%'만 붙인다.
-            if (fmt.StartsWith("PERCENT")) return new ColumnTypeHint(ColumnValueType.Percent);
-            if (fmt[0] == 'E' && (fmt.Length == 1 || char.IsDigit(fmt[1]))) return new ColumnTypeHint(ColumnValueType.Scientific);
-            return null;
+        // 프리미티브 기반 SAS 매핑(단위 테스트용). typeName은 SasReader Column.getType().Name("String"/"Double"…).
+        internal static ColumnTypeHint? MapSasFormat(string? typeName, string? formatName, int precision)
+        {
+            // 문자 컬럼: 값 라벨 카탈로그 미지원 → 추론(String/Categorical)에 위임.
+            if (typeName == "String") return null;
+
+            string fmt = (formatName ?? string.Empty).ToUpperInvariant();
+            if (fmt.Length > 0)
+            {
+                if (fmt.StartsWith("WON")) return new ColumnTypeHint(ColumnValueType.Currency, '₩');
+                if (fmt.StartsWith("YEN")) return new ColumnTypeHint(ColumnValueType.Currency, '¥');
+                if (fmt.StartsWith("EURO")) return new ColumnTypeHint(ColumnValueType.Currency, '€');
+                if (fmt.StartsWith("DOLLAR") || fmt.StartsWith("NLMNY")) return new ColumnTypeHint(ColumnValueType.Currency, '$');
+                // SAS PERCENT: 리더 반환 스케일이 불확실해 표시 ×100을 하지 않는다(표시·필터·통계 일관).
+                if (fmt.StartsWith("PERCENT")) return new ColumnTypeHint(ColumnValueType.Percent);
+                if (fmt[0] == 'E' && (fmt.Length == 1 || char.IsDigit(fmt[1]))) return new ColumnTypeHint(ColumnValueType.Scientific);
+                // 날짜/시간 등 일반 숫자 포맷이 아니면 리더가 값을 변환하므로 추론에 위임(예: YYMMDDS → Date).
+                if (!PlainNumericSasFormats.Contains(fmt) && !char.IsDigit(fmt[0])) return null;
+            }
+            // 포맷 없음(대다수 일반 숫자) 또는 일반 숫자 포맷 → 선언 숫자 타입(id의 Identifier 오인 방지, SPSS와 대칭).
+            return new ColumnTypeHint(precision > 0 ? ColumnValueType.Float : ColumnValueType.Integer);
         }
     }
 }

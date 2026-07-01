@@ -81,6 +81,43 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(ColumnValueType.Time, FormatMappers.MapSpss(NumericVar("t", FormatType.TIME))!.Type);
         }
 
+        [Fact]
+        public void MapSas_string_defers_to_inference()
+            => Assert.Null(FormatMappers.MapSasFormat("String", "$", 0));
+
+        [Fact]
+        public void MapSas_plain_numeric_is_declared_integer_float()
+        {
+            // 무포맷/일반 숫자 포맷은 선언 숫자로(‘seq’ 헤더의 Identifier 오인 방지, SPSS와 대칭).
+            Assert.Equal(ColumnValueType.Integer, FormatMappers.MapSasFormat("Double", "", 0)!.Type);
+            Assert.Equal(ColumnValueType.Integer, FormatMappers.MapSasFormat("Double", "BEST", 0)!.Type);
+            Assert.Equal(ColumnValueType.Float, FormatMappers.MapSasFormat("Double", "COMMA", 2)!.Type);
+        }
+
+        [Fact]
+        public void MapSas_date_format_defers_to_inference()
+            // 날짜 포맷은 리더가 DateTime으로 변환하므로 추론에 위임(Integer로 강제하지 않음).
+            => Assert.Null(FormatMappers.MapSasFormat("Double", "YYMMDDS", 0));
+
+        [Theory]
+        [InlineData("DOLLAR", ColumnValueType.Currency, '$')]
+        [InlineData("WON", ColumnValueType.Currency, '₩')]
+        [InlineData("YEN", ColumnValueType.Currency, '¥')]
+        [InlineData("EURO", ColumnValueType.Currency, '€')]
+        public void MapSas_currency_formats(string fmt, ColumnValueType type, char sym)
+        {
+            var h = FormatMappers.MapSasFormat("Double", fmt, 0)!;
+            Assert.Equal(type, h.Type);
+            Assert.Equal(sym, h.CurrencySymbol);
+        }
+
+        [Fact]
+        public void MapSas_percent_and_scientific()
+        {
+            Assert.Equal(ColumnValueType.Percent, FormatMappers.MapSasFormat("Double", "PERCENT", 0)!.Type);
+            Assert.Equal(ColumnValueType.Scientific, FormatMappers.MapSasFormat("Double", "E", 0)!.Type);
+        }
+
         private static Variable NumericVar(string name, FormatType fmt, int dec = 0) => new(name)
         {
             Type = DataType.Numeric,
