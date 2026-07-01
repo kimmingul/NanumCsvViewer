@@ -1,6 +1,8 @@
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using Curiosity.SPSS.DataReader;
+using Curiosity.SPSS.SpssDataset;
 using NanumCsvViewer.Import;
 
 namespace NanumCsvViewer.Tests
@@ -8,13 +10,76 @@ namespace NanumCsvViewer.Tests
     public class WorkbookImportTests
     {
         [Fact]
-        public void IsImportable_matches_excel_and_sas_extensions()
+        public void IsImportable_matches_excel_sas_and_spss_extensions()
         {
             Assert.True(TabularImporter.IsImportable("a.xlsx"));
             Assert.True(TabularImporter.IsImportable("a.XLS"));
             Assert.True(TabularImporter.IsImportable("data.sas7bdat"));
+            Assert.True(TabularImporter.IsImportable("survey.sav"));
+            Assert.True(TabularImporter.IsImportable("survey.SAV"));
             Assert.False(TabularImporter.IsImportable("a.csv"));
             Assert.False(TabularImporter.IsImportable("a.txt"));
+        }
+
+        [Theory]
+        [InlineData("@2010_TotalProfit", "2010_TotalProfit")]  // 숫자로 시작하는 변수명의 라이브러리 '@' 접두 제거
+        [InlineData("@x", "x")]
+        [InlineData("Region", "Region")]                       // 정상 이름은 그대로
+        [InlineData("@", "@")]                                 // '@' 단독은 보존(길이 1 가드)
+        [InlineData("a@b", "a@b")]                             // 선행이 아닌 '@'는 건드리지 않음
+        public void SpssHeaderName_strips_only_leading_at(string input, string expected)
+            => Assert.Equal(expected, TabularImporter.SpssHeaderName(input));
+
+        [Fact]
+        public void Imports_sav_with_values_and_maps_sysmis_to_empty()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_savtest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string sav = Path.Combine(dir, "clinic.sav");
+                CreateSampleSav(sav);
+
+                var sheets = TabularImporter.Import(sav, Path.Combine(dir, "out"));
+
+                Assert.Single(sheets);
+                Assert.Equal("clinic", sheets[0].Name);   // 시트명 = 파일명
+
+                var lines = File.ReadAllText(sheets[0].CsvPath).Replace("\r\n", "\n").Trim().Split('\n');
+                Assert.Equal("id,name", lines[0]);
+                Assert.Equal("1,Kim", lines[1]);
+                Assert.Equal(",Lee", lines[2]);            // 시스템 결측(sysmis) → 빈 셀
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        // 숫자 1개 + 텍스트 1개, 2행(2번째 행의 숫자는 sysmis)짜리 최소 .sav를 생성.
+        private static void CreateSampleSav(string path)
+        {
+            var idVar = new Variable("id")
+            {
+                Type = DataType.Numeric,
+                MeasurementType = MeasurementType.Scale,
+                PrintFormat = new OutputFormat(FormatType.F, 8, 0),
+                WriteFormat = new OutputFormat(FormatType.F, 8, 0),
+            };
+            var nameVar = new Variable("name")
+            {
+                Type = DataType.Text,
+                MeasurementType = MeasurementType.Nominal,
+                Width = 20,
+                TextWidth = 20,
+                PrintFormat = new OutputFormat(FormatType.A, 20, 0),
+                WriteFormat = new OutputFormat(FormatType.A, 20, 0),
+            };
+
+            using var os = File.Create(path);
+            using var writer = new SpssWriter(os, new List<Variable> { idVar, nameVar },
+                Array.Empty<Mrset>(), new SpssOptions(), leaveOpen: false);
+
+            var r1 = writer.CreateRecord(); r1[0] = 1.0; r1[1] = "Kim"; writer.WriteRecord(r1);
+            var r2 = writer.CreateRecord(); r2[0] = double.NaN; r2[1] = "Lee"; writer.WriteRecord(r2);
+            writer.EndFile();
         }
 
         [Fact]

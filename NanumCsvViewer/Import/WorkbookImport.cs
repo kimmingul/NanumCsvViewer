@@ -1,16 +1,17 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using Curiosity.SPSS.DataReader;
 using ExcelDataReader;
 using SasReader;
 
 namespace NanumCsvViewer.Import
 {
-    /// <summary>임포트된 한 시트(=엑셀 시트 또는 SAS 데이터셋)의 이름과 변환된 임시 CSV 경로.</summary>
+    /// <summary>임포트된 한 시트(=엑셀 시트, SAS 데이터셋, 또는 SPSS 데이터셋)의 이름과 변환된 임시 CSV 경로.</summary>
     public sealed record ImportedSheet(string Name, string CsvPath);
 
     /// <summary>
-    /// 엑셀(xlsx/xls)·SAS(sas7bdat) 파일을 시트별 UTF-8 CSV로 변환한다.
+    /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav) 파일을 시트별 UTF-8 CSV로 변환한다.
     /// 변환 결과를 기존 CSV 엔진(VirtualCsvDocument)이 그대로 열어 모든 기능을 재사용한다.
     /// </summary>
     public static class TabularImporter
@@ -22,7 +23,7 @@ namespace NanumCsvViewer.Import
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         }
 
-        private static readonly string[] Extensions = { ".xlsx", ".xlsm", ".xls", ".sas7bdat" };
+        private static readonly string[] Extensions = { ".xlsx", ".xlsm", ".xls", ".sas7bdat", ".sav" };
         private static readonly char[] CsvSpecials = { ',', '"', '\n', '\r' };
 
         public static bool IsImportable(string path)
@@ -32,9 +33,12 @@ namespace NanumCsvViewer.Import
         public static IReadOnlyList<ImportedSheet> Import(string path, string tempDir)
         {
             Directory.CreateDirectory(tempDir);
-            return Path.GetExtension(path).ToLowerInvariant() == ".sas7bdat"
-                ? ImportSas(path, tempDir)
-                : ImportExcel(path, tempDir);
+            return Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".sas7bdat" => ImportSas(path, tempDir),
+                ".sav" => ImportSpss(path, tempDir),
+                _ => ImportExcel(path, tempDir),
+            };
         }
 
         private static List<ImportedSheet> ImportExcel(string path, string tempDir)
@@ -92,6 +96,34 @@ namespace NanumCsvViewer.Import
             return new List<ImportedSheet> { new(name, csv) };
         }
 
+        // SPSS(.sav)는 단일 데이터셋 → 시트 1개. 헤더는 변수명, 값은 원값(코드)을 그대로 내보내
+        // 기존 타입 추론이 정상 동작하게 한다. Value Label 전개·Variable Label 노출은 후속(Phase 2).
+        private static List<ImportedSheet> ImportSpss(string path, string tempDir)
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = new SpssReader(stream);
+            var vars = reader.Variables.ToList();
+            string name = Path.GetFileNameWithoutExtension(path);
+            string csv = Path.Combine(tempDir, "sheet_0.csv");
+
+            using (var writer = NewCsvWriter(csv))
+            {
+                writer.WriteLine(string.Join(",", vars.Select(v => Escape(SpssHeaderName(v.Name)))));
+                foreach (var record in reader.Records)
+                {
+                    var cells = new string[vars.Count];
+                    for (int c = 0; c < vars.Count; c++) cells[c] = Escape(FormatCell(record.GetValue(vars[c])));
+                    writer.WriteLine(string.Join(",", cells));
+                }
+            }
+            return new List<ImportedSheet> { new(name, csv) };
+        }
+
+        // Curiosity.SPSS는 숫자로 시작하는 변수명에 '@'를 접두한다(SPSS 식별자 규칙 표현).
+        // SPSS 식별자는 '@'로 시작할 수 없으므로 선행 '@' 하나를 제거해 원래 표시명을 복원한다.
+        internal static string SpssHeaderName(string name)
+            => name.Length > 1 && name[0] == '@' ? name[1..] : name;
+
         private static StreamWriter NewCsvWriter(string path)
             => new(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -102,7 +134,9 @@ namespace NanumCsvViewer.Import
             DateTime dt => dt.TimeOfDay == TimeSpan.Zero
                 ? dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 : dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            double d when double.IsNaN(d) => "",   // SPSS 시스템 결측(sysmis)은 NaN → 빈 셀
             double d => d.ToString("0.################", CultureInfo.InvariantCulture),
+            float f when float.IsNaN(f) => "",
             float f => f.ToString("0.################", CultureInfo.InvariantCulture),
             bool b => b ? "true" : "false",
             _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
