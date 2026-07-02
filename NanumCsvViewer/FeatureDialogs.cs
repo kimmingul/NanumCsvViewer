@@ -168,10 +168,12 @@ namespace NanumCsvViewer
         }
     }
 
-    /// <summary>분석/통계 결과를 고정폭 텍스트로 표시(복사 가능). 큰 표도 스크롤로 확인.</summary>
+    /// <summary>분석/통계 결과를 고정폭 텍스트로 표시(복사 가능). 큰 표도 스크롤로 확인.
+    /// actionLabel/onAction을 주면 좌측에 액션 버튼(예: "차트로 보기") 추가 — 이슈 #19 역방향 진입.</summary>
     internal sealed class ResultForm : Form
     {
-        public ResultForm(string title, string body, ThemePalette palette)
+        public ResultForm(string title, string body, ThemePalette palette,
+            string? actionLabel = null, Action? onAction = null)
         {
             Text = title;
             StartPosition = FormStartPosition.CenterParent;
@@ -205,6 +207,12 @@ namespace NanumCsvViewer
             copy.Click += (_, _) => { try { Clipboard.SetText(body); } catch { } };
             bottom.Controls.Add(close);
             bottom.Controls.Add(copy);
+            if (actionLabel is not null && onAction is not null)
+            {
+                var action = new Button { Text = actionLabel, AutoSize = true, MinimumSize = new Size(110, 26) };
+                action.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); onAction(); };
+                bottom.Controls.Add(action); // RightToLeft라 가장 왼쪽에 놓임
+            }
 
             Controls.Add(text);
             Controls.Add(bottom);

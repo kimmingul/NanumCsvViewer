@@ -18,6 +18,10 @@ namespace NanumCsvViewer
         private readonly Dictionary<int, ColumnValueType> _manualTypeOverrides = new();
         private ContextMenuStrip? _typeMenu; // 헤더 우클릭 메뉴(컬럼마다 새로 구성)
 
+        // 시각화(이슈 #19): 모델리스 차트 빌더 창들. 문서/시트 전환 시 일괄 닫음(뷰 스냅샷이 낡기 때문).
+        private readonly List<ChartForm> _chartForms = new();
+        private ToolStripMenuItem? _vizMenu;
+
         // 그리드/인스펙터 복사 (그리드 향상)
         private ToolStripMenuItem? _copyCellsMenu, _copyRowMenu, _copyColMenu;
         private Button? _inspectorCopyText, _inspectorCopyJson;
@@ -155,6 +159,32 @@ namespace NanumCsvViewer
             if (pivotIdx < 0) pivotIdx = menuStrip1.Items.Count;
             menuStrip1.Items.Insert(pivotIdx, _pivotTopMenu);
 
+            // 새 최상위 메뉴: 시각화(이슈 #19) — 분석과 피벗 사이. 차트 빌더 + 분석 축(분포/관계/범주/시계열) 프리셋.
+            _vizMenu = new ToolStripMenuItem();
+            _vizMenu.DropDownItems.Add(MakeItem("Chart Builder…", "차트 빌더…", (_, _) => OpenChartBuilder(ChartKind.Histogram)));
+            _vizMenu.DropDownItems.Add(new ToolStripSeparator());
+            var vizDist = new ToolStripMenuItem();
+            RegisterLabel(vizDist, "Distribution", "분포");
+            vizDist.DropDownItems.Add(MakeItem("Histogram · Density…", "히스토그램·밀도…", (_, _) => OpenChartBuilder(ChartKind.Histogram)));
+            vizDist.DropDownItems.Add(MakeItem("Box Plot (groups)…", "박스플롯(그룹)…", (_, _) => OpenChartBuilder(ChartKind.BoxPlot)));
+            vizDist.DropDownItems.Add(MakeItem("Q-Q Plot…", "Q-Q 플롯…", (_, _) => OpenChartBuilder(ChartKind.QqPlot)));
+            _vizMenu.DropDownItems.Add(vizDist);
+            var vizRel = new ToolStripMenuItem();
+            RegisterLabel(vizRel, "Relationship", "관계");
+            vizRel.DropDownItems.Add(MakeItem("Scatter · Regression…", "산점도·회귀…", (_, _) => OpenChartBuilder(ChartKind.Scatter)));
+            vizRel.DropDownItems.Add(MakeItem("Correlation Heatmap…", "상관 히트맵…", (_, _) => OpenChartBuilder(ChartKind.CorrelationHeatmap)));
+            _vizMenu.DropDownItems.Add(vizRel);
+            var vizCat = new ToolStripMenuItem();
+            RegisterLabel(vizCat, "Category", "범주");
+            vizCat.DropDownItems.Add(MakeItem("Pareto…", "파레토…", (_, _) => OpenChartBuilder(ChartKind.Pareto)));
+            _vizMenu.DropDownItems.Add(vizCat);
+            var vizTime = new ToolStripMenuItem();
+            RegisterLabel(vizTime, "Time Series", "시계열");
+            vizTime.DropDownItems.Add(MakeItem("Time Series · Moving Avg…", "시계열·이동평균…", (_, _) => OpenChartBuilder(ChartKind.TimeSeries)));
+            _vizMenu.DropDownItems.Add(vizTime);
+            RegisterLabel(_vizMenu, "Visualization", "시각화");
+            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _vizMenu);
+
             // 타입 배지 토글 툴바 버튼 — 우측 정렬로 추가하면 테마 토글 버튼 왼쪽에 놓인다.
             _badgeToggleButton = new ToolStripButton
             {
@@ -268,6 +298,7 @@ namespace NanumCsvViewer
             if (_restoreViewMenu is not null) _restoreViewMenu.Enabled = ready;
             if (_perfMenu is not null) _perfMenu.Enabled = _doc is not null;
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
+            if (_vizMenu is not null) _vizMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
             // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
             bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
@@ -1657,7 +1688,8 @@ namespace NanumCsvViewer
                 int barLen = maxCount > 0 ? b.Count * 30 / maxCount : 0;
                 sb.AppendLine($"[{b.LowerBound,10:G5} – {b.UpperBound,10:G5}) {b.Count,8:N0} {new string('█', barLen)}");
             }
-            ShowResult(LT("Numeric Distribution", "수치 분포"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Numeric Distribution", "수치 분포"), sb.ToString(), truncated,
+                ChartKind.Histogram, new[] { col.SelectedIndex });
         }
 
         private void AnalyzeDateHistogram()
@@ -1765,7 +1797,8 @@ namespace NanumCsvViewer
             sb.AppendLine($"p-value      {r.PValue:0.0000}");
             sb.AppendLine($"sample size  {r.SampleSize:N0}");
             sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("Correlation", "상관분석"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Correlation", "상관분석"), sb.ToString(), truncated,
+                ChartKind.Scatter, new[] { x.SelectedIndex, y.SelectedIndex });
         }
 
         private void AnalyzeIndependentTTest()
@@ -1802,7 +1835,8 @@ namespace NanumCsvViewer
             sb.AppendLine($"95% CI       [{r.ConfidenceIntervalLow:G6}, {r.ConfidenceIntervalHigh:G6}]");
             sb.AppendLine($"Cohen's d    {r.EffectSize:0.0000}");
             sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("Independent t-test", "독립표본 t검정"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Independent t-test", "독립표본 t검정"), sb.ToString(), truncated,
+                ChartKind.BoxPlot, new[] { vc, gc });
         }
 
         private void AnalyzePairedTTest()
@@ -1913,7 +1947,8 @@ namespace NanumCsvViewer
                 if (!double.IsNaN(d.CoefficientOfVariation)) sb.AppendLine($"CV           {d.CoefficientOfVariation:0.0000}");
                 sb.AppendLine();
             }
-            ShowResult(LT("Descriptive Statistics", "기술통계"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Descriptive Statistics", "기술통계"), sb.ToString(), truncated,
+                ChartKind.Histogram, new[] { cols[0] });
         }
 
         private void AnalyzeFrequency()
@@ -1944,7 +1979,8 @@ namespace NanumCsvViewer
             }
             if (t.Entries.Count > limit)
                 sb.AppendLine(LT($"… {t.Entries.Count - limit:N0} more values", $"… 외 {t.Entries.Count - limit:N0}개 값"));
-            ShowResult(LT("Frequency Table", "빈도분석"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Frequency Table", "빈도분석"), sb.ToString(), truncated,
+                ChartKind.Pareto, new[] { c });
         }
 
         private void AnalyzeOneWayAnova()
@@ -1978,7 +2014,8 @@ namespace NanumCsvViewer
             sb.AppendLine($"p-value      {r.PValue:0.0000}");
             sb.AppendLine($"η² (eta²)    {r.EtaSquared:0.0000}");
             sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(), truncated,
+                ChartKind.BoxPlot, new[] { vc, gc });
         }
 
         private void AnalyzeNormality()
@@ -2009,7 +2046,65 @@ namespace NanumCsvViewer
             sb.AppendLine($"W            {r.W:0.0000}");
             sb.AppendLine($"p-value      {r.PValue:0.0000}");
             sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(), truncated);
+            ShowResultWithChart(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(), truncated,
+                ChartKind.QqPlot, new[] { col.SelectedIndex });
+        }
+
+        // ---------------------------------------------------------------- 시각화 (이슈 #19)
+
+        /// <summary>차트 빌더 창을 연다. shareCtx가 있으면(히트맵→산점도 드릴다운) 부모 스냅샷을 공유해 재수집 비용 0.</summary>
+        private void OpenChartBuilder(ChartKind kind, int[]? presetCols = null, ChartContext? shareCtx = null)
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+
+            ChartContext ctx;
+            if (shareCtx is not null)
+            {
+                ctx = shareCtx;
+            }
+            else
+            {
+                var rows = GatherViewRows(out bool truncated);
+                var names = new string[_doc.ColumnCount];
+                for (int c = 0; c < names.Length; c++)
+                    names[c] = c < grid.Columns.Count ? grid.Columns[c].HeaderText : $"Column{c + 1}";
+                ctx = new ChartContext
+                {
+                    Rows = rows,
+                    ColumnNames = names,
+                    Summaries = _columnSummaries,
+                    Palette = _palette,
+                    RefreshRows = () => GatherViewRows(out _),
+                };
+                ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx); // 드릴다운 = 같은 스냅샷 공유
+                if (truncated)
+                    statusLabel.Text = LT($"Chart uses first {AnalysisRowCap:N0} rows", $"차트는 처음 {AnalysisRowCap:N0}행 사용");
+            }
+
+            var f = new ChartForm(ctx, kind, presetCols) { Owner = this };
+            _chartForms.Add(f);
+            f.FormClosed += (_, _) => _chartForms.Remove(f);
+            f.Show(this);
+        }
+
+        // 문서/시트 전환 시 호출: 열린 차트는 낡은 스냅샷을 보므로 모두 닫는다.
+        private void CloseAllChartForms()
+        {
+            foreach (var f in _chartForms.ToArray())
+            {
+                try { f.Close(); } catch { /* 이미 닫힘 */ }
+            }
+            _chartForms.Clear();
+        }
+
+        /// <summary>통계 결과창 + "차트로 보기" 버튼(이슈 #19 역방향 진입): 결과를 해당 차트로 이어본다.</summary>
+        private void ShowResultWithChart(string title, string body, bool truncated, ChartKind kind, int[]? presetCols)
+        {
+            if (truncated)
+                body = LT($"(showing first {AnalysisRowCap:N0} rows)\n\n", $"(처음 {AnalysisRowCap:N0}행만 표시)\n\n") + body;
+            using var form = new ResultForm(title, body, _palette,
+                LT("View as Chart", "차트로 보기"), () => OpenChartBuilder(kind, presetCols));
+            form.ShowDialog(this);
         }
 
         // ---------------------------------------------------------------- 피벗 빌더 (O · P)

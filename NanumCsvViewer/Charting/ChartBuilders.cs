@@ -449,7 +449,12 @@ namespace NanumCsvViewer.Charting
             return new PlotModel
             {
                 Title = $"Pareto: {colName}",
-                XAxis = new PlotAxis { Kind = PlotAxisKind.Category, Title = colName, Categories = labels },
+                // Min/Max는 누적% 선의 x=인덱스가 카테고리 슬롯 중심에 정확히 놓이도록 설정(-0.5..n-0.5).
+                XAxis = new PlotAxis
+                {
+                    Kind = PlotAxisKind.Category, Title = colName, Categories = labels,
+                    Min = -0.5, Max = labels.Count - 0.5,
+                },
                 YAxis = new PlotAxis { Kind = PlotAxisKind.Numeric, Title = "count", Min = 0, Max = counts.Max() * 1.05 },
                 Y2Axis = new PlotAxis { Kind = PlotAxisKind.Numeric, Title = "cum %", Min = 0, Max = 105, IsPercent = true },
                 Series = new[]

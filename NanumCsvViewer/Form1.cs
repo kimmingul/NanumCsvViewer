@@ -1247,6 +1247,7 @@ namespace NanumCsvViewer
             _manualTypeOverrides.Clear(); // 수동 타입 지정은 문서/시트 단위(이슈 #12)
             _sortKeys.Clear();
             ClearSortGlyphs();
+            CloseAllChartForms();         // 열린 차트는 이전 뷰 스냅샷을 보므로 함께 닫는다(이슈 #19)
         }
 
         private void ResetViewMapOnly()
