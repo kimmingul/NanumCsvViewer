@@ -4,6 +4,7 @@ using System.Text;
 using Curiosity.SPSS.DataReader;
 using Curiosity.SPSS.SpssDataset;
 using ExcelDataReader;
+using Microsoft.Data.Sqlite;
 using NanumCsvViewer.Csv;
 using SasReader;
 
@@ -13,7 +14,7 @@ namespace NanumCsvViewer.Import
     public sealed record ImportedSheet(string Name, string CsvPath, IReadOnlyList<ColumnTypeHint?>? Hints = null);
 
     /// <summary>
-    /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav) 파일을 시트별 UTF-8 CSV로 변환한다.
+    /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav)·SQLite(db/sqlite) 파일을 시트별 UTF-8 CSV로 변환한다.
     /// 변환 결과를 기존 CSV 엔진(VirtualCsvDocument)이 그대로 열어 모든 기능을 재사용한다.
     /// </summary>
     public static class TabularImporter
@@ -25,7 +26,8 @@ namespace NanumCsvViewer.Import
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         }
 
-        private static readonly string[] Extensions = { ".xlsx", ".xlsm", ".xls", ".sas7bdat", ".sav" };
+        private static readonly string[] Extensions =
+            { ".xlsx", ".xlsm", ".xls", ".sas7bdat", ".sav", ".db", ".sqlite", ".sqlite3" };
         private static readonly char[] CsvSpecials = { ',', '"', '\n', '\r' };
 
         public static bool IsImportable(string path)
@@ -49,6 +51,7 @@ namespace NanumCsvViewer.Import
             {
                 ".sas7bdat" => ImportSas(path, tempDir, showLabels),
                 ".sav" => ImportSpss(path, tempDir, showLabels),
+                ".db" or ".sqlite" or ".sqlite3" => ImportSqlite(path, tempDir),
                 _ => ImportExcel(path, tempDir),
             };
         }
@@ -162,6 +165,52 @@ namespace NanumCsvViewer.Import
         internal static string SpssHeaderName(string name)
             => name.Length > 1 && name[0] == '@' ? name[1..] : name;
 
+        // SQLite(이슈 #16): 테이블·뷰 하나가 시트 하나. 읽기 전용으로 열어 원본을 건드리지 않는다.
+        // SQLite에 날짜 타입은 없으므로(TEXT/INTEGER 저장) 기존 CSV 타입 추론이 그대로 동작한다.
+        private static List<ImportedSheet> ImportSqlite(string path, string tempDir)
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false, // 임포트 후 파일 잠금이 남지 않도록
+            };
+            using var conn = new SqliteConnection(builder.ConnectionString);
+            conn.Open();
+
+            var names = new List<string>();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master " +
+                                  "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
+                using var r = cmd.ExecuteReader();
+                while (r.Read()) names.Add(r.GetString(0));
+            }
+
+            var sheets = new List<ImportedSheet>(names.Count);
+            for (int i = 0; i < names.Count; i++)
+            {
+                string csv = Path.Combine(tempDir, $"sheet_{i}.csv");
+                using var cmd = conn.CreateCommand();
+                // 식별자는 파라미터 바인딩이 불가하므로 "…" 인용 + 내부 따옴표 이스케이프로 안전 처리.
+                cmd.CommandText = $"SELECT * FROM \"{names[i].Replace("\"", "\"\"")}\"";
+                using var reader = cmd.ExecuteReader();
+                using var writer = NewCsvWriter(csv);
+                var header = new string[reader.FieldCount];
+                for (int c = 0; c < reader.FieldCount; c++) header[c] = Escape(reader.GetName(c));
+                writer.WriteLine(string.Join(",", header));
+                while (reader.Read())
+                {
+                    var cells = new string[reader.FieldCount];
+                    for (int c = 0; c < reader.FieldCount; c++)
+                        cells[c] = Escape(FormatCell(reader.GetValue(c)));
+                    writer.WriteLine(string.Join(",", cells));
+                }
+                sheets.Add(new ImportedSheet(names[i], csv));
+            }
+            return sheets;
+        }
+
         private static StreamWriter NewCsvWriter(string path)
             => new(path, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -169,6 +218,8 @@ namespace NanumCsvViewer.Import
         private static string FormatCell(object? value) => value switch
         {
             null => "",
+            DBNull => "",                                     // SQLite NULL
+            byte[] b => $"(BLOB {b.Length:N0} B)",            // SQLite BLOB: 내용 대신 크기 표시
             DateTime dt => dt.TimeOfDay == TimeSpan.Zero
                 ? dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 : dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),

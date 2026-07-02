@@ -22,6 +22,87 @@ namespace NanumCsvViewer.Tests
             Assert.False(TabularImporter.IsImportable("a.txt"));
         }
 
+        [Fact]
+        public void IsImportable_matches_sqlite_extensions()
+        {
+            Assert.True(TabularImporter.IsImportable("data.db"));
+            Assert.True(TabularImporter.IsImportable("data.SQLITE"));
+            Assert.True(TabularImporter.IsImportable("data.sqlite3"));
+        }
+
+        // ---- SQLite (이슈 #16) ----
+
+        [Fact]
+        public void ImportSqlite_converts_tables_and_views_to_csv_sheets()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            string db = Path.Combine(dir, "sample.db");
+            try
+            {
+                var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                { DataSource = db, Pooling = false };
+                using (var conn = new Microsoft.Data.Sqlite.SqliteConnection(csb.ConnectionString))
+                {
+                    conn.Open();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        "CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT, height REAL, note TEXT);" +
+                        "INSERT INTO people VALUES (1, '김, 철수', 1.75, NULL);" +           // NULL → 빈 셀
+                        "INSERT INTO people VALUES (2, 'Lee \"Q\"', 1.6, 'ok');" +           // 따옴표 이스케이프
+                        "INSERT INTO people VALUES (3, 'blob', 1.8, x'DEADBEEF');" +         // BLOB → 크기 표기
+                        "CREATE TABLE zempty (a TEXT);" +
+                        "CREATE VIEW adults AS SELECT name FROM people WHERE height >= 1.7;";
+                    cmd.ExecuteNonQuery();
+                }
+
+                var sheets = TabularImporter.Import(db, Path.Combine(dir, "out"));
+
+                // 테이블·뷰가 이름순으로 시트가 된다.
+                Assert.Equal(new[] { "adults", "people", "zempty" }, sheets.Select(s => s.Name).ToArray());
+
+                var people = File.ReadAllLines(sheets.First(s => s.Name == "people").CsvPath);
+                Assert.Equal("id,name,height,note", people[0]);
+                Assert.Equal("1,\"김, 철수\",1.75,", people[1]);
+                Assert.Equal("2,\"Lee \"\"Q\"\"\",1.6,ok", people[2]);
+                Assert.Equal("3,blob,1.8,(BLOB 4 B)", people[3]);
+
+                // 빈 테이블도 헤더 1줄로 열린다.
+                Assert.Equal(new[] { "a" }, File.ReadAllLines(sheets.First(s => s.Name == "zempty").CsvPath));
+
+                // 뷰도 데이터가 나온다.
+                var adults = File.ReadAllLines(sheets.First(s => s.Name == "adults").CsvPath);
+                Assert.Equal("name", adults[0]);
+                Assert.Equal(3, adults.Length); // 김, 철수(1.75)·blob(1.8)
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { }
+            }
+        }
+
+        [Fact]
+        public void ImportSqlite_empty_database_yields_no_sheets()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ncv_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            string db = Path.Combine(dir, "empty.db");
+            try
+            {
+                var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                { DataSource = db, Pooling = false };
+                using (var conn = new Microsoft.Data.Sqlite.SqliteConnection(csb.ConnectionString))
+                    conn.Open(); // 빈 DB 파일 생성
+
+                var sheets = TabularImporter.Import(db, Path.Combine(dir, "out"));
+                Assert.Empty(sheets); // WorkbookSession.Create가 "열 수 있는 시트 없음"으로 처리
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { }
+            }
+        }
+
         [Theory]
         [InlineData("@2010_TotalProfit", "2010_TotalProfit")]  // 숫자로 시작하는 변수명의 라이브러리 '@' 접두 제거
         [InlineData("@x", "x")]
