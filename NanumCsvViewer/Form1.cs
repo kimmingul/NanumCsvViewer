@@ -1244,6 +1244,7 @@ namespace NanumCsvViewer
             _textConditionDesc = "";
             _valueConditions.Clear();
             _columnFilters.Clear();
+            _manualTypeOverrides.Clear(); // 수동 타입 지정은 문서/시트 단위(이슈 #12)
             _sortKeys.Clear();
             ClearSortGlyphs();
         }

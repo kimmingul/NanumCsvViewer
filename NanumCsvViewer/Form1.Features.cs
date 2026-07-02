@@ -14,6 +14,10 @@ namespace NanumCsvViewer
         private ColumnSummary[] _columnSummaries = Array.Empty<ColumnSummary>();
         private long _lastIndexMs;
 
+        // 수동 지정 컬럼 타입(이슈 #12). 추론·선언 힌트보다 우선. 문서/시트 전환(ResetView) 시 초기화.
+        private readonly Dictionary<int, ColumnValueType> _manualTypeOverrides = new();
+        private ContextMenuStrip? _typeMenu; // 헤더 우클릭 메뉴(컬럼마다 새로 구성)
+
         // 그리드/인스펙터 복사 (그리드 향상)
         private ToolStripMenuItem? _copyCellsMenu, _copyRowMenu, _copyColMenu;
         private Button? _inspectorCopyText, _inspectorCopyJson;
@@ -122,6 +126,8 @@ namespace NanumCsvViewer
 
             // 새 최상위 메뉴: 분석 (Help 앞에 삽입)
             _analysisMenu = new ToolStripMenuItem();
+            _analysisMenu.DropDownItems.Add(MakeItem("Descriptive Statistics…", "기술통계…", (_, _) => AnalyzeDescriptives()));
+            _analysisMenu.DropDownItems.Add(MakeItem("Frequency Table…", "빈도분석…", (_, _) => AnalyzeFrequency()));
             _analysisMenu.DropDownItems.Add(MakeItem("Numeric Distribution…", "수치 분포…", (_, _) => AnalyzeDistribution()));
             _analysisMenu.DropDownItems.Add(MakeItem("Date Histogram…", "날짜 히스토그램…", (_, _) => AnalyzeDateHistogram()));
             _analysisMenu.DropDownItems.Add(MakeItem("Find Duplicates…", "중복 찾기…", (_, _) => AnalyzeDuplicates()));
@@ -130,7 +136,9 @@ namespace NanumCsvViewer
             _analysisMenu.DropDownItems.Add(MakeItem("Correlation…", "상관분석…", (_, _) => AnalyzeCorrelation()));
             _analysisMenu.DropDownItems.Add(MakeItem("Independent t-test…", "독립표본 t검정…", (_, _) => AnalyzeIndependentTTest()));
             _analysisMenu.DropDownItems.Add(MakeItem("Paired t-test…", "대응표본 t검정…", (_, _) => AnalyzePairedTTest()));
+            _analysisMenu.DropDownItems.Add(MakeItem("One-way ANOVA…", "일원배치 분산분석…", (_, _) => AnalyzeOneWayAnova()));
             _analysisMenu.DropDownItems.Add(MakeItem("Chi-square…", "카이제곱 검정…", (_, _) => AnalyzeChiSquare()));
+            _analysisMenu.DropDownItems.Add(MakeItem("Normality Test (Shapiro-Wilk)…", "정규성 검정(Shapiro-Wilk)…", (_, _) => AnalyzeNormality()));
             RegisterLabel(_analysisMenu, "Analysis", "분석");
             int helpIdx = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
             if (helpIdx < 0) helpIdx = menuStrip1.Items.Count;
@@ -188,6 +196,9 @@ namespace NanumCsvViewer
             // 엑셀식 다중 셀 복사: 기본 Ctrl+C는 잘린 미리보기를 복사하므로 끄고 직접 처리(전체 값).
             grid.ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable;
             grid.KeyDown += OnGridCopyKeyDown;
+
+            // 헤더 우클릭 → 컬럼 타입 수동 변경 메뉴(이슈 #12). 데이터 셀은 기존 gridContextMenu 유지.
+            grid.CellContextMenuStripNeeded += OnCellContextMenuStripNeeded;
 
             // 컨텍스트 메뉴: 선택/행/열 복사
             gridContextMenu.Items.Insert(0, new ToolStripSeparator());
@@ -273,11 +284,11 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 컬럼 타입 태그 (A)
 
-        // OnIndexingComplete()에서 호출. 표본 행으로 컬럼 추론 타입을 계산해 헤더 툴팁에 표시.
-        private void ComputeColumnTypeTags()
+        // 타입 추론·수동 타입 검증용 표본(최대 10k행) 수집.
+        private List<string[]> CollectTypeSampleRows()
         {
-            if (_doc is null) { _columnSummaries = Array.Empty<ColumnSummary>(); return; }
             var doc = _doc;
+            if (doc is null) return new List<string[]>();
             const int sampleCap = 10_000;
             int n = Math.Min(sampleCap, doc.DataRowsAvailable);
             var sample = new List<string[]>(n);
@@ -285,8 +296,16 @@ namespace NanumCsvViewer
             {
                 try { sample.Add(doc.GetDataRowUncached(i)); } catch { }
             }
+            return sample;
+        }
 
-            var report = ColumnStatisticsBuilder.Summarize(doc.Header, sample);
+        // OnIndexingComplete()에서 호출. 표본 행으로 컬럼 추론 타입을 계산해 헤더 툴팁에 표시.
+        private void ComputeColumnTypeTags()
+        {
+            if (_doc is null) { _columnSummaries = Array.Empty<ColumnSummary>(); return; }
+            var sample = CollectTypeSampleRows();
+
+            var report = ColumnStatisticsBuilder.Summarize(_doc.Header, sample);
             _columnSummaries = report.Columns.ToArray();
 
             // SAS/SPSS가 파일에 명시한 선언 타입이 있으면 추론을 오버라이드(지정된 타입으로 매칭).
@@ -308,16 +327,149 @@ namespace NanumCsvViewer
                 }
             }
 
+            // 사용자가 수동 지정한 타입(이슈 #12)은 추론·선언 힌트 모두보다 우선.
+            foreach (var kv in _manualTypeOverrides)
+            {
+                int c = kv.Key;
+                if (c < 0 || c >= _columnSummaries.Length) continue;
+                _columnSummaries[c] = _columnSummaries[c] with
+                {
+                    InferredType = kv.Value,
+                    Numeric = kv.Value.IsNumeric() ? _columnSummaries[c].Numeric : null,
+                };
+            }
+
             for (int c = 0; c < grid.Columns.Count && c < _columnSummaries.Length; c++)
             {
                 var s = _columnSummaries[c];
+                string manual = _manualTypeOverrides.ContainsKey(c) ? LT(" (manual)", " (수동)") : "";
                 grid.Columns[c].ToolTipText = LT(
-                    $"Type: {s.InferredType.DisplayName()} · unique {s.UniqueCount:N0} · nulls {s.NullCount:N0}",
-                    $"타입: {s.InferredType.DisplayName()} · 고유값 {s.UniqueCount:N0} · 빈값 {s.NullCount:N0}");
+                    $"Type: {s.InferredType.DisplayName()}{manual} · unique {s.UniqueCount:N0} · nulls {s.NullCount:N0}",
+                    $"타입: {s.InferredType.DisplayName()}{manual} · 고유값 {s.UniqueCount:N0} · 빈값 {s.NullCount:N0}");
             }
 
             // 타입 배지가 생겼으니 헤더를 다시 그린다.
             grid.Invalidate();
+        }
+
+        // ---------------------------------------------------------------- 컬럼 타입 수동 변경 (이슈 #12)
+
+        // 수동 지정 가능한 대상 타입(Empty 제외).
+        private static readonly ColumnValueType[] ManualTypeTargets =
+        {
+            ColumnValueType.Integer, ColumnValueType.Float, ColumnValueType.Currency, ColumnValueType.Percent,
+            ColumnValueType.Scientific, ColumnValueType.Date, ColumnValueType.DateTime, ColumnValueType.Time,
+            ColumnValueType.Boolean, ColumnValueType.Categorical, ColumnValueType.Ordinal,
+            ColumnValueType.Identifier, ColumnValueType.String,
+        };
+
+        // 헤더 셀(RowIndex -1) 우클릭에만 타입 메뉴를 제공. 데이터 셀은 기본(gridContextMenu) 유지.
+        private void OnCellContextMenuStripNeeded(object? sender, DataGridViewCellContextMenuStripNeededEventArgs e)
+        {
+            if (e.RowIndex != -1 || e.ColumnIndex < 0) return;
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            if (e.ColumnIndex >= _columnSummaries.Length) return;
+            _typeMenu?.Dispose();
+            _typeMenu = BuildTypeMenu(e.ColumnIndex);
+            e.ContextMenuStrip = _typeMenu;
+        }
+
+        private ContextMenuStrip BuildTypeMenu(int col)
+        {
+            var menu = new ContextMenuStrip();
+            var current = _columnSummaries[col].InferredType;
+            string header = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
+
+            menu.Items.Add(new ToolStripMenuItem(LT(
+                $"\"{header}\" — {current.DisplayName()}",
+                $"\"{header}\" — {current.DisplayName()}"))
+            { Enabled = false });
+            menu.Items.Add(new ToolStripSeparator());
+
+            var change = new ToolStripMenuItem(LT("Change Type", "타입 변경"));
+            foreach (var target in ManualTypeTargets)
+            {
+                var policy = ColumnTypeConversion.Classify(current, target);
+                var item = new ToolStripMenuItem(target.DisplayName())
+                {
+                    Checked = target == current,
+                    Enabled = target != current && policy != TypeChangePolicy.Blocked,
+                };
+                if (policy == TypeChangePolicy.Blocked)
+                    item.ToolTipText = LT("Blocked: lossy or unsafe reinterpretation", "차단됨: 손실·오해석 가능 전환");
+                else if (policy == TypeChangePolicy.RequiresValidation)
+                    item.ToolTipText = LT("Applies after sample validation", "표본 검증 후 적용");
+                var t = target;
+                item.Click += (_, _) => ApplyManualType(col, t);
+                change.DropDownItems.Add(item);
+            }
+            menu.Items.Add(change);
+
+            var reset = new ToolStripMenuItem(LT("Reset to Auto-detected", "자동 감지로 되돌리기"))
+            { Enabled = _manualTypeOverrides.ContainsKey(col) };
+            reset.Click += (_, _) => ResetManualType(col);
+            menu.Items.Add(reset);
+            return menu;
+        }
+
+        // 변환 규칙(허용/제한적/차단)에 따라 수동 타입을 적용. 제한적 전환은 표본 검증 결과를 보여주고 확인받는다.
+        private async void ApplyManualType(int col, ColumnValueType target)
+        {
+            if (_doc is null || _busy || col >= _columnSummaries.Length) return;
+            var current = _columnSummaries[col].InferredType;
+            if (target == current) return;
+            var policy = ColumnTypeConversion.Classify(current, target);
+            if (policy == TypeChangePolicy.Blocked) return; // 메뉴에서 비활성이므로 방어적 경로
+
+            string header = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
+            if (policy == TypeChangePolicy.RequiresValidation)
+            {
+                var sample = CollectTypeSampleRows();
+                var values = new List<string>(sample.Count);
+                foreach (var row in sample) if (col < row.Length) values.Add(row[col]);
+                var v = ColumnTypeConversion.Validate(target, values);
+
+                var sb = new StringBuilder();
+                sb.AppendLine(LT(
+                    $"Change \"{header}\": {current.DisplayName()} → {target.DisplayName()}?",
+                    $"\"{header}\" 타입 변경: {current.DisplayName()} → {target.DisplayName()}?"));
+                sb.AppendLine();
+                sb.AppendLine(LT(
+                    $"Sample check: {v.ValidCount:N0} of {v.SampleCount:N0} values parse as {target.DisplayName()}.",
+                    $"표본 검증: {v.SampleCount:N0}개 중 {v.ValidCount:N0}개가 {target.DisplayName()}(으)로 해석됩니다."));
+                if (!v.AllValid)
+                {
+                    sb.AppendLine(LT(
+                        $"{v.FailCount:N0} value(s) will not parse. Examples:",
+                        $"{v.FailCount:N0}개 값은 해석되지 않습니다. 예시:"));
+                    foreach (var ex in v.FailingExamples)
+                        sb.AppendLine("  · " + (ex.Length > 40 ? ex[..39] + "…" : ex));
+                }
+                if (MessageBox.Show(this, sb.ToString(), LT("Change Column Type", "컬럼 타입 변경"),
+                        MessageBoxButtons.YesNo,
+                        v.AllValid ? MessageBoxIcon.Question : MessageBoxIcon.Warning) != DialogResult.Yes)
+                    return;
+            }
+
+            _manualTypeOverrides[col] = target;
+            // 타입이 바뀌면 그 컬럼의 기존 필터는 의미가 달라지므로 해제하고 뷰를 재구성.
+            bool hadFilter = _columnFilters.HasFilterFor(col);
+            if (hadFilter) _columnFilters.Remove(col);
+            ComputeColumnTypeTags();
+            if (hadFilter) await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+            statusLabel.Text = LT(
+                $"Column type changed: {header} → {target.DisplayName()}",
+                $"컬럼 타입 변경: {header} → {target.DisplayName()}");
+        }
+
+        private void ResetManualType(int col)
+        {
+            if (!_manualTypeOverrides.Remove(col)) return;
+            ComputeColumnTypeTags();
+            string header = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
+            statusLabel.Text = LT(
+                $"Column type reset to auto-detected: {header}",
+                $"컬럼 타입 자동 감지로 복원: {header}");
         }
 
         // ---- 헤더 타입 배지 그리기 ----
@@ -1708,6 +1860,156 @@ namespace NanumCsvViewer
             sb.AppendLine($"p-value      {r.PValue:0.0000}");
             sb.AppendLine($"→ {r.Interpretation}");
             ShowResult(LT("Chi-square", "카이제곱 검정"), sb.ToString(), truncated);
+        }
+
+        // ---------------------------------------------------------------- 기본통계 (이슈 #17)
+
+        private void AnalyzeDescriptives()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Descriptive Statistics", "기술통계"), _palette);
+            var list = dlg.AddCheckedList(LT("Columns", "컬럼"), ColumnLabels(), Math.Min(12, _doc.ColumnCount));
+            for (int c = 0; c < _columnSummaries.Length && c < list.Items.Count; c++)
+                if (IsNumericColumn(c)) list.SetItemChecked(c, true);
+            if (!dlg.ShowOk(this)) return;
+            var cols = CheckedIndexes(list);
+            if (cols.Count == 0) { ShowResult(LT("Descriptive Statistics", "기술통계"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요.")); return; }
+
+            var rows = GatherViewRows(out bool truncated);
+            var sb = new StringBuilder();
+            foreach (int c in cols)
+            {
+                var values = NumericColumn(rows, c);
+                sb.AppendLine(ColumnLabel(c));
+                sb.AppendLine(new string('─', 44));
+                var d = CsvStatistics.Describe(values);
+                if (d is null)
+                {
+                    sb.AppendLine(LT("No numeric values.", "수치 값이 없습니다."));
+                    sb.AppendLine();
+                    continue;
+                }
+                int missing = rows.Count - d.Count;
+                sb.AppendLine($"N (valid)    {d.Count:N0}");
+                sb.AppendLine(LT($"missing      {missing:N0}", $"결측/비수치   {missing:N0}"));
+                sb.AppendLine($"sum          {d.Sum:G6}");
+                sb.AppendLine($"mean         {d.Mean:G6}");
+                sb.AppendLine($"sd           {d.StandardDeviation:G6}");
+                sb.AppendLine($"se           {d.StandardError:G6}");
+                sb.AppendLine($"95% CI       [{d.ConfidenceIntervalLow:G6}, {d.ConfidenceIntervalHigh:G6}]");
+                sb.AppendLine($"min          {d.Min:G6}");
+                sb.AppendLine($"q1           {d.Q1:G6}");
+                sb.AppendLine($"median       {d.Median:G6}");
+                sb.AppendLine($"q3           {d.Q3:G6}");
+                sb.AppendLine($"max          {d.Max:G6}");
+                sb.AppendLine($"range        {d.Range:G6}");
+                sb.AppendLine($"IQR          {d.InterquartileRange:G6}");
+                if (d.Modes.Count > 0)
+                    sb.AppendLine(LT("mode         ", "최빈값        ").TrimEnd() + "  " +
+                        string.Join(", ", d.Modes.Take(3).Select(m => m.ToString("G6", CultureInfo.InvariantCulture))) +
+                        (d.Modes.Count > 3 ? " …" : "") + $"  (×{d.ModeFrequency})");
+                if (!double.IsNaN(d.Skewness)) sb.AppendLine($"skewness     {d.Skewness:0.0000}");
+                if (!double.IsNaN(d.ExcessKurtosis)) sb.AppendLine($"kurtosis     {d.ExcessKurtosis:0.0000}");
+                if (!double.IsNaN(d.CoefficientOfVariation)) sb.AppendLine($"CV           {d.CoefficientOfVariation:0.0000}");
+                sb.AppendLine();
+            }
+            ShowResult(LT("Descriptive Statistics", "기술통계"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeFrequency()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Frequency Table", "빈도분석"), _palette);
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), 0);
+            var topN = dlg.AddNumeric(LT("Max rows", "최대 행 수"), 1, 10_000, 100);
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            int c = col.SelectedIndex;
+            var values = new List<string>(rows.Count);
+            foreach (var row in rows) values.Add(c < row.Length ? row[c] : string.Empty);
+
+            var t = CsvStatistics.FrequencyTable(values);
+            var sb = new StringBuilder();
+            sb.AppendLine(ColumnLabel(c));
+            sb.AppendLine(LT($"total {t.TotalCount:N0} · unique {t.UniqueCount:N0}", $"전체 {t.TotalCount:N0} · 고유값 {t.UniqueCount:N0}"));
+            sb.AppendLine(new string('─', 56));
+            sb.AppendLine(LT($"{"value",-24} {"count",8} {"%",8} {"cum%",8}", $"{"값",-24} {"빈도",8} {"%",8} {"누적%",8}"));
+            int limit = (int)topN.Value;
+            foreach (var e in t.Entries.Take(limit))
+            {
+                string label = e.Value.Length == 0 ? LT("(empty)", "(빈값)") : e.Value;
+                if (label.Length > 24) label = label[..23] + "…";
+                sb.AppendLine($"{label,-24} {e.Count,8:N0} {e.Percent,7:0.00}% {e.CumulativePercent,7:0.00}%");
+            }
+            if (t.Entries.Count > limit)
+                sb.AppendLine(LT($"… {t.Entries.Count - limit:N0} more values", $"… 외 {t.Entries.Count - limit:N0}개 값"));
+            ShowResult(LT("Frequency Table", "빈도분석"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeOneWayAnova()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("One-way ANOVA", "일원배치 분산분석"), _palette);
+            var valueCol = dlg.AddCombo(LT("Value column", "값 컬럼"), ColumnLabels(), FirstNumericColumn());
+            var groupCol = dlg.AddCombo(LT("Group column", "그룹 컬럼"), ColumnLabels(), 0);
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            int vc = valueCol.SelectedIndex, gc = groupCol.SelectedIndex;
+            var obs = new List<(string, double)>();
+            foreach (var row in rows)
+                if (vc < row.Length && gc < row.Length &&
+                    double.TryParse(row[vc].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double v))
+                    obs.Add((row[gc].Trim(), v));
+
+            var r = CsvStatistics.OneWayAnova(obs);
+            if (r is null) { ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), LT("Need at least 2 groups with numeric values.", "수치 값을 가진 그룹이 2개 이상 필요합니다.")); return; }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{ColumnLabel(vc)} by {ColumnLabel(gc)}");
+            sb.AppendLine(new string('─', 44));
+            foreach (var g in r.Groups.Take(30))
+                sb.AppendLine($"  {g.Name,-16} n={g.Count,-6:N0} mean={g.Mean:G6}  sd={g.StandardDeviation:G6}");
+            if (r.Groups.Count > 30) sb.AppendLine($"  … +{r.Groups.Count - 30:N0}");
+            sb.AppendLine();
+            sb.AppendLine($"F            {r.FStatistic:0.0000}");
+            sb.AppendLine($"df           {r.DfBetween}, {r.DfWithin}");
+            sb.AppendLine($"p-value      {r.PValue:0.0000}");
+            sb.AppendLine($"η² (eta²)    {r.EtaSquared:0.0000}");
+            sb.AppendLine($"→ {r.Interpretation}");
+            ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeNormality()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), _palette);
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), FirstNumericColumn());
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            var values = NumericColumn(rows, col.SelectedIndex);
+            // Royston p값 근사는 n≤5000에서 검증됨 → 초과 시 앞 5,000개만 사용하고 표기.
+            const int swCap = 5000;
+            bool capped = values.Count > swCap;
+            if (capped) values = values.Take(swCap).ToList();
+
+            var r = CsvStatistics.ShapiroWilk(values);
+            if (r is null)
+            {
+                ShowResult(LT("Normality Test", "정규성 검정"),
+                    LT("Need at least 3 distinct numeric values.", "서로 다른 수치 값이 3개 이상 필요합니다."));
+                return;
+            }
+            var sb = new StringBuilder();
+            sb.AppendLine(ColumnLabel(col.SelectedIndex));
+            sb.AppendLine(new string('─', 40));
+            sb.AppendLine($"n            {r.SampleSize:N0}" + (capped ? LT("  (first 5,000)", "  (처음 5,000개)") : ""));
+            sb.AppendLine($"W            {r.W:0.0000}");
+            sb.AppendLine($"p-value      {r.PValue:0.0000}");
+            sb.AppendLine($"→ {r.Interpretation}");
+            ShowResult(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(), truncated);
         }
 
         // ---------------------------------------------------------------- 피벗 빌더 (O · P)
