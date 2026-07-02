@@ -122,6 +122,8 @@ namespace NanumCsvViewer
 
             // 새 최상위 메뉴: 분석 (Help 앞에 삽입)
             _analysisMenu = new ToolStripMenuItem();
+            _analysisMenu.DropDownItems.Add(MakeItem("Descriptive Statistics…", "기술통계…", (_, _) => AnalyzeDescriptives()));
+            _analysisMenu.DropDownItems.Add(MakeItem("Frequency Table…", "빈도분석…", (_, _) => AnalyzeFrequency()));
             _analysisMenu.DropDownItems.Add(MakeItem("Numeric Distribution…", "수치 분포…", (_, _) => AnalyzeDistribution()));
             _analysisMenu.DropDownItems.Add(MakeItem("Date Histogram…", "날짜 히스토그램…", (_, _) => AnalyzeDateHistogram()));
             _analysisMenu.DropDownItems.Add(MakeItem("Find Duplicates…", "중복 찾기…", (_, _) => AnalyzeDuplicates()));
@@ -130,7 +132,9 @@ namespace NanumCsvViewer
             _analysisMenu.DropDownItems.Add(MakeItem("Correlation…", "상관분석…", (_, _) => AnalyzeCorrelation()));
             _analysisMenu.DropDownItems.Add(MakeItem("Independent t-test…", "독립표본 t검정…", (_, _) => AnalyzeIndependentTTest()));
             _analysisMenu.DropDownItems.Add(MakeItem("Paired t-test…", "대응표본 t검정…", (_, _) => AnalyzePairedTTest()));
+            _analysisMenu.DropDownItems.Add(MakeItem("One-way ANOVA…", "일원배치 분산분석…", (_, _) => AnalyzeOneWayAnova()));
             _analysisMenu.DropDownItems.Add(MakeItem("Chi-square…", "카이제곱 검정…", (_, _) => AnalyzeChiSquare()));
+            _analysisMenu.DropDownItems.Add(MakeItem("Normality Test (Shapiro-Wilk)…", "정규성 검정(Shapiro-Wilk)…", (_, _) => AnalyzeNormality()));
             RegisterLabel(_analysisMenu, "Analysis", "분석");
             int helpIdx = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
             if (helpIdx < 0) helpIdx = menuStrip1.Items.Count;
@@ -1708,6 +1712,156 @@ namespace NanumCsvViewer
             sb.AppendLine($"p-value      {r.PValue:0.0000}");
             sb.AppendLine($"→ {r.Interpretation}");
             ShowResult(LT("Chi-square", "카이제곱 검정"), sb.ToString(), truncated);
+        }
+
+        // ---------------------------------------------------------------- 기본통계 (이슈 #17)
+
+        private void AnalyzeDescriptives()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Descriptive Statistics", "기술통계"), _palette);
+            var list = dlg.AddCheckedList(LT("Columns", "컬럼"), ColumnLabels(), Math.Min(12, _doc.ColumnCount));
+            for (int c = 0; c < _columnSummaries.Length && c < list.Items.Count; c++)
+                if (IsNumericColumn(c)) list.SetItemChecked(c, true);
+            if (!dlg.ShowOk(this)) return;
+            var cols = CheckedIndexes(list);
+            if (cols.Count == 0) { ShowResult(LT("Descriptive Statistics", "기술통계"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요.")); return; }
+
+            var rows = GatherViewRows(out bool truncated);
+            var sb = new StringBuilder();
+            foreach (int c in cols)
+            {
+                var values = NumericColumn(rows, c);
+                sb.AppendLine(ColumnLabel(c));
+                sb.AppendLine(new string('─', 44));
+                var d = CsvStatistics.Describe(values);
+                if (d is null)
+                {
+                    sb.AppendLine(LT("No numeric values.", "수치 값이 없습니다."));
+                    sb.AppendLine();
+                    continue;
+                }
+                int missing = rows.Count - d.Count;
+                sb.AppendLine($"N (valid)    {d.Count:N0}");
+                sb.AppendLine(LT($"missing      {missing:N0}", $"결측/비수치   {missing:N0}"));
+                sb.AppendLine($"sum          {d.Sum:G6}");
+                sb.AppendLine($"mean         {d.Mean:G6}");
+                sb.AppendLine($"sd           {d.StandardDeviation:G6}");
+                sb.AppendLine($"se           {d.StandardError:G6}");
+                sb.AppendLine($"95% CI       [{d.ConfidenceIntervalLow:G6}, {d.ConfidenceIntervalHigh:G6}]");
+                sb.AppendLine($"min          {d.Min:G6}");
+                sb.AppendLine($"q1           {d.Q1:G6}");
+                sb.AppendLine($"median       {d.Median:G6}");
+                sb.AppendLine($"q3           {d.Q3:G6}");
+                sb.AppendLine($"max          {d.Max:G6}");
+                sb.AppendLine($"range        {d.Range:G6}");
+                sb.AppendLine($"IQR          {d.InterquartileRange:G6}");
+                if (d.Modes.Count > 0)
+                    sb.AppendLine(LT("mode         ", "최빈값        ").TrimEnd() + "  " +
+                        string.Join(", ", d.Modes.Take(3).Select(m => m.ToString("G6", CultureInfo.InvariantCulture))) +
+                        (d.Modes.Count > 3 ? " …" : "") + $"  (×{d.ModeFrequency})");
+                if (!double.IsNaN(d.Skewness)) sb.AppendLine($"skewness     {d.Skewness:0.0000}");
+                if (!double.IsNaN(d.ExcessKurtosis)) sb.AppendLine($"kurtosis     {d.ExcessKurtosis:0.0000}");
+                if (!double.IsNaN(d.CoefficientOfVariation)) sb.AppendLine($"CV           {d.CoefficientOfVariation:0.0000}");
+                sb.AppendLine();
+            }
+            ShowResult(LT("Descriptive Statistics", "기술통계"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeFrequency()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Frequency Table", "빈도분석"), _palette);
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), 0);
+            var topN = dlg.AddNumeric(LT("Max rows", "최대 행 수"), 1, 10_000, 100);
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            int c = col.SelectedIndex;
+            var values = new List<string>(rows.Count);
+            foreach (var row in rows) values.Add(c < row.Length ? row[c] : string.Empty);
+
+            var t = CsvStatistics.FrequencyTable(values);
+            var sb = new StringBuilder();
+            sb.AppendLine(ColumnLabel(c));
+            sb.AppendLine(LT($"total {t.TotalCount:N0} · unique {t.UniqueCount:N0}", $"전체 {t.TotalCount:N0} · 고유값 {t.UniqueCount:N0}"));
+            sb.AppendLine(new string('─', 56));
+            sb.AppendLine(LT($"{"value",-24} {"count",8} {"%",8} {"cum%",8}", $"{"값",-24} {"빈도",8} {"%",8} {"누적%",8}"));
+            int limit = (int)topN.Value;
+            foreach (var e in t.Entries.Take(limit))
+            {
+                string label = e.Value.Length == 0 ? LT("(empty)", "(빈값)") : e.Value;
+                if (label.Length > 24) label = label[..23] + "…";
+                sb.AppendLine($"{label,-24} {e.Count,8:N0} {e.Percent,7:0.00}% {e.CumulativePercent,7:0.00}%");
+            }
+            if (t.Entries.Count > limit)
+                sb.AppendLine(LT($"… {t.Entries.Count - limit:N0} more values", $"… 외 {t.Entries.Count - limit:N0}개 값"));
+            ShowResult(LT("Frequency Table", "빈도분석"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeOneWayAnova()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("One-way ANOVA", "일원배치 분산분석"), _palette);
+            var valueCol = dlg.AddCombo(LT("Value column", "값 컬럼"), ColumnLabels(), FirstNumericColumn());
+            var groupCol = dlg.AddCombo(LT("Group column", "그룹 컬럼"), ColumnLabels(), 0);
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            int vc = valueCol.SelectedIndex, gc = groupCol.SelectedIndex;
+            var obs = new List<(string, double)>();
+            foreach (var row in rows)
+                if (vc < row.Length && gc < row.Length &&
+                    double.TryParse(row[vc].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double v))
+                    obs.Add((row[gc].Trim(), v));
+
+            var r = CsvStatistics.OneWayAnova(obs);
+            if (r is null) { ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), LT("Need at least 2 groups with numeric values.", "수치 값을 가진 그룹이 2개 이상 필요합니다.")); return; }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{ColumnLabel(vc)} by {ColumnLabel(gc)}");
+            sb.AppendLine(new string('─', 44));
+            foreach (var g in r.Groups.Take(30))
+                sb.AppendLine($"  {g.Name,-16} n={g.Count,-6:N0} mean={g.Mean:G6}  sd={g.StandardDeviation:G6}");
+            if (r.Groups.Count > 30) sb.AppendLine($"  … +{r.Groups.Count - 30:N0}");
+            sb.AppendLine();
+            sb.AppendLine($"F            {r.FStatistic:0.0000}");
+            sb.AppendLine($"df           {r.DfBetween}, {r.DfWithin}");
+            sb.AppendLine($"p-value      {r.PValue:0.0000}");
+            sb.AppendLine($"η² (eta²)    {r.EtaSquared:0.0000}");
+            sb.AppendLine($"→ {r.Interpretation}");
+            ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(), truncated);
+        }
+
+        private void AnalyzeNormality()
+        {
+            if (_doc is null) return;
+            using var dlg = new ParamDialog(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), _palette);
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), FirstNumericColumn());
+            if (!dlg.ShowOk(this)) return;
+
+            var rows = GatherViewRows(out bool truncated);
+            var values = NumericColumn(rows, col.SelectedIndex);
+            // Royston p값 근사는 n≤5000에서 검증됨 → 초과 시 앞 5,000개만 사용하고 표기.
+            const int swCap = 5000;
+            bool capped = values.Count > swCap;
+            if (capped) values = values.Take(swCap).ToList();
+
+            var r = CsvStatistics.ShapiroWilk(values);
+            if (r is null)
+            {
+                ShowResult(LT("Normality Test", "정규성 검정"),
+                    LT("Need at least 3 distinct numeric values.", "서로 다른 수치 값이 3개 이상 필요합니다."));
+                return;
+            }
+            var sb = new StringBuilder();
+            sb.AppendLine(ColumnLabel(col.SelectedIndex));
+            sb.AppendLine(new string('─', 40));
+            sb.AppendLine($"n            {r.SampleSize:N0}" + (capped ? LT("  (first 5,000)", "  (처음 5,000개)") : ""));
+            sb.AppendLine($"W            {r.W:0.0000}");
+            sb.AppendLine($"p-value      {r.PValue:0.0000}");
+            sb.AppendLine($"→ {r.Interpretation}");
+            ShowResult(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(), truncated);
         }
 
         // ---------------------------------------------------------------- 피벗 빌더 (O · P)
