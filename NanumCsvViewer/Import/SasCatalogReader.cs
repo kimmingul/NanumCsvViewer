@@ -42,6 +42,25 @@ namespace NanumCsvViewer.Import
             return key.Length > 0 && (_charFormats.ContainsKey(key) || _numFormats.ContainsKey(key));
         }
 
+        /// <summary>
+        /// 해당 포맷의 허용 코드 집합(데이터 품질 코드북 대조용, 이슈 #26).
+        /// 숫자 코드는 CSV 변환(FormatCell)과 동일한 "0.################" 형식으로 정규화해
+        /// 임포트된 셀 텍스트와 그대로 비교할 수 있다. 포맷이 없으면 null.
+        /// </summary>
+        public IReadOnlySet<string>? TryGetCodes(string? formatName)
+        {
+            if (string.IsNullOrWhiteSpace(formatName)) return null;
+            string key = NormalizeName(formatName);
+            if (key.Length == 0) return null;
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            if (_charFormats.TryGetValue(key, out var cd))
+                foreach (string code in cd.Keys) set.Add(code.Trim());
+            if (_numFormats.TryGetValue(key, out var nd))
+                foreach (double code in nd.Keys)
+                    set.Add(code.ToString("0.################", System.Globalization.CultureInfo.InvariantCulture));
+            return set.Count > 0 ? set : null;
+        }
+
         /// <summary>셀 원값에 대응하는 라벨. 포맷이 없거나 값이 라벨되지 않았으면 null(원값 표시).</summary>
         public string? TryLabel(string? formatName, object? value)
         {
