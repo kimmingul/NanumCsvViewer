@@ -25,6 +25,13 @@
 - **사용법 도움말** — **Help ▸ How to Use**(F1)에서 주요 기능과 단축키를 한 화면에서 안내합니다.
 - **전용 앱 아이콘** — 작업표시줄·창 제목·설치 관리자·제거 항목에 일관된 아이콘이 적용됩니다.
 
+### ✨ v1.13.0 신규 — 기본통계 확장 · 타입 수동 변경 · SQLite · SAS 값 라벨
+
+- **기본통계 대폭 확장** — 분석 메뉴에 **기술통계**(N·결측·평균·표준편차·표준오차·95% 신뢰구간·사분위·범위·IQR·최빈값·왜도/첨도·변동계수, 다중 컬럼 일괄), **빈도분석**(빈도·백분율·누적%), **일원배치 분산분석(ANOVA)**(F·자유도·p·효과크기 η²), **정규성 검정(Shapiro-Wilk)** 을 추가했습니다. 통계량·p값은 `scipy`와 대조해 검증했습니다(기존 상관·t검정·카이제곱에 더해).
+- **컬럼 타입 수동 변경** — 컬럼 헤더 **우클릭 ▸ 타입 변경**으로 자동 추론을 덮어씁니다. 데이터 무결성을 위해 전환을 **허용 / 표본 검증 후 허용 / 차단**으로 분류하고(예: `Float→Integer`처럼 손실 가능한 변환은 차단, `문자→날짜`는 표본을 검증해 실패 예시와 함께 확인), 언제든 **자동 감지로 되돌릴 수 있습니다**. 타입을 바꾸면 그 컬럼의 필터·통계·표시가 새 타입으로 재계산됩니다.
+- **SQLite(.db/.sqlite/.sqlite3) 열기** — 데이터베이스의 **테이블·뷰를 하단 시트 탭**으로 열어 CSV처럼 필터·정렬·분석·내보내기를 그대로 씁니다. 원본은 **읽기 전용**으로만 접근합니다([Microsoft.Data.Sqlite](https://www.nuget.org/packages/Microsoft.Data.Sqlite)).
+- **SAS 값 라벨(.sas7bcat) 지원** — **필드 라벨 표시**를 켜면 `.sas7bdat` 옆의 **동반 포맷 카탈로그**(`<파일명>.sas7bcat` 또는 `formats.sas7bcat`)를 자동으로 찾아 코드를 라벨로 치환합니다(예: `1`→`Male`). 카탈로그 판독은 [ReadStat](https://github.com/WizardMac/ReadStat)(MIT)의 구현을 **순수 관리형 C#으로 포팅**해 네이티브 의존성 없이 동작하며, 한국어(CP949·EUC-KR) 인코딩도 처리합니다. *(v1.12.1까지 미지원이던 기능입니다. 다만 SAS 카탈로그 포맷 특성상 일부 파일은 판독되지 않을 수 있으며, 그럴 땐 코드값을 그대로 표시합니다.)*
+
 ### 🔧 v1.12.1 — SAS 선언 타입 매칭 대칭화
 
 - **SAS 숫자 컬럼도 선언 타입 존중** — 무포맷/일반 숫자 포맷은 `Integer`/`Float`로 확정해(예: `seq` 같은 헤더의 Identifier 오인 방지) SPSS와 동일하게 동작합니다. 날짜 포맷(`YYMMDDS` 등)은 그대로 날짜로 인식합니다. 실제 임상 `.sas7bdat`로 검증했습니다.
@@ -137,10 +144,10 @@ dotnet test
 
 ```powershell
 # 토큰 연결 상태에서 실행(코드사이닝 인증서 자동 선택)
-.\scripts\release.ps1 -Version 1.9.1
+.\scripts\release.ps1 -Version 1.13.0
 
 # 빌드/컴파일만(서명·검증·릴리즈 생략)
-.\scripts\release.ps1 -Version 1.9.1 -SkipSign -SkipRelease
+.\scripts\release.ps1 -Version 1.13.0 -SkipSign -SkipRelease
 ```
 
 요구: .NET SDK, **[Inno Setup 6.3+](https://jrsoftware.org/isdl.php)** (`winget install JRSoftware.InnoSetup`), Windows SDK(`signtool`), SafeNet Authentication Client, [GitHub CLI](https://cli.github.com/)(`gh auth login`).
@@ -192,7 +199,7 @@ dotnet test
 
 ## ⚠️ 제한 사항
 
-- 엑셀(`.xlsx/.xls`)·SAS(`.sas7bdat`)·SPSS(`.sav`)는 **열 때 시트/데이터셋별 CSV로 변환**해 지원합니다(시트 탭으로 전환). 단, 바이트 오프셋 **대용량 즉시열람**은 CSV/TXT 전용입니다.
+- 엑셀(`.xlsx/.xls`)·SAS(`.sas7bdat`)·SPSS(`.sav`)·SQLite(`.db/.sqlite/.sqlite3`)는 **열 때 시트/데이터셋/테이블별 CSV로 변환**해 지원합니다(시트 탭으로 전환). 단, 바이트 오프셋 **대용량 즉시열람**은 CSV/TXT 전용입니다.
 - **UTF-16/UTF-32**는 대용량 모드에서 지원하지 않습니다(BOM 감지 시 안내).
 - 매우 느린 HDD에서 디스크 모드(>약 1.5 GB)일 때 스크롤에 미세한 지연이 있을 수 있습니다.
 
