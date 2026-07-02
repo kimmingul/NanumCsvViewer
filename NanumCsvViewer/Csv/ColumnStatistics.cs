@@ -341,6 +341,12 @@ namespace NanumCsvViewer.Csv
 
         private static bool IsNull(string value) => NullTokens.Contains(value);
 
+        /// <summary>널로 취급하는 토큰인지(빈 문자열·na·null…). 수동 타입 변경 검증 등 외부 판정용.</summary>
+        public static bool IsNullToken(string value) => NullTokens.Contains(value);
+
+        /// <summary>불리언으로 취급하는 토큰인지(true/false/yes/no/y/n/0/1). 추론기와 동일 기준.</summary>
+        public static bool IsBooleanToken(string value) => BooleanTokens.Contains(value);
+
         private static NumericColumnSummary SummarizeNumbers(List<double> values)
         {
             var sorted = values.ToArray();
