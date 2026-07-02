@@ -663,11 +663,13 @@ namespace NanumCsvViewer
             return rows;
         }
 
+        // 접사 인식 파서(NumericAffix)로 통일 — 타입 시스템(Currency/Percent=numeric)·컬럼 필터·차트 빌더와
+        // 같은 기준. 통화 컬럼에서 "결과창은 값 없음인데 차트로 보기는 전수 집계"가 되는 모순 방지(이슈 #19 리뷰).
         private static List<double> NumericColumn(IEnumerable<string[]> rows, int col)
         {
             var values = new List<double>();
             foreach (var row in rows)
-                if (col < row.Length && double.TryParse(row[col].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
+                if (col < row.Length && NumericAffix.TryParseNumber(row[col], out double d) && double.IsFinite(d))
                     values.Add(d);
             return values;
         }
@@ -676,11 +678,15 @@ namespace NanumCsvViewer
 
         private void ShowResult(string title, string body, bool truncated)
         {
-            if (truncated)
-                body = LT($"(showing first {AnalysisRowCap:N0} rows)\n\n", $"(처음 {AnalysisRowCap:N0}행만 표시)\n\n") + body;
-            using var form = new ResultForm(title, body, _palette);
+            using var form = new ResultForm(title, PrefixTruncated(body, truncated), _palette);
             form.ShowDialog(this);
         }
+
+        // 절단 안내 접두의 단일 소스(일반 결과창·"차트로 보기" 결과창 공용).
+        private string PrefixTruncated(string body, bool truncated)
+            => truncated
+                ? LT($"(showing first {AnalysisRowCap:N0} rows)\n\n", $"(처음 {AnalysisRowCap:N0}행만 표시)\n\n") + body
+                : body;
 
         // ---------------------------------------------------------------- 내보내기 (E)
 
@@ -1784,8 +1790,8 @@ namespace NanumCsvViewer
             var pairs = new List<(double, double)>();
             foreach (var row in rows)
                 if (x.SelectedIndex < row.Length && y.SelectedIndex < row.Length &&
-                    double.TryParse(row[x.SelectedIndex].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double xv) &&
-                    double.TryParse(row[y.SelectedIndex].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double yv))
+                    NumericAffix.TryParseNumber(row[x.SelectedIndex], out double xv) &&
+                    NumericAffix.TryParseNumber(row[y.SelectedIndex], out double yv))
                     pairs.Add((xv, yv));
 
             var r = CsvStatistics.Correlation(pairs, (CorrelationMethod)method.SelectedIndex);
@@ -1815,7 +1821,7 @@ namespace NanumCsvViewer
             foreach (var row in rows)
             {
                 if (vc >= row.Length || gc >= row.Length) continue;
-                if (!double.TryParse(row[vc].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double v)) continue;
+                if (!NumericAffix.TryParseNumber(row[vc], out double v)) continue;
                 string g = row[gc];
                 if (!groups.TryGetValue(g, out var listv)) { listv = new List<double>(); groups[g] = listv; }
                 listv.Add(v);
@@ -1852,8 +1858,8 @@ namespace NanumCsvViewer
             foreach (var row in rows)
             {
                 if (before.SelectedIndex >= row.Length || after.SelectedIndex >= row.Length) continue;
-                if (double.TryParse(row[before.SelectedIndex].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double bv) &&
-                    double.TryParse(row[after.SelectedIndex].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double av))
+                if (NumericAffix.TryParseNumber(row[before.SelectedIndex], out double bv) &&
+                    NumericAffix.TryParseNumber(row[after.SelectedIndex], out double av))
                 { b.Add(bv); a.Add(av); }
             }
             if (b.Count < 2) { ShowResult(LT("Paired t-test", "대응표본 t검정"), LT("Need at least 2 paired values.", "쌍을 이룬 값이 2개 이상 필요합니다.")); return; }
@@ -1996,7 +2002,7 @@ namespace NanumCsvViewer
             var obs = new List<(string, double)>();
             foreach (var row in rows)
                 if (vc < row.Length && gc < row.Length &&
-                    double.TryParse(row[vc].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double v))
+                    NumericAffix.TryParseNumber(row[vc], out double v))
                     obs.Add((row[gc].Trim(), v));
 
             var r = CsvStatistics.OneWayAnova(obs);
@@ -2052,34 +2058,44 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 시각화 (이슈 #19)
 
-        /// <summary>차트 빌더 창을 연다. shareCtx가 있으면(히트맵→산점도 드릴다운) 부모 스냅샷을 공유해 재수집 비용 0.</summary>
+        /// <summary>
+        /// 차트 빌더 창을 연다. shareCtx가 있으면(히트맵→산점도 드릴다운) 행 스냅샷 List만 참조 공유하고
+        /// 컨텍스트 객체는 창마다 복제한다 — 한 창의 "현재 뷰로 새로고침"이 다른 창의 데이터 소스를
+        /// 몰래 바꾸지 않도록(스냅샷 List 자체는 어디서도 변경하지 않는 읽기 전용 계약).
+        /// </summary>
         private void OpenChartBuilder(ChartKind kind, int[]? presetCols = null, ChartContext? shareCtx = null)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
 
-            ChartContext ctx;
+            List<string[]> rows;
             if (shareCtx is not null)
             {
-                ctx = shareCtx;
+                rows = shareCtx.Rows; // 드릴다운: 부모 스냅샷 재사용(재수집 비용 0)
             }
             else
             {
-                var rows = GatherViewRows(out bool truncated);
-                var names = new string[_doc.ColumnCount];
-                for (int c = 0; c < names.Length; c++)
-                    names[c] = c < grid.Columns.Count ? grid.Columns[c].HeaderText : $"Column{c + 1}";
-                ctx = new ChartContext
-                {
-                    Rows = rows,
-                    ColumnNames = names,
-                    Summaries = _columnSummaries,
-                    Palette = _palette,
-                    RefreshRows = () => GatherViewRows(out _),
-                };
-                ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx); // 드릴다운 = 같은 스냅샷 공유
+                rows = GatherViewRows(out bool truncated);
                 if (truncated)
                     statusLabel.Text = LT($"Chart uses first {AnalysisRowCap:N0} rows", $"차트는 처음 {AnalysisRowCap:N0}행 사용");
             }
+
+            var names = shareCtx?.ColumnNames;
+            if (names is null)
+            {
+                names = new string[_doc.ColumnCount];
+                for (int c = 0; c < names.Length; c++)
+                    names[c] = c < grid.Columns.Count ? grid.Columns[c].HeaderText : $"Column{c + 1}";
+            }
+
+            var ctx = new ChartContext
+            {
+                Rows = rows,
+                ColumnNames = names,
+                Summaries = shareCtx?.Summaries ?? _columnSummaries,
+                Palette = _palette,
+                RefreshRows = () => GatherViewRows(out _),
+            };
+            ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx);
 
             var f = new ChartForm(ctx, kind, presetCols) { Owner = this };
             _chartForms.Add(f);
@@ -2097,14 +2113,18 @@ namespace NanumCsvViewer
             _chartForms.Clear();
         }
 
-        /// <summary>통계 결과창 + "차트로 보기" 버튼(이슈 #19 역방향 진입): 결과를 해당 차트로 이어본다.</summary>
+        /// <summary>통계 결과창 + "차트로 보기" 버튼(이슈 #19 역방향 진입): 결과를 해당 차트로 이어본다.
+        /// truncated 접두는 ShowResult와 동일 규칙(단일 경로), 차트는 모달이 완전히 닫힌 뒤 연다.</summary>
         private void ShowResultWithChart(string title, string body, bool truncated, ChartKind kind, int[]? presetCols)
         {
-            if (truncated)
-                body = LT($"(showing first {AnalysisRowCap:N0} rows)\n\n", $"(처음 {AnalysisRowCap:N0}행만 표시)\n\n") + body;
-            using var form = new ResultForm(title, body, _palette,
-                LT("View as Chart", "차트로 보기"), () => OpenChartBuilder(kind, presetCols));
-            form.ShowDialog(this);
+            bool requested;
+            using (var form = new ResultForm(title, PrefixTruncated(body, truncated), _palette,
+                       LT("View as Chart", "차트로 보기")))
+            {
+                form.ShowDialog(this);
+                requested = form.ActionRequested;
+            }
+            if (requested) OpenChartBuilder(kind, presetCols); // 모달 언와인드 후 — z-order/예외 안전
         }
 
         // ---------------------------------------------------------------- 피벗 빌더 (O · P)

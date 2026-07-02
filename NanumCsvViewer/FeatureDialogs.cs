@@ -169,11 +169,16 @@ namespace NanumCsvViewer
     }
 
     /// <summary>분석/통계 결과를 고정폭 텍스트로 표시(복사 가능). 큰 표도 스크롤로 확인.
-    /// actionLabel/onAction을 주면 좌측에 액션 버튼(예: "차트로 보기") 추가 — 이슈 #19 역방향 진입.</summary>
+    /// actionLabel을 주면 좌측에 액션 버튼(예: "차트로 보기") 추가 — 이슈 #19 역방향 진입.
+    /// 액션 실행은 모달 언와인드 후가 안전하므로(모달 활성 중 모델리스 창을 열면 z-order/예외 이스케이프 위험)
+    /// 버튼은 ActionRequested만 세우고 닫으며, 호출자가 ShowDialog 반환 후 확인해 실행한다.</summary>
     internal sealed class ResultForm : Form
     {
+        /// <summary>사용자가 액션 버튼으로 닫았는지. ShowDialog 반환 후 확인.</summary>
+        public bool ActionRequested { get; private set; }
+
         public ResultForm(string title, string body, ThemePalette palette,
-            string? actionLabel = null, Action? onAction = null)
+            string? actionLabel = null)
         {
             Text = title;
             StartPosition = FormStartPosition.CenterParent;
@@ -207,10 +212,10 @@ namespace NanumCsvViewer
             copy.Click += (_, _) => { try { Clipboard.SetText(body); } catch { } };
             bottom.Controls.Add(close);
             bottom.Controls.Add(copy);
-            if (actionLabel is not null && onAction is not null)
+            if (actionLabel is not null)
             {
                 var action = new Button { Text = actionLabel, AutoSize = true, MinimumSize = new Size(110, 26) };
-                action.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); onAction(); };
+                action.Click += (_, _) => { ActionRequested = true; DialogResult = DialogResult.OK; Close(); };
                 bottom.Controls.Add(action); // RightToLeft라 가장 왼쪽에 놓임
             }
 

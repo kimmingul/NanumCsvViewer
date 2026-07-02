@@ -26,6 +26,18 @@ namespace NanumCsvViewer.Charting
 
         private static string Num(double v) => v.ToString("G6", CultureInfo.InvariantCulture);
         private static string PVal(double p) => p < 0.0001 ? "p<0.0001" : $"p={p.ToString("0.0000", CultureInfo.InvariantCulture)}";
+        private static string LT(string en, string ko) => ChartCommon.LT(en, ko);
+
+        /// <summary>Shapiro-Wilk 배지(히스토그램·Q-Q 공용 — 라벨/상세 포맷 단일 유지).
+        /// Royston p값 근사 신뢰범위(n≤5,000) 밖이면 null.</summary>
+        private static StatBadge? ShapiroBadge(List<double> values)
+        {
+            if (values.Count > 5000) return null;
+            var sw = CsvStatistics.ShapiroWilk(values);
+            if (sw is null) return null;
+            return new StatBadge($"SW W={sw.W:0.000} {PVal(sw.PValue)}",
+                $"Shapiro-Wilk (n={sw.SampleSize:N0})\nW = {sw.W:0.0000}\np-value = {sw.PValue:0.0000}\n→ {sw.Interpretation}");
+        }
 
         // ---------------------------------------------------------------- 1. 히스토그램(+정규곡선+KDE)
 
@@ -68,7 +80,7 @@ namespace NanumCsvViewer.Charting
             }
             if (opt.ShowKde && sorted.Length >= 3 && sorted[^1] > sorted[0])
             {
-                double h = PlotMath.SilvermanBandwidth(sorted);
+                double h = PlotMath.SilvermanBandwidth(sorted, d.StandardDeviation); // Describe의 sd 재사용(재순회·정의 이원화 방지)
                 var kde = PlotMath.BinnedKdeCurve(sorted, h);
                 var ys = new double[kde.Density.Length];
                 for (int i = 0; i < ys.Length; i++) ys[i] = kde.Density[i] * overlayScale;
@@ -82,17 +94,16 @@ namespace NanumCsvViewer.Charting
                 new($"μ={Num(d.Mean)} σ={Num(d.StandardDeviation)}", DescribeDetail(colName, d, rows.Count - values.Count)),
             };
             // Shapiro-Wilk: Royston 근사 신뢰범위(n≤5000) 준수 — 초과 시 왜도/첨도 배지로 대체.
-            if (values.Count <= 5000)
+            if (ShapiroBadge(values) is { } swBadge)
             {
-                var sw = CsvStatistics.ShapiroWilk(values);
-                if (sw is not null)
-                    badges.Add(new StatBadge($"SW W={sw.W:0.000} {PVal(sw.PValue)}",
-                        $"Shapiro-Wilk (n={sw.SampleSize:N0})\nW = {sw.W:0.0000}\np-value = {sw.PValue:0.0000}\n→ {sw.Interpretation}"));
+                badges.Add(swBadge);
             }
             else if (!double.IsNaN(d.Skewness))
             {
                 badges.Add(new StatBadge($"skew={d.Skewness:0.00} kurt={d.ExcessKurtosis:0.00}",
-                    $"n>5,000: Shapiro-Wilk 근사 신뢰범위 초과 → 왜도/첨도 표시\nskewness = {d.Skewness:0.0000}\nexcess kurtosis = {d.ExcessKurtosis:0.0000}"));
+                    LT("n>5,000: beyond Shapiro-Wilk approximation range → showing skewness/kurtosis",
+                       "n>5,000: Shapiro-Wilk 근사 신뢰범위 초과 → 왜도/첨도 표시")
+                    + $"\nskewness = {d.Skewness:0.0000}\nexcess kurtosis = {d.ExcessKurtosis:0.0000}"));
             }
 
             double xPad = (sorted[^1] - sorted[0]) * 0.02;
@@ -166,7 +177,7 @@ namespace NanumCsvViewer.Charting
             {
                 var b = PlotMath.ComputeBoxStats(vals);
                 if (b is null) continue;
-                boxes.Add(new PlotBox(name.Length == 0 ? "(빈값)" : name, b.Count, b.Q1, b.Median, b.Q3,
+                boxes.Add(new PlotBox(name.Length == 0 ? LT("(empty)", "(빈값)") : name, b.Count, b.Q1, b.Median, b.Q3,
                     b.WhiskerLow, b.WhiskerHigh, b.Outliers, b.Mean));
                 double lo = b.Outliers.Length > 0 ? Math.Min(b.WhiskerLow, b.Outliers.Min()) : b.WhiskerLow;
                 double hi = b.Outliers.Length > 0 ? Math.Max(b.WhiskerHigh, b.Outliers.Max()) : b.WhiskerHigh;
@@ -196,7 +207,8 @@ namespace NanumCsvViewer.Charting
             }
             if (omitted > 0)
                 badges.Add(new StatBadge($"+{omitted:N0} groups omitted",
-                    $"표본수 상위 {maxGroups}개 그룹만 표시. {omitted:N0}개 그룹 생략(검정도 표시 그룹 기준)."));
+                    LT($"Showing top {maxGroups} groups by count; {omitted:N0} omitted (tests use shown groups).",
+                       $"표본수 상위 {maxGroups}개 그룹만 표시. {omitted:N0}개 그룹 생략(검정도 표시 그룹 기준).")));
 
             double pad = (yMax - yMin) * 0.05;
             return new PlotModel
@@ -261,7 +273,8 @@ namespace NanumCsvViewer.Charting
                     PaletteIndex = 2,
                 });
                 badges.Add(new StatBadge($"y={Num(fit.Slope)}x{(fit.Intercept >= 0 ? "+" : "")}{Num(fit.Intercept)} R²={fit.RSquared:0.000}",
-                    $"OLS regression (n={fit.Count:N0}, 전수 계산)\nslope = {Num(fit.Slope)}\nintercept = {Num(fit.Intercept)}\nR² = {fit.RSquared:0.0000}"));
+                    LT($"OLS regression (n={fit.Count:N0}, full data)", $"OLS 회귀 (n={fit.Count:N0}, 전수 계산)")
+                    + $"\nslope = {Num(fit.Slope)}\nintercept = {Num(fit.Intercept)}\nR² = {fit.RSquared:0.0000}"));
             }
 
             double px = (xMax - xMin) * 0.03, py = (yMax - yMin) * 0.03;
@@ -273,7 +286,7 @@ namespace NanumCsvViewer.Charting
                 Series = series,
                 Badges = badges,
                 RenderNote = density
-                    ? $"통계 N={xs.Count:N0}(전수) · 렌더=밀도 격자"
+                    ? LT($"stats N={xs.Count:N0} (full) · render=density grid", $"통계 N={xs.Count:N0}(전수) · 렌더=밀도 격자")
                     : $"N={xs.Count:N0}",
                 AllowZoom = true,
             };
@@ -304,7 +317,8 @@ namespace NanumCsvViewer.Charting
                 Badges = new[]
                 {
                     new StatBadge($"{cols.Count}×{cols.Count}",
-                        "Pearson 상관 행렬(쌍별 완전관측·단일 패스).\n비유의(p≥0.05) 셀은 흐리게 표시.\n셀 클릭 → 해당 두 컬럼 산점도."),
+                        LT("Pearson correlation matrix (pairwise-complete, single pass).\nNon-significant (p≥0.05) cells are dimmed.\nClick a cell → scatter of the two columns.",
+                           "Pearson 상관 행렬(쌍별 완전관측·단일 패스).\n비유의(p≥0.05) 셀은 흐리게 표시.\n셀 클릭 → 해당 두 컬럼 산점도.")),
                 },
                 RenderNote = $"N={rows.Count:N0}",
                 AllowZoom = false,
@@ -321,7 +335,8 @@ namespace NanumCsvViewer.Charting
             Array.Sort(sorted);
             if (sorted[^1] <= sorted[0]) return null; // 상수 컬럼
 
-            var qq = PlotMath.QqNormalPoints(sorted);
+            // 설계 계약: n≤10,000은 전 점, 초과 시에만 결정적 분위 시닝 2,000점(배지 안내와 일치).
+            var qq = PlotMath.QqNormalPoints(sorted, maxPoints: sorted.Length <= 10_000 ? sorted.Length : 2_000);
             var d = CsvStatistics.Describe(values)!;
 
             // 기준선: y = μ + σ·z (완전 정규면 점들이 이 선 위)
@@ -339,17 +354,12 @@ namespace NanumCsvViewer.Charting
             };
 
             var badges = new List<StatBadge>();
-            if (values.Count <= 5000)
-            {
-                var sw = CsvStatistics.ShapiroWilk(values);
-                if (sw is not null)
-                    badges.Add(new StatBadge($"SW W={sw.W:0.000} {PVal(sw.PValue)}",
-                        $"Shapiro-Wilk (n={sw.SampleSize:N0})\nW = {sw.W:0.0000}\np-value = {sw.PValue:0.0000}\n→ {sw.Interpretation}"));
-            }
+            if (ShapiroBadge(values) is { } swBadge) badges.Add(swBadge);
             bool thinned = values.Count > qq.Sample.Length;
             if (thinned)
                 badges.Add(new StatBadge($"{qq.Sample.Length:N0} quantiles",
-                    $"n={values.Count:N0} > 10,000 → 결정적 분위 시닝 {qq.Sample.Length:N0}점(무작위 아님·꼬리 보존)."));
+                    LT($"n={values.Count:N0} > 10,000 → deterministic quantile thinning to {qq.Sample.Length:N0} points (not random; tails preserved).",
+                       $"n={values.Count:N0} > 10,000 → 결정적 분위 시닝 {qq.Sample.Length:N0}점(무작위 아님·꼬리 보존).")));
 
             double px = (zHi - zLo) * 0.05;
             double sLo = Math.Min(qq.Sample[0], d.Mean + d.StandardDeviation * zLo);
@@ -363,7 +373,10 @@ namespace NanumCsvViewer.Charting
                 YAxis = new PlotAxis { Kind = PlotAxisKind.Numeric, Title = colName, Min = sLo - py, Max = sHi + py },
                 Series = series,
                 Badges = badges,
-                RenderNote = thinned ? $"통계 N={values.Count:N0}(전수) · 렌더={qq.Sample.Length:N0}분위" : $"N={values.Count:N0}",
+                RenderNote = thinned
+                    ? LT($"stats N={values.Count:N0} (full) · render={qq.Sample.Length:N0} quantiles",
+                         $"통계 N={values.Count:N0}(전수) · 렌더={qq.Sample.Length:N0}분위")
+                    : $"N={values.Count:N0}",
                 AllowZoom = true,
             };
         }
@@ -393,7 +406,11 @@ namespace NanumCsvViewer.Charting
             {
                 new() { Kind = PlotSeriesKind.Line, Name = yTitle, Xs = xs, Ys = ys, PaletteIndex = 0 },
             };
-            var badges = new List<StatBadge> { new($"{hist.Bins.Count:N0} bins · {opt.Period}", $"{dateName} · {opt.Period} 비닝") };
+            var badges = new List<StatBadge>
+            {
+                new($"{hist.Bins.Count:N0} bins · {opt.Period}",
+                    LT($"{dateName} · binned by {opt.Period}", $"{dateName} · {opt.Period} 비닝")),
+            };
             if (opt.MovingAverageWindow >= 2 && ys.Length >= 2)
             {
                 var ma = PlotMath.TrailingMovingAverage(ys, opt.MovingAverageWindow);
@@ -429,10 +446,10 @@ namespace NanumCsvViewer.Charting
             var counts = new List<int>(top.Count + 1);
             foreach (var e in top)
             {
-                labels.Add(e.Value.Length == 0 ? "(빈값)" : e.Value);
+                labels.Add(e.Value.Length == 0 ? LT("(empty)", "(빈값)") : e.Value);
                 counts.Add(e.Count);
             }
-            if (otherCount > 0) { labels.Add("(기타)"); counts.Add(otherCount); }
+            if (otherCount > 0) { labels.Add(LT("(other)", "(기타)")); counts.Add(otherCount); }
 
             var cum = PlotMath.ParetoCumulativePercent(counts);
             var xs = new double[counts.Count];
@@ -440,11 +457,14 @@ namespace NanumCsvViewer.Charting
 
             var badges = new List<StatBadge>
             {
-                new($"unique={freq.UniqueCount:N0}", $"{colName}\n전체 {freq.TotalCount:N0} · 고유값 {freq.UniqueCount:N0}"),
+                new($"unique={freq.UniqueCount:N0}",
+                    LT($"{colName}\ntotal {freq.TotalCount:N0} · unique {freq.UniqueCount:N0}",
+                       $"{colName}\n전체 {freq.TotalCount:N0} · 고유값 {freq.UniqueCount:N0}")),
             };
             if (otherCount > 0)
-                badges.Add(new StatBadge($"top {top.Count}+기타",
-                    $"빈도 상위 {top.Count}개 + 나머지 {freq.UniqueCount - top.Count:N0}개 값을 (기타)로 합침."));
+                badges.Add(new StatBadge(LT($"top {top.Count}+other", $"top {top.Count}+기타"),
+                    LT($"Top {top.Count} by count; remaining {freq.UniqueCount - top.Count:N0} values merged into (other).",
+                       $"빈도 상위 {top.Count}개 + 나머지 {freq.UniqueCount - top.Count:N0}개 값을 (기타)로 합침.")));
 
             return new PlotModel
             {

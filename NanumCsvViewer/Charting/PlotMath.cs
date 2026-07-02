@@ -38,17 +38,28 @@ namespace NanumCsvViewer.Charting
 
         // ---- 커널 밀도 추정 (히스토그램 KDE 오버레이) ----
 
-        /// <summary>교과서 Silverman rule-of-thumb: h = 0.9·min(σ, IQR/1.34)·n^(-1/5). scipy gaussian_kde 기본과 다른 정의임에 주의.</summary>
-        public static double SilvermanBandwidth(double[] sorted)
+        /// <summary>
+        /// 교과서 Silverman rule-of-thumb: h = 0.9·min(σ, IQR/1.34)·n^(-1/5). scipy gaussian_kde 기본과 다른 정의임에 주의.
+        /// sampleSd에 이미 계산된 표본 표준편차(Describe 등)를 넘기면 재순회를 생략(대용량 이중 계산·정의 이원화 방지).
+        /// </summary>
+        public static double SilvermanBandwidth(double[] sorted, double? sampleSd = null)
         {
             int n = sorted.Length;
             if (n < 2) return 1;
-            double mean = 0;
-            foreach (double v in sorted) mean += v;
-            mean /= n;
-            double ss = 0;
-            foreach (double v in sorted) ss += (v - mean) * (v - mean);
-            double sd = Math.Sqrt(ss / (n - 1));
+            double sd;
+            if (sampleSd is { } given && given >= 0)
+            {
+                sd = given;
+            }
+            else
+            {
+                double mean = 0;
+                foreach (double v in sorted) mean += v;
+                mean /= n;
+                double ss = 0;
+                foreach (double v in sorted) ss += (v - mean) * (v - mean);
+                sd = Math.Sqrt(ss / (n - 1));
+            }
             double iqr = CsvAnalytics.Percentile(sorted, 0.75) - CsvAnalytics.Percentile(sorted, 0.25);
             double spread = iqr > 0 ? Math.Min(sd, iqr / 1.34) : sd;
             if (spread <= 0) spread = sd > 0 ? sd : 1;
@@ -337,6 +348,42 @@ namespace NanumCsvViewer.Charting
                 total++;
             }
             return total == 0 ? null : new DensityGrid(counts, lox, hix, loy, hiy, max, total);
+        }
+
+        // ---- 선분 클리핑 (렌더 안전) ----
+
+        /// <summary>
+        /// Liang-Barsky 선분 클리핑. GDI+ 좌표 한계(±2²³ 고정소수점) 때문에 딥 줌 시
+        /// 회귀선·KDE 곡선의 픽셀 좌표가 폭주하면 OverflowException으로 크래시한다 —
+        /// 세그먼트를 안전 사각형으로 정확히 잘라(직선 위 보간) 시각 왜곡 없이 방지.
+        /// 반환 false = 세그먼트가 사각형과 교차하지 않음(그리지 않음).
+        /// </summary>
+        public static bool ClipSegment(
+            double x1, double y1, double x2, double y2,
+            double left, double top, double right, double bottom,
+            out double cx1, out double cy1, out double cx2, out double cy2)
+        {
+            cx1 = x1; cy1 = y1; cx2 = x2; cy2 = y2;
+            double dx = x2 - x1, dy = y2 - y1;
+            double t0 = 0, t1 = 1;
+
+            // 각 경계에 대해 파라미터 t 구간을 좁힌다: p·t ≤ q
+            Span<double> p = stackalloc double[] { -dx, dx, -dy, dy };
+            Span<double> q = stackalloc double[] { x1 - left, right - x1, y1 - top, bottom - y1 };
+            for (int i = 0; i < 4; i++)
+            {
+                if (p[i] == 0)
+                {
+                    if (q[i] < 0) return false; // 경계와 평행 + 밖
+                    continue;
+                }
+                double t = q[i] / p[i];
+                if (p[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+                else { if (t < t0) return false; if (t < t1) t1 = t; }
+            }
+            cx1 = x1 + t0 * dx; cy1 = y1 + t0 * dy;
+            cx2 = x1 + t1 * dx; cy2 = y1 + t1 * dy;
+            return true;
         }
 
         // ---- 파레토 ----

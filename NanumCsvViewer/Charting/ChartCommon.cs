@@ -31,5 +31,8 @@ namespace NanumCsvViewer.Charting
 
         public static string FormatTick(double v)
             => v == Math.Truncate(v) && Math.Abs(v) < 1e15 ? v.ToString("#,##0") : v.ToString("#,##0.###");
+
+        /// <summary>이중언어 헬퍼(코드베이스 표준 관용구 — Form1.Features·PivotForm과 동일). 빌더/렌더러의 사용자 노출 문자열용.</summary>
+        public static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
     }
 }

@@ -91,7 +91,12 @@ namespace NanumCsvViewer
             KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
 
             BuildLayout();
+            // 초기 선택은 핸들러를 억제하고 반영 — BuildLayout이 이미 _kind 기준으로 슬롯/옵션을 구성했으므로
+            // 핸들러가 돌면 프리셋 적용 전에 기본 컬럼으로 전체 빌드가 한 번 낭비된다(2M행 이중 블로킹 방지).
+            _building = true;
             _kindList.SelectedIndex = (int)kind;
+            _building = false;
+            Text = LT("Chart Builder", "차트 빌더") + " — " + _kindList.SelectedItem;
             ApplyPreset(presetCols);
             RebuildModel();
         }

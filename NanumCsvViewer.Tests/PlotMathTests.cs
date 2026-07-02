@@ -261,6 +261,58 @@ namespace NanumCsvViewer.Tests
             Assert.Null(PlotMath.ComputeDensityGrid(Array.Empty<double>(), Array.Empty<double>(), 4, 4));
         }
 
+        // ---- 선분 클리핑 (딥 줌 GDI+ 오버플로 방지 — 리뷰 수정) ----
+
+        [Fact]
+        public void ClipSegment_inside_is_unchanged()
+        {
+            Assert.True(PlotMath.ClipSegment(1, 1, 5, 5, 0, 0, 10, 10,
+                out double x1, out double y1, out double x2, out double y2));
+            Assert.Equal((1.0, 1, 5, 5), (x1, y1, x2, y2));
+        }
+
+        [Fact]
+        public void ClipSegment_crossing_interpolates_on_line()
+        {
+            // (-10,-10)→(30,30)은 y=x 직선 — [0,20] 박스로 자르면 정확히 (0,0)→(20,20)
+            Assert.True(PlotMath.ClipSegment(-10, -10, 30, 30, 0, 0, 20, 20,
+                out double x1, out double y1, out double x2, out double y2));
+            Assert.Equal(0, x1, 9);
+            Assert.Equal(0, y1, 9);
+            Assert.Equal(20, x2, 9);
+            Assert.Equal(20, y2, 9);
+        }
+
+        [Fact]
+        public void ClipSegment_outside_returns_false()
+        {
+            Assert.False(PlotMath.ClipSegment(100, 100, 200, 100, 0, 0, 10, 10,
+                out _, out _, out _, out _));
+        }
+
+        [Fact]
+        public void ClipSegment_handles_extreme_coordinates()
+        {
+            // 딥 줌 시나리오: 회귀선 끝점이 GDI+ 한계(±2²³)를 아득히 초과해도 보이는 구간은 정확
+            Assert.True(PlotMath.ClipSegment(-1e9, -1e9, 1e9, 1e9, 0, 0, 800, 600,
+                out double x1, out double y1, out double x2, out double y2));
+            Assert.InRange(x1, 0, 800);
+            Assert.InRange(y1, 0, 600);
+            Assert.InRange(x2, 0, 800);
+            Assert.InRange(y2, 0, 600);
+            Assert.Equal(x1, y1, 6); // y=x 위 보간 유지
+        }
+
+        // ---- Silverman sd 재사용 (리뷰 수정) ----
+
+        [Fact]
+        public void Silverman_with_precomputed_sd_matches_self_computed()
+        {
+            var d = new double[] { 2, 3, 3, 4, 4, 4, 5, 5, 6, 8 };
+            double sd = 1.7126976771553504; // 표본 sd(Describe와 동일 정의)
+            Assert.Equal(PlotMath.SilvermanBandwidth(d), PlotMath.SilvermanBandwidth(d, sd), 12);
+        }
+
         // ---- 파레토 ----
 
         [Fact]

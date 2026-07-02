@@ -1,3 +1,4 @@
+using System.Globalization;
 using NanumCsvViewer.Charting;
 using NanumCsvViewer.Csv;
 
@@ -6,6 +7,9 @@ namespace NanumCsvViewer.Tests
     // 차트 빌더(이슈 #19): 행 → PlotModel 변환·통계 배지·대용량 모드 전환·상한 정책 검증.
     public class ChartBuildersTests
     {
+        // 빌더의 사용자 노출 문자열은 LT(en,ko)라 실행 머신 언어에 좌우됨 → 한국어 단정 테스트는 컬처 고정.
+        private static void PinKorean() => CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ko-KR");
+
         private static List<string[]> Rows(params string[][] rows) => rows.ToList();
 
         private static List<string[]> NumericRows(IEnumerable<double> values)
@@ -105,6 +109,7 @@ namespace NanumCsvViewer.Tests
         [Fact]
         public void Scatter_large_n_switches_to_density_with_full_stats()
         {
+            PinKorean();
             var rows = new List<string[]>();
             var rnd = new Random(7);
             for (int i = 0; i < 1200; i++)
@@ -199,12 +204,52 @@ namespace NanumCsvViewer.Tests
         [Fact]
         public void Pareto_aggregates_tail_into_other()
         {
+            PinKorean();
             var rows = new List<string[]>();
             for (int v = 0; v < 60; v++) rows.Add(new[] { $"v{v:00}" });
             var m = ChartBuilders.Pareto(rows, 0, "cat", topN: 50)!;
             Assert.Equal(51, m.XAxis.Categories.Count);                          // 상위 50 + (기타)
             Assert.Equal("(기타)", m.XAxis.Categories[^1]);
             Assert.Contains(m.Badges, b => b.Label.Contains("기타"));
+        }
+
+        // ---- Q-Q 시닝 계약 (리뷰 수정: 배지 안내(>10,000)와 실제 임계 일치) ----
+
+        [Fact]
+        public void Qq_does_not_thin_at_or_below_ten_thousand()
+        {
+            var values = new List<double>();
+            var rnd = new Random(1);
+            for (int i = 0; i < 5000; i++) values.Add(rnd.NextDouble() * 100);
+            var m = ChartBuilders.QqPlot(NumericRows(values), 0, "v")!;
+            var points = m.Series.First(s => s.Kind == PlotSeriesKind.Points);
+            Assert.Equal(5000, points.Xs.Length);                                 // 전 점 표시
+            Assert.DoesNotContain(m.Badges, b => b.Label.Contains("quantiles"));  // 시닝 배지 없음
+        }
+
+        [Fact]
+        public void Qq_thins_above_ten_thousand_to_two_thousand()
+        {
+            var values = new List<double>();
+            var rnd = new Random(2);
+            for (int i = 0; i < 15000; i++) values.Add(rnd.NextDouble() * 100);
+            var m = ChartBuilders.QqPlot(NumericRows(values), 0, "v")!;
+            var points = m.Series.First(s => s.Kind == PlotSeriesKind.Points);
+            Assert.Equal(2000, points.Xs.Length);                                 // 결정적 분위 시닝
+            Assert.Contains(m.Badges, b => b.Label.Contains("quantiles"));
+        }
+
+        // ---- 파서 일관성 (리뷰 수정: 통화·퍼센트 접사도 수치로) ----
+
+        [Fact]
+        public void Builders_parse_currency_and_percent_affixes()
+        {
+            var rows = new List<string[]>
+            {
+                new[] { "₩1,000" }, new[] { "$2,500" }, new[] { "25%" }, new[] { "3.5" },
+            };
+            var m = ChartBuilders.Histogram(rows, 0, "v", new ChartBuilders.HistogramOptions(Bins: 5, ShowNormal: false, ShowKde: false))!;
+            Assert.Equal(4, m.Series.Single(s => s.Kind == PlotSeriesKind.Bars).BarHeight.Sum());
         }
     }
 }

@@ -5,7 +5,10 @@ namespace NanumCsvViewer.Charting
     /// <summary>
     /// PlotModel을 그리는 얇은 GDI+ 렌더러(이슈 #19). 계산은 전부 PlotMath/ChartBuilders에 있고
     /// 여기는 좌표 변환·페인트·상호작용(툴팁·드래그/휠 줌·히트맵 셀 클릭)만 담당한다.
-    /// 밀도 산점은 줌 시 PlotMath.ComputeDensityGrid로 재비닝하며, 가시 점이 임계 이하로 줄면 점 렌더로 복귀.
+    ///
+    /// 렌더 구조(리뷰 반영): 장면(축·격자·시리즈·기준선·노트)은 뷰포트/크기 단위로 비트맵에 캐시하고,
+    /// OnPaint는 블릿 + 오버레이(드래그 사각형·툴팁)만 그린다 — 마우스 이동마다 5만 점을 다시 칠하지 않는다.
+    /// 딥 줌 시 픽셀 좌표가 GDI+ 고정소수점 한계(±2²³)를 넘지 않도록 선분은 클리핑, 막대는 클램프한다.
     /// </summary>
     internal sealed class PlotControl : Control
     {
@@ -21,10 +24,15 @@ namespace NanumCsvViewer.Charting
         private Point? _dragStart;
         private Rectangle _dragRect;
 
+        // 장면 캐시: (모델·뷰포트·크기·팔레트)가 바뀔 때만 재렌더.
+        private Bitmap? _scene;
+        private (PlotModel? Model, double X0, double X1, double Y0, double Y1, int W, int H, ThemePalette P) _sceneKey;
+
         // 밀도 격자 캐시(뷰포트 단위)
         private PlotMath.DensityGrid? _densityCache;
         private (double, double, double, double)? _densityCacheKey;
-        private int _visiblePointCache = -1;
+
+        private static string LT(string en, string ko) => ChartCommon.LT(en, ko);
 
         /// <summary>히트맵 셀 클릭(rowIndex, colIndex) — 상관 히트맵 → 산점도 드릴다운용.</summary>
         public event Action<int, int>? HeatCellClicked;
@@ -55,31 +63,77 @@ namespace NanumCsvViewer.Charting
                 if (_vyMax <= _vyMin) _vyMax = _vyMin + 1;
             }
             _zoomed = false;
-            _densityCache = null;
-            _densityCacheKey = null;
-            _visiblePointCache = -1;
+            InvalidateDensity();
             Invalidate();
         }
 
-        /// <summary>PNG 저장·클립보드용 고해상도 렌더.</summary>
+        private void InvalidateDensity()
+        {
+            _densityCache = null;
+            _densityCacheKey = null;
+        }
+
+        /// <summary>PNG 저장·클립보드용 고해상도 렌더(장면 캐시 미사용 — 항상 신선하게 그림).</summary>
         public Bitmap RenderBitmap(int scale = 2)
         {
             int w = Math.Max(320, Width) * scale, h = Math.Max(240, Height) * scale;
             var bmp = new Bitmap(w, h);
             using var g = Graphics.FromImage(bmp);
             g.ScaleTransform(scale, scale);
-            RenderTo(g, new Rectangle(0, 0, w / scale, h / scale), interactive: false);
+            RenderScene(g, new Rectangle(0, 0, w / scale, h / scale));
             return bmp;
         }
 
-        // ---------------------------------------------------------------- 페인트
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { _scene?.Dispose(); _scene = null; }
+            base.Dispose(disposing);
+        }
+
+        // ---------------------------------------------------------------- 페인트 (장면 캐시 + 오버레이)
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            RenderTo(e.Graphics, ClientRectangle, interactive: true);
+            var g = e.Graphics;
+            if (Width < 8 || Height < 8) return;
+
+            var key = (_model, _vxMin, _vxMax, _vyMin, _vyMax, Width, Height, _palette);
+            if (_scene is null || _sceneKey != key)
+            {
+                _scene?.Dispose();
+                _scene = new Bitmap(Math.Max(1, Width), Math.Max(1, Height));
+                using var sg = Graphics.FromImage(_scene);
+                RenderScene(sg, ClientRectangle);
+                _sceneKey = key;
+            }
+            g.DrawImageUnscaled(_scene, 0, 0);
+
+            // 오버레이: 드래그 줌 사각형 + 호버 툴팁 (장면 재렌더 없음)
+            if (_model is null) return;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            if (_dragStart is not null && _dragRect.Width > 2 && _dragRect.Height > 2)
+            {
+                using var db = new SolidBrush(Color.FromArgb(40, _palette.Accent));
+                using var dp = new Pen(_palette.Accent) { DashStyle = DashStyle.Dash };
+                g.FillRectangle(db, _dragRect);
+                g.DrawRectangle(dp, _dragRect);
+            }
+            using var font = new Font(Font.FontFamily, 8f);
+            DrawTooltip(g, font, PlotRect(ClientRectangle), _model);
         }
 
-        private void RenderTo(Graphics g, Rectangle area, bool interactive)
+        // 플롯 사각형 계산의 단일 소스(렌더와 히트테스트가 반드시 같은 좌표계를 쓰도록).
+        private Rectangle PlotRect(Rectangle area)
+        {
+            var m = _model;
+            bool hasY2 = m?.Y2Axis is not null;
+            int legendH = m is not null && m.Series.Count(s => !string.IsNullOrEmpty(s.Name)) > 1 ? 20 : 4;
+            return new Rectangle(area.Left + 62, area.Top + 8 + legendH,
+                area.Width - 62 - (hasY2 ? 52 : 18), area.Height - 8 - legendH - 48);
+        }
+
+        private void RenderScene(Graphics g, Rectangle area)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
@@ -88,7 +142,7 @@ namespace NanumCsvViewer.Charting
             var m = _model;
             if (m is null || m.Series.Count == 0)
             {
-                TextRenderer.DrawText(g, "No data", Font, area, _palette.Text,
+                TextRenderer.DrawText(g, LT("No data", "데이터 없음"), Font, area, _palette.Text,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 return;
             }
@@ -96,13 +150,12 @@ namespace NanumCsvViewer.Charting
             using var font = new Font(Font.FontFamily, 8f);
             using var titleFont = new Font(Font.FontFamily, 8f, FontStyle.Bold);
 
-            bool hasY2 = m.Y2Axis is not null;
-            int legendH = m.Series.Count(s => !string.IsNullOrEmpty(s.Name)) > 1 ? 20 : 4;
-            var plot = new Rectangle(area.Left + 62, area.Top + 8 + legendH,
-                area.Width - 62 - (hasY2 ? 52 : 18), area.Height - 8 - legendH - 48);
+            var plot = PlotRect(area);
             if (plot.Width < 30 || plot.Height < 30) return;
 
-            if (legendH > 4) DrawLegend(g, font, new Rectangle(plot.Left, area.Top + 6, plot.Width, legendH), m);
+            int legendTop = area.Top + 6;
+            if (m.Series.Count(s => !string.IsNullOrEmpty(s.Name)) > 1)
+                DrawLegend(g, font, new Rectangle(plot.Left, legendTop, plot.Width, 20), m);
 
             // 축 + 격자
             if (m.XAxis.Kind == PlotAxisKind.Category && m.YAxis.Kind == PlotAxisKind.Category)
@@ -112,7 +165,7 @@ namespace NanumCsvViewer.Charting
                 DrawYAxis(g, font, plot, m);
                 if (m.XAxis.Kind == PlotAxisKind.Numeric) DrawXAxisNumeric(g, font, plot, m);
                 else DrawXAxisCategories(g, font, plot, m.XAxis.Categories);
-                if (hasY2) DrawY2Axis(g, font, plot, m.Y2Axis!);
+                if (m.Y2Axis is { } y2) DrawY2Axis(g, font, plot, y2);
             }
 
             // 시리즈
@@ -132,12 +185,13 @@ namespace NanumCsvViewer.Charting
                 }
             }
 
-            // 기준선(평균·중앙값)
+            // 기준선(평균·중앙값) — 줌으로 뷰 밖이면 건너뜀(좌표 폭주 방지 겸).
             foreach (var r in m.ReferenceLines)
             {
                 using var pen = new Pen(ChartCommon.SeriesColor(r.PaletteIndex)) { DashStyle = r.Dashed ? DashStyle.Dash : DashStyle.Solid };
                 if (r.Vertical)
                 {
+                    if (r.Value < _vxMin || r.Value > _vxMax) continue;
                     int x = XToPx(r.Value, plot);
                     g.DrawLine(pen, x, plot.Top, x, plot.Bottom);
                     TextRenderer.DrawText(g, r.Label, font, new Point(Math.Min(x + 3, plot.Right - 60), plot.Top + 2),
@@ -145,6 +199,7 @@ namespace NanumCsvViewer.Charting
                 }
                 else
                 {
+                    if (r.Value < _vyMin || r.Value > _vyMax) continue;
                     int y = YToPx(r.Value, plot);
                     g.DrawLine(pen, plot.Left, y, plot.Right, y);
                     TextRenderer.DrawText(g, r.Label, font, new Point(plot.Left + 3, Math.Max(y - 15, plot.Top)),
@@ -154,7 +209,7 @@ namespace NanumCsvViewer.Charting
             g.Clip = oldClip;
 
             // 렌더 정직성 노트(우하단) + 줌 표시
-            string note = m.RenderNote + (_zoomed ? "  ·  zoom (더블클릭=초기화)" : "");
+            string note = m.RenderNote + (_zoomed ? "  ·  " + LT("zoom (double-click to reset)", "줌 (더블클릭=초기화)") : "");
             if (!string.IsNullOrEmpty(note))
                 TextRenderer.DrawText(g, note, font,
                     new Rectangle(plot.Left, area.Bottom - 16, plot.Width, 14), Color.FromArgb(150, _palette.Text),
@@ -164,18 +219,6 @@ namespace NanumCsvViewer.Charting
             if (!string.IsNullOrEmpty(m.XAxis.Title))
                 TextRenderer.DrawText(g, m.XAxis.Title, titleFont,
                     new Rectangle(plot.Left, plot.Bottom + 30, plot.Width, 14), _palette.Text, TextFormatFlags.HorizontalCenter);
-
-            if (interactive)
-            {
-                if (_dragStart is not null && _dragRect.Width > 2 && _dragRect.Height > 2)
-                {
-                    using var db = new SolidBrush(Color.FromArgb(40, _palette.Accent));
-                    using var dp = new Pen(_palette.Accent) { DashStyle = DashStyle.Dash };
-                    g.FillRectangle(db, _dragRect);
-                    g.DrawRectangle(dp, _dragRect);
-                }
-                DrawTooltip(g, font, plot, m);
-            }
         }
 
         // ---------------------------------------------------------------- 좌표 변환
@@ -186,22 +229,27 @@ namespace NanumCsvViewer.Charting
         private int YToPx(double y, Rectangle plot)
             => plot.Bottom - (int)((y - _vyMin) / (_vyMax - _vyMin) * plot.Height);
 
+        private float XToPxF(double x, Rectangle plot)
+            => plot.Left + (float)((x - _vxMin) / (_vxMax - _vxMin) * plot.Width);
+
+        private float YToPxF(double y, Rectangle plot)
+            => plot.Bottom - (float)((y - _vyMin) / (_vyMax - _vyMin) * plot.Height);
+
         private double PxToX(int px, Rectangle plot)
             => _vxMin + (px - plot.Left) / (double)plot.Width * (_vxMax - _vxMin);
 
         private double PxToY(int py, Rectangle plot)
             => _vyMin + (plot.Bottom - py) / (double)plot.Height * (_vyMax - _vyMin);
 
-        private int Y2ToPx(double y, Rectangle plot, PlotAxis y2)
-            => plot.Bottom - (int)((y - y2.Min) / (y2.Max - y2.Min) * plot.Height);
+        // 카테고리 슬롯/히트맵 셀 히트테스트의 단일 소스(툴팁 hover와 클릭이 같은 셀을 가리키도록).
+        private static int SlotAt(int px, Rectangle plot, int count)
+            => count <= 0 ? -1 : (int)((px - plot.Left) / (plot.Width / (float)count));
 
-        private Rectangle PlotArea()
-        {
-            var m = _model!;
-            bool hasY2 = m.Y2Axis is not null;
-            int legendH = m.Series.Count(s => !string.IsNullOrEmpty(s.Name)) > 1 ? 20 : 4;
-            return new Rectangle(62, 8 + legendH, Width - 62 - (hasY2 ? 52 : 18), Height - 8 - legendH - 48);
-        }
+        private static (int Row, int Col) HeatCellAt(Point p, Rectangle plot, int rows, int cols)
+            => (SlotAtVertical(p.Y, plot, rows), SlotAt(p.X, plot, cols));
+
+        private static int SlotAtVertical(int py, Rectangle plot, int count)
+            => count <= 0 ? -1 : (int)((py - plot.Top) / (plot.Height / (float)count));
 
         // ---------------------------------------------------------------- 축
 
@@ -236,6 +284,9 @@ namespace NanumCsvViewer.Charting
                     _palette.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             }
         }
+
+        private int Y2ToPx(double y, Rectangle plot, PlotAxis y2)
+            => plot.Bottom - (int)((y - y2.Min) / (y2.Max - y2.Min) * plot.Height);
 
         private void DrawXAxisNumeric(Graphics g, Font font, Rectangle plot, PlotModel m)
         {
@@ -320,12 +371,14 @@ namespace NanumCsvViewer.Charting
             var col = ChartCommon.SeriesColor(s.PaletteIndex);
             using var fill = new SolidBrush(Color.FromArgb(180, col));
             using var pen = new Pen(_palette.Surface);
-            int zero = YToPx(Math.Max(0, _vyMin), plot);
+            int zero = Math.Clamp(YToPx(Math.Max(0, _vyMin), plot), plot.Top - 2, plot.Bottom + 2);
             for (int i = 0; i < s.BarHeight.Length; i++)
             {
-                int x1 = XToPx(s.BarLeft[i], plot);
-                int x2 = XToPx(s.BarRight[i], plot);
-                int y = YToPx(s.BarHeight[i], plot);
+                // 딥 줌 좌표 폭주 방지: 뷰 밖 빈은 건너뛰고, 경계 빈은 플롯 사각형으로 클램프(축 정렬이라 정확).
+                if (s.BarRight[i] < _vxMin || s.BarLeft[i] > _vxMax) continue;
+                int x1 = Math.Clamp(XToPx(s.BarLeft[i], plot), plot.Left - 2, plot.Right + 2);
+                int x2 = Math.Clamp(XToPx(s.BarRight[i], plot), plot.Left - 2, plot.Right + 2);
+                int y = Math.Clamp(YToPx(s.BarHeight[i], plot), plot.Top - 2, plot.Bottom + 2);
                 if (x2 <= x1) x2 = x1 + 1;
                 var rect = Rectangle.FromLTRB(x1, Math.Min(y, zero), x2, Math.Max(y, zero));
                 g.FillRectangle(fill, rect);
@@ -357,7 +410,7 @@ namespace NanumCsvViewer.Charting
             {
                 double x = s.Xs[i], y = s.Ys[i];
                 if (x < _vxMin || x > _vxMax || y < _vyMin || y > _vyMax) continue;
-                g.FillEllipse(b, XToPx(x, plot) - 2.4f, YToPx(y, plot) - 2.4f, 4.8f, 4.8f);
+                g.FillEllipse(b, XToPxF(x, plot) - 2.4f, YToPxF(y, plot) - 2.4f, 4.8f, 4.8f);
             }
         }
 
@@ -366,26 +419,59 @@ namespace NanumCsvViewer.Charting
             var col = ChartCommon.SeriesColor(s.PaletteIndex);
             using var pen = new Pen(col, 2f) { LineJoin = LineJoin.Round };
             if (s.Dashed) pen.DashStyle = DashStyle.Dash;
-            var pts = new List<PointF>(s.Xs.Length);
-            for (int i = 0; i < s.Xs.Length; i++)
+
+            bool useY2 = s.UseSecondaryAxis && m.Y2Axis is not null;
+            var y2 = m.Y2Axis;
+
+            // 세그먼트 단위 클리핑: 딥 줌 시 회귀선·곡선의 픽셀 좌표 폭주(GDI+ ±2²³ 한계) 크래시 방지.
+            // 직선 위 보간이라 시각 왜곡 없음(PlotMath.ClipSegment, Liang-Barsky).
+            float PxX(double x) => XToPxF(x, plot);
+            float PxY(double yv) => useY2
+                ? plot.Bottom - (float)((yv - y2!.Min) / (y2.Max - y2.Min) * plot.Height)
+                : YToPxF(yv, plot);
+
+            var run = new List<PointF>(Math.Min(s.Xs.Length, 4096));
+            void FlushRun()
             {
-                float px = plot.Left + (float)((s.Xs[i] - _vxMin) / (_vxMax - _vxMin) * plot.Width);
-                float py = s.UseSecondaryAxis && m.Y2Axis is { } y2
-                    ? plot.Bottom - (float)((s.Ys[i] - y2.Min) / (y2.Max - y2.Min) * plot.Height)
-                    : plot.Bottom - (float)((s.Ys[i] - _vyMin) / (_vyMax - _vyMin) * plot.Height);
-                pts.Add(new PointF(px, py));
+                if (run.Count > 1) g.DrawLines(pen, run.ToArray());
+                else if (run.Count == 1)
+                {
+                    using var single = new SolidBrush(col);
+                    g.FillEllipse(single, run[0].X - 2, run[0].Y - 2, 4, 4);
+                }
+                run.Clear();
             }
-            if (pts.Count > 1) g.DrawLines(pen, pts.ToArray());
-            else if (pts.Count == 1)
+
+            for (int i = 1; i < s.Xs.Length; i++)
             {
-                using var single = new SolidBrush(col);
-                g.FillEllipse(single, pts[0].X - 2, pts[0].Y - 2, 4, 4);
+                double px1 = PxX(s.Xs[i - 1]), py1 = PxY(s.Ys[i - 1]);
+                double px2 = PxX(s.Xs[i]), py2 = PxY(s.Ys[i]);
+                if (!PlotMath.ClipSegment(px1, py1, px2, py2,
+                        plot.Left, plot.Top, plot.Right, plot.Bottom,
+                        out double cx1, out double cy1, out double cx2, out double cy2))
+                {
+                    FlushRun();
+                    continue;
+                }
+                var a = new PointF((float)cx1, (float)cy1);
+                var bpt = new PointF((float)cx2, (float)cy2);
+                if (run.Count == 0) run.Add(a);
+                else if (run[^1] != a) { FlushRun(); run.Add(a); } // 클리핑으로 경로가 끊긴 지점
+                run.Add(bpt);
             }
+            FlushRun();
+
             // 점 마커는 시계열(라벨 축)에서만 — 곡선(KDE·정규)은 매끈하게 선만.
-            if (m.XAxis.TickLabels is not null && pts.Count <= 120)
+            if (m.XAxis.TickLabels is not null && s.Xs.Length <= 120)
             {
                 using var mb = new SolidBrush(col);
-                foreach (var p in pts) g.FillEllipse(mb, p.X - 2.5f, p.Y - 2.5f, 5, 5);
+                for (int i = 0; i < s.Xs.Length; i++)
+                {
+                    if (s.Xs[i] < _vxMin || s.Xs[i] > _vxMax) continue;
+                    float mx = PxX(s.Xs[i]), my = PxY(s.Ys[i]);
+                    if (my < plot.Top || my > plot.Bottom) continue;
+                    g.FillEllipse(mb, mx - 2.5f, my - 2.5f, 5, 5);
+                }
             }
         }
 
@@ -437,6 +523,8 @@ namespace NanumCsvViewer.Charting
             int rows = cells.GetLength(0), cols = cells.GetLength(1);
             float cw = plot.Width / (float)cols, ch = plot.Height / (float)rows;
             using var border = new Pen(_palette.Surface);
+            using var hatch = new SolidBrush(Color.FromArgb(24, _palette.Text));
+            using var cellBrush = new SolidBrush(Color.White); // 색만 바꿔 재사용(셀마다 할당 방지)
             bool showText = cw > 34 && ch > 16;
             for (int r = 0; r < rows; r++)
             {
@@ -446,13 +534,12 @@ namespace NanumCsvViewer.Charting
                     double v = cells[r, c];
                     if (double.IsNaN(v))
                     {
-                        using var hatch = new SolidBrush(Color.FromArgb(24, _palette.Text));
                         g.FillRectangle(hatch, rect);
                     }
                     else
                     {
                         bool significant = s.CellsP is not { } ps || double.IsNaN(ps[r, c]) || ps[r, c] < 0.05 || r == c;
-                        using var cellBrush = new SolidBrush(HeatColor(v, significant));
+                        cellBrush.Color = HeatColor(v, significant);
                         g.FillRectangle(cellBrush, rect);
                         if (showText)
                             TextRenderer.DrawText(g, v.ToString("0.00"), font, Rectangle.Round(rect),
@@ -493,7 +580,6 @@ namespace NanumCsvViewer.Charting
                 int rows = Math.Max(24, Math.Min(240, plot.Height / 3));
                 _densityCache = PlotMath.ComputeDensityGrid(s.Xs, s.Ys, cols, rows, _vxMin, _vxMax, _vyMin, _vyMax);
                 _densityCacheKey = key;
-                _visiblePointCache = _densityCache?.Total ?? 0;
             }
             var grid = _densityCache;
             if (grid is null) return;
@@ -508,6 +594,7 @@ namespace NanumCsvViewer.Charting
             float cw = plot.Width / (float)gc, ch = plot.Height / (float)gr;
             var col = ChartCommon.SeriesColor(s.PaletteIndex);
             double logMax = Math.Log(1 + grid.MaxCount);
+            using var cellBrush = new SolidBrush(col); // 알파만 바꿔 재사용(셀마다 할당 방지)
             for (int r = 0; r < gr; r++)
             {
                 for (int c = 0; c < gc; c++)
@@ -515,15 +602,15 @@ namespace NanumCsvViewer.Charting
                     int count = grid.Counts[r, c];
                     if (count == 0) continue;
                     int alpha = (int)(30 + 225 * Math.Log(1 + count) / logMax); // 로그 명도(설계 합의)
-                    using var b = new SolidBrush(Color.FromArgb(Math.Min(255, alpha), col));
+                    cellBrush.Color = Color.FromArgb(Math.Min(255, alpha), col);
                     // 격자 row 0 = yMin(아래) → 화면은 아래에서 위로
                     float y = plot.Bottom - ch * (r + 1);
-                    g.FillRectangle(b, plot.Left + cw * c, y, cw + 0.5f, ch + 0.5f);
+                    g.FillRectangle(cellBrush, plot.Left + cw * c, y, cw + 0.5f, ch + 0.5f);
                 }
             }
         }
 
-        // ---------------------------------------------------------------- 툴팁
+        // ---------------------------------------------------------------- 툴팁 (오버레이 — 장면 캐시와 분리)
 
         private void DrawTooltip(Graphics g, Font font, Rectangle plot, PlotModel m)
         {
@@ -561,6 +648,7 @@ namespace NanumCsvViewer.Charting
                     case PlotSeriesKind.Bars:
                         for (int i = 0; i < s.BarHeight.Length; i++)
                         {
+                            if (s.BarRight[i] < _vxMin || s.BarLeft[i] > _vxMax) continue;
                             int x1 = XToPx(s.BarLeft[i], plot), x2 = XToPx(s.BarRight[i], plot);
                             if (_mouse.X >= x1 && _mouse.X < x2)
                             {
@@ -573,8 +661,7 @@ namespace NanumCsvViewer.Charting
 
                     case PlotSeriesKind.CategoryBars:
                     {
-                        int n = Math.Max(1, m.XAxis.Categories.Count);
-                        int i = (int)((_mouse.X - plot.Left) / (plot.Width / (float)n));
+                        int i = SlotAt(_mouse.X, plot, m.XAxis.Categories.Count);
                         if (i >= 0 && i < s.Ys.Length)
                         {
                             lines.Add(m.XAxis.Categories[i]);
@@ -588,8 +675,7 @@ namespace NanumCsvViewer.Charting
 
                     case PlotSeriesKind.Boxes:
                     {
-                        int n = Math.Max(1, m.XAxis.Categories.Count);
-                        int i = (int)((_mouse.X - plot.Left) / (plot.Width / (float)n));
+                        int i = SlotAt(_mouse.X, plot, m.XAxis.Categories.Count);
                         if (i >= 0 && i < s.Boxes.Count)
                         {
                             var b = s.Boxes[i];
@@ -605,16 +691,14 @@ namespace NanumCsvViewer.Charting
 
                     case PlotSeriesKind.HeatCells when s.Cells is { } cells:
                     {
-                        int rows = cells.GetLength(0), cols = cells.GetLength(1);
-                        int c = (int)((_mouse.X - plot.Left) / (plot.Width / (float)cols));
-                        int r = (int)((_mouse.Y - plot.Top) / (plot.Height / (float)rows));
-                        if (r >= 0 && r < rows && c >= 0 && c < cols)
+                        var (r, c) = HeatCellAt(_mouse, plot, cells.GetLength(0), cells.GetLength(1));
+                        if (r >= 0 && r < cells.GetLength(0) && c >= 0 && c < cells.GetLength(1))
                         {
                             lines.Add($"{m.YAxis.Categories[r]} × {m.XAxis.Categories[c]}");
                             double v = cells[r, c];
                             lines.Add(double.IsNaN(v) ? "r: n/a" : $"r = {v:0.000}");
                             if (s.CellsP is { } ps && !double.IsNaN(ps[r, c])) lines.Add($"p = {ps[r, c]:0.0000}");
-                            if (r != c) lines.Add("클릭 → 산점도");
+                            if (r != c) lines.Add(LT("click → scatter", "클릭 → 산점도"));
                             return lines;
                         }
                         break;
@@ -627,8 +711,8 @@ namespace NanumCsvViewer.Charting
                         int bi = -1;
                         for (int i = 0; i < s.Xs.Length; i++)
                         {
-                            double dx = XToPx(s.Xs[i], plot) - _mouse.X;
-                            double dy = YToPx(s.Ys[i], plot) - _mouse.Y;
+                            double dx = XToPxF(s.Xs[i], plot) - _mouse.X;
+                            double dy = YToPxF(s.Ys[i], plot) - _mouse.Y;
                             double dd = dx * dx + dy * dy;
                             if (dd < best) { best = dd; bi = i; }
                         }
@@ -645,8 +729,8 @@ namespace NanumCsvViewer.Charting
                         if (_densityCache is { } grid && grid.Total > s.DensityThreshold)
                         {
                             int gr = grid.Counts.GetLength(0), gc = grid.Counts.GetLength(1);
-                            int c = (int)((_mouse.X - plot.Left) / (plot.Width / (float)gc));
-                            int r = (int)((plot.Bottom - _mouse.Y) / (plot.Height / (float)gr));
+                            int c = SlotAt(_mouse.X, plot, gc);
+                            int r = gr - 1 - SlotAtVertical(_mouse.Y, plot, gr); // 격자 row 0 = 아래
                             if (r >= 0 && r < gr && c >= 0 && c < gc && grid.Counts[r, c] > 0)
                             {
                                 lines.Add($"x ≈ {ChartCommon.FormatTick(PxToX(_mouse.X, plot))}");
@@ -666,7 +750,7 @@ namespace NanumCsvViewer.Charting
                             lines.Add(labels[idx]);
                             foreach (var ls in m.Series)
                             {
-                                int j = Array.IndexOf(ls.Xs, idx);
+                                int j = Array.IndexOf(ls.Xs, (double)idx);
                                 if (j >= 0) lines.Add($"{ls.Name}: {ChartCommon.FormatTick(ls.Ys[j])}");
                             }
                             return lines;
@@ -686,7 +770,7 @@ namespace NanumCsvViewer.Charting
             if (_dragStart is { } start)
                 _dragRect = Rectangle.FromLTRB(Math.Min(start.X, e.X), Math.Min(start.Y, e.Y),
                                                Math.Max(start.X, e.X), Math.Max(start.Y, e.Y));
-            Invalidate();
+            Invalidate(); // 장면은 캐시 — 오버레이(툴팁·드래그 사각형)만 다시 그려짐
             base.OnMouseMove(e);
         }
 
@@ -711,7 +795,7 @@ namespace NanumCsvViewer.Charting
         {
             var m = _model;
             if (m is null) { base.OnMouseUp(e); return; }
-            var plot = PlotArea();
+            var plot = PlotRect(ClientRectangle);
 
             if (_dragStart is not null)
             {
@@ -725,7 +809,7 @@ namespace NanumCsvViewer.Charting
                     {
                         _vxMin = x1; _vxMax = x2; _vyMin = y1; _vyMax = y2;
                         _zoomed = true;
-                        _densityCache = null;
+                        InvalidateDensity();
                     }
                     Invalidate();
                     base.OnMouseUp(e);
@@ -733,15 +817,13 @@ namespace NanumCsvViewer.Charting
                 }
             }
 
-            // 히트맵 셀 클릭 → 드릴다운
+            // 히트맵 셀 클릭 → 드릴다운 (툴팁과 동일한 히트테스트 헬퍼 사용)
             if (e.Button == MouseButtons.Left &&
                 m.Series.FirstOrDefault(s => s.Kind == PlotSeriesKind.HeatCells) is { Cells: { } cells } &&
                 plot.Contains(e.Location))
             {
-                int rows = cells.GetLength(0), cols = cells.GetLength(1);
-                int c = (int)((e.X - plot.Left) / (plot.Width / (float)cols));
-                int r = (int)((e.Y - plot.Top) / (plot.Height / (float)rows));
-                if (r >= 0 && r < rows && c >= 0 && c < cols && r != c)
+                var (r, c) = HeatCellAt(e.Location, plot, cells.GetLength(0), cells.GetLength(1));
+                if (r >= 0 && r < cells.GetLength(0) && c >= 0 && c < cells.GetLength(1) && r != c)
                     HeatCellClicked?.Invoke(r, c);
             }
             base.OnMouseUp(e);
@@ -757,7 +839,7 @@ namespace NanumCsvViewer.Charting
         {
             if (_model is { AllowZoom: true })
             {
-                var plot = PlotArea();
+                var plot = PlotRect(ClientRectangle);
                 if (plot.Contains(e.Location))
                 {
                     double factor = e.Delta > 0 ? 0.85 : 1.18;
@@ -767,7 +849,7 @@ namespace NanumCsvViewer.Charting
                     _vyMin = cy - (cy - _vyMin) * factor;
                     _vyMax = cy + (_vyMax - cy) * factor;
                     _zoomed = true;
-                    _densityCache = null;
+                    InvalidateDensity();
                     Invalidate();
                 }
             }
