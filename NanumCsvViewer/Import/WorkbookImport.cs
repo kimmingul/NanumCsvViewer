@@ -89,8 +89,8 @@ namespace NanumCsvViewer.Import
             return sheets;
         }
 
-        // SAS는 변수 라벨은 있으나 값 라벨은 파일 밖(.sas7bcat 카탈로그)에 있어 코드 치환 불가.
-        // showLabels는 헤더를 변수 라벨로 바꾸는 데만 쓴다. 날짜는 리더가 이미 DateTime으로 반환.
+        // SAS 변수 라벨은 파일 안에 있고, 값 라벨은 파일 밖 포맷 카탈로그(.sas7bcat)에 있다.
+        // 라벨 표시 모드면 헤더를 변수 라벨로 바꾸고, 동반 카탈로그가 있으면 값도 라벨로 치환한다(이슈 #20).
         private static List<ImportedSheet> ImportSas(string path, string tempDir, bool showLabels)
         {
             using var stream = File.OpenRead(path);
@@ -100,9 +100,15 @@ namespace NanumCsvViewer.Import
                 ? Path.GetFileNameWithoutExtension(path) : props.getName();
             string csv = Path.Combine(tempDir, "sheet_0.csv");
 
+            // 라벨 모드에서만 카탈로그 탐색: 동일 파일명 우선, 없으면 SAS 관례상 formats.sas7bcat.
+            SasCatalog? catalog = showLabels ? FindSasCatalog(path) : null;
+
             var columns = reader.getColumns();
-            // SAS 값은 라벨 표시 모드에서도 바뀌지 않으므로(헤더만 변경) 선언 힌트는 항상 유효.
-            var hints = columns.Select(FormatMappers.MapSas).ToArray();
+            var formatNames = columns.Select(col => col.getFormat()?.getName()).ToArray();
+            // 카탈로그 라벨이 적용되는 컬럼은 값이 문자열(라벨)로 바뀌므로 선언 숫자 힌트가 무의미 → 추론 위임.
+            // 그 외 컬럼(헤더만 변경)은 선언 힌트가 항상 유효.
+            var hints = columns.Select((col, i) =>
+                catalog?.HasFormat(formatNames[i]) == true ? null : FormatMappers.MapSas(col)).ToArray();
 
             using (var writer = NewCsvWriter(csv))
             {
@@ -114,11 +120,26 @@ namespace NanumCsvViewer.Import
                     object[] row = reader.readNext();
                     if (row is null) break;
                     var cells = new string[row.Length];
-                    for (int c = 0; c < row.Length; c++) cells[c] = Escape(FormatCell(row[c]));
+                    for (int c = 0; c < row.Length; c++)
+                        cells[c] = Escape(
+                            (catalog is not null && c < formatNames.Length
+                                ? catalog.TryLabel(formatNames[c], row[c]) : null)
+                            ?? FormatCell(row[c]));
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
             return new List<ImportedSheet> { new(name, csv, hints) };
+        }
+
+        // 동반 카탈로그 탐색: <파일명>.sas7bcat → formats.sas7bcat 순. 읽기 실패는 null(라벨 없이 진행).
+        private static SasCatalog? FindSasCatalog(string sasPath)
+        {
+            string dir = Path.GetDirectoryName(sasPath) ?? ".";
+            string sameName = Path.Combine(dir, Path.GetFileNameWithoutExtension(sasPath) + ".sas7bcat");
+            if (File.Exists(sameName) && SasCatalogReader.TryRead(sameName) is { FormatCount: > 0 } c1) return c1;
+            string conventional = Path.Combine(dir, "formats.sas7bcat");
+            if (File.Exists(conventional) && SasCatalogReader.TryRead(conventional) is { FormatCount: > 0 } c2) return c2;
+            return null;
         }
 
         // SPSS(.sav)는 단일 데이터셋 → 시트 1개. 헤더는 변수명, 값은 원값(코드)을 그대로 내보내

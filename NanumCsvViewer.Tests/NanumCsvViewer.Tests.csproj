@@ -26,4 +26,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- SAS 카탈로그(.sas7bcat) 파서 검증용 실파일 픽스처(출처: Roche/pyreadstat test_data, Apache-2.0) -->
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
