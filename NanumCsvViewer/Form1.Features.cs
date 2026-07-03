@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using NanumCsvViewer.Csv;
+using NanumCsvViewer.Csv.DataQuality;
 
 namespace NanumCsvViewer
 {
@@ -185,6 +186,23 @@ namespace NanumCsvViewer
             RegisterLabel(_vizMenu, "Visualization", "시각화");
             menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _vizMenu);
 
+            // 새 최상위 메뉴: 데이터 품질(이슈 #26) — 시각화와 피벗 사이.
+            // 구성은 4-모델 설계 논쟁으로 확정: 전수 프로파일 + 발견 패널(필터 칩·행 점프 루프) +
+            // 키 유일성 + 사용자 규칙(JSON) + 증거 보고서. 점수 게이지·내장 의료 규칙 팩은 두지 않는다.
+            _qualityMenu = new ToolStripMenuItem();
+            var qualityRun = MakeItem("Run Quality Profile", "품질 프로파일 실행", async (_, _) => await RunQualityProfileAsync());
+            qualityRun.ShortcutKeys = Keys.Control | Keys.Shift | Keys.Q;
+            _qualityMenu.DropDownItems.Add(qualityRun);
+            _qualityPanelMenu = MakeItem("Findings Panel", "검사 결과 패널", (_, _) => ToggleQualityPanel());
+            _qualityMenu.DropDownItems.Add(_qualityPanelMenu);
+            _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
+            _qualityMenu.DropDownItems.Add(MakeItem("Key Uniqueness…", "키 유일성 검사…", async (_, _) => await RunKeyUniquenessAsync()));
+            _qualityMenu.DropDownItems.Add(MakeItem("Validation Rules…", "타당성 규칙…", async (_, _) => await ShowQualityRulesAsync()));
+            _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
+            _qualityMenu.DropDownItems.Add(MakeItem("Export Quality Report…", "품질 보고서 내보내기…", (_, _) => ExportQualityReport()));
+            RegisterLabel(_qualityMenu, "Data Quality", "데이터 품질");
+            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _qualityMenu);
+
             // 타입 배지 토글 툴바 버튼 — 우측 정렬로 추가하면 테마 토글 버튼 왼쪽에 놓인다.
             _badgeToggleButton = new ToolStripButton
             {
@@ -270,6 +288,7 @@ namespace NanumCsvViewer
                 _badgeToggleButton.ToolTipText = LT("Toggle type badges", "타입 배지 표시 전환");
             if (_fieldLabelsToggleButton is not null)
                 _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
+            _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
@@ -299,6 +318,7 @@ namespace NanumCsvViewer
             if (_perfMenu is not null) _perfMenu.Enabled = _doc is not null;
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
             if (_vizMenu is not null) _vizMenu.Enabled = ready;
+            if (_qualityMenu is not null) _qualityMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
             // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
             bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
@@ -1441,6 +1461,13 @@ namespace NanumCsvViewer
                 return;
             }
 
+            await JumpToSourceRowAsync(target); // 품질 패널 "행 이동"과 공용(이슈 #26)
+        }
+
+        /// <summary>원본 행번호(1-based)로 그리드 이동. 필터 중이면 뷰맵을 스캔해 찾는다.</summary>
+        private async Task JumpToSourceRowAsync(long target)
+        {
+            if (_doc is null || _doc.DisplayRowCount == 0 || target < 1) return;
             var doc = _doc;
             int viewRow = -1;
             if (!doc.IsFiltered)
@@ -2227,6 +2254,477 @@ namespace NanumCsvViewer
                 try { if (File.Exists(f)) File.Delete(f); } catch { }
             }
             _tempImportFiles.Clear();
+        }
+
+        // ---------------------------------------------------------------- 데이터 품질 (이슈 #26)
+        //
+        // 4-모델 설계 논쟁(Fable 5·Codex·Grok·Opus 4.8) 합의 구현:
+        //  - 전수 스트리밍 프로파일(뷰 200만 행 상한 우회, 검사 범위 정직 표기)
+        //  - 발견 → 기존 필터 칩 변환 → 원본 행 점프 루프(하단 도킹 패널)
+        //  - 점수 게이지·내장 의료 규칙 팩·자동 수정 없음. 규칙은 사용자 소유 JSON.
+
+        private ToolStripMenuItem? _qualityMenu, _qualityPanelMenu;
+        private QualityPanel? _qualityPanel;
+        private QualityReport? _qualityReport;                       // 마지막 프로파일(스냅샷·보고서 기반)
+        private readonly List<QualityFinding> _qualityFindings = new(); // 표시 대상: 프로파일 + 키 + 규칙
+        private VirtualCsvDocument? _qualityFindingsDoc;             // 발견이 캡처한 문서(프로버넌스 가드)
+        private List<QualityRule> _qualityRules = new();             // 세션 규칙(문서 전환에도 유지)
+        private CancellationTokenSource? _qualityCts;
+        private Task? _qualityTask;                                  // CancelAndDrainAsync가 함께 대기
+
+        // 문서/시트 전환 시 호출(ResetView): 발견은 이전 문서 기준이므로 비운다. 규칙은 세션 자산으로 유지.
+        private void ResetQualityState()
+        {
+            _qualityCts?.Cancel();
+            _qualityReport = null;
+            _qualityFindings.Clear();
+            _qualityFindingsDoc = null;
+            // 패널 내부 목록·Tag(옛 발견)도 함께 비운다 — 그러지 않으면 메뉴로 패널을 다시 열 때
+            // 옛 문서의 ViolationPredicate가 새 문서에 조용히 잘못 적용된다(리뷰 확정 결함).
+            if (_qualityPanel is not null)
+            {
+                _qualityPanel.ShowFindings(Array.Empty<QualityFinding>(), "");
+                SetQualityPanelVisible(false);
+            }
+        }
+
+        private void EnsureQualityPanel()
+        {
+            if (_qualityPanel is not null) return;
+            _qualityPanel = new QualityPanel(_palette) { Visible = false };
+            _qualityPanel.ApplyFilterRequested += async f => await ApplyQualityFindingFilterAsync(f);
+            _qualityPanel.JumpRequested += async row => await JumpToSourceRowAsync(row);
+            _qualityPanel.ExportRequested += ExportQualityReport;
+            _qualityPanel.CloseRequested += () => SetQualityPanelVisible(false);
+            // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
+            Controls.Add(_qualityPanel);
+            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(outerSplit) + 1);
+        }
+
+        private void SetQualityPanelVisible(bool visible)
+        {
+            EnsureQualityPanel();
+            _qualityPanel!.Visible = visible;
+            if (_qualityPanelMenu is not null) _qualityPanelMenu.Checked = visible;
+            PerformLayout();
+        }
+
+        private void ToggleQualityPanel()
+        {
+            EnsureQualityPanel();
+            SetQualityPanelVisible(!_qualityPanel!.Visible);
+        }
+
+        // 발견 목록을 결정적 순서(심각도↓·컬럼·종류)로 패널에 반영하고 표시한다.
+        private void ShowQualityFindings()
+        {
+            EnsureQualityPanel();
+            var sorted = _qualityFindings
+                .OrderByDescending(f => f.Severity)
+                .ThenBy(f => f.Column)
+                .ThenBy(f => f.Kind)
+                .ToArray();
+            _qualityFindings.Clear();
+            _qualityFindings.AddRange(sorted);
+            _qualityFindingsDoc = _doc; // 발견은 현재 문서 기준 — 필터/점프 시 동일성 확인용
+            _qualityPanel!.ShowFindings(sorted, QualitySummaryText());
+            SetQualityPanelVisible(true);
+        }
+
+        private string QualitySummaryText()
+        {
+            long crit = _qualityFindings.Count(f => f.Severity == QualitySeverity.Critical);
+            long warn = _qualityFindings.Count(f => f.Severity == QualitySeverity.Warning);
+            long info = _qualityFindings.Count(f => f.Severity == QualitySeverity.Info);
+            string counts = LT($"Critical {crit} · Warning {warn} · Info {info}",
+                               $"심각 {crit} · 경고 {warn} · 정보 {info}");
+            if (_qualityReport is not { } r) return counts;
+            string scope = r.ScannedFully ? LT("full scan", "전수") : LT("partial scan", "일부");
+            string dup = r.DuplicateRowCheckSkipped ? LT(" · dup check skipped", " · 중복검사 생략") : "";
+            return LT($"{r.RowsScanned:N0} rows ({scope}) · {r.ElapsedSeconds:0.0}s · {counts}{dup}",
+                      $"{r.RowsScanned:N0}행 ({scope}) · {r.ElapsedSeconds:0.0}초 · {counts}{dup}");
+        }
+
+        // 현재 문서에 대한 스캔 입력(전수 경로). 기대 타입은 추론+선언+수동 오버라이드가 반영된 요약에서.
+        private QualityScanSource BuildQualityScanSource(VirtualCsvDocument doc, bool withTypes)
+        {
+            ColumnValueType[]? types = withTypes && _columnSummaries.Length == doc.ColumnCount
+                ? _columnSummaries.Select(s => s.InferredType).ToArray() : null;
+            return new QualityScanSource
+            {
+                Headers = doc.Header,
+                RowAt = doc.GetDataRowUncached,
+                RowCount = doc.DataRowsAvailable,
+                CoversAllRows = !doc.RowCountTruncated,
+                ColumnTypes = types,
+                AllowedCodes = withTypes ? _workbook?.AllowedCodes(_currentSheetIndex) : null,
+                SourceName = Path.GetFileName(_workbook?.SourcePath ?? _currentPath ?? ""),
+                SourceBytes = doc.FileLength,
+            };
+        }
+
+        private async Task RunQualityProfileAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+
+            var src = BuildQualityScanSource(doc, withTypes: true);
+            var options = new QualityScanOptions();
+
+            SetBusy(true);
+            statusLabel.Text = LT("Quality scan…", "품질 스캔 중…");
+            var progress = new Progress<int>(p =>
+            {
+                if (!cts.IsCancellationRequested)
+                    statusLabel.Text = LT($"Quality scan… {p}%", $"품질 스캔 중… {p}%");
+            });
+
+            QualityReport report;
+            var task = Task.Run(() => QualityProfiler.Scan(src, options, progress, cts.Token), cts.Token);
+            _qualityTask = task;
+            try { report = await task; }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("Quality scan failed", "품질 스캔 실패");
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return; // 문서가 바뀌었으면 낡은 결과
+
+            _qualityReport = report with
+            {
+                ScanTimestamp = DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
+                AppVersion = AppInfo.Version,
+            };
+            _qualityFindings.RemoveAll(f => f.Kind != QualityCheckKind.Rule && f.Kind != QualityCheckKind.KeyUniqueness);
+            _qualityFindings.InsertRange(0, report.Findings);
+            ShowQualityFindings();
+            statusLabel.Text = QualitySummaryText();
+        }
+
+        private async Task ApplyQualityFindingFilterAsync(QualityFinding f)
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy || f.ViolationPredicate is null) return;
+            // 프로버넌스 가드: 발견이 캡처한 문서가 현재 문서와 다르면(옛 컬럼 인덱스·해시셋) 적용 금지.
+            if (!ReferenceEquals(_doc, _qualityFindingsDoc))
+            {
+                statusLabel.Text = LT("Findings are from a different file — rerun the scan",
+                                      "다른 파일의 검사 결과입니다 — 다시 스캔하세요");
+                return;
+            }
+            _valueConditions.Add((QualityText.ChipLabel(f), f.ViolationPredicate, null));
+            await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+            grid.Invalidate();
+        }
+
+        private async Task RunKeyUniquenessAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
+
+            using var dlg = new ParamDialog(LT("Key Uniqueness", "키 유일성 검사"), _palette);
+            dlg.AddNote(LT("Checks duplicates of the selected (composite) key across the whole file.",
+                           "선택한 (복합)키의 중복을 파일 전체에서 검사합니다."));
+            var list = dlg.AddCheckedList(LT("Key columns", "키 컬럼"), ColumnLabels(), Math.Min(12, doc.ColumnCount));
+            if (!dlg.ShowOk(this)) return;
+            var keys = CheckedIndexes(list);
+            if (keys.Count == 0)
+            {
+                ShowResult(LT("Key Uniqueness", "키 유일성 검사"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요."));
+                return;
+            }
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            var src = BuildQualityScanSource(doc, withTypes: false);
+            var options = new QualityScanOptions();
+
+            SetBusy(true);
+            statusLabel.Text = LT("Key scan…", "키 검사 중…");
+            var progress = new Progress<int>(p =>
+            {
+                if (!cts.IsCancellationRequested)
+                    statusLabel.Text = LT($"Key scan… {p}%", $"키 검사 중… {p}%");
+            });
+
+            KeyUniquenessScanner.Result result;
+            var task = Task.Run(() => KeyUniquenessScanner.Scan(src, keys, options, progress, cts.Token), cts.Token);
+            _qualityTask = task;
+            try { result = await task; }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("Key scan failed", "키 검사 실패");
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return;
+
+            string keyNames = string.Join(" + ", keys.Select(ColumnLabel));
+            if (result.Skipped)
+            {
+                MessageBox.Show(this,
+                    LT("Too many rows for the key scan (memory guard). The check was skipped.",
+                       "행 수가 상한을 넘어 키 검사를 생략했습니다(메모리 가드)."),
+                    LT("Key Uniqueness", "키 유일성 검사"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (result.Finding is null)
+            {
+                statusLabel.Text = LT($"Key ({keyNames}) is unique — {src.RowCount:N0} rows checked",
+                                      $"키({keyNames})는 유일합니다 — {src.RowCount:N0}행 전수 확인");
+                return;
+            }
+
+            var finding = result.Finding with { ColumnName = keyNames };
+            _qualityFindings.RemoveAll(f => f.Kind == QualityCheckKind.KeyUniqueness && f.ColumnName == keyNames);
+            _qualityFindings.Add(finding);
+            ShowQualityFindings();
+            statusLabel.Text = QualitySummaryText();
+        }
+
+        private async Task ShowQualityRulesAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
+
+            bool run;
+            using (var dlg = new QualityRulesDialog(_qualityRules, doc.Header, _palette))
+            {
+                dlg.ShowDialog(this);
+                _qualityRules = dlg.Rules; // 닫기여도 편집 결과는 보존(사용자 소유 자산)
+                run = dlg.RunRequested;
+            }
+            if (!run || _qualityRules.Count == 0) return;
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            var src = BuildQualityScanSource(doc, withTypes: false);
+            var options = new QualityScanOptions();
+
+            SetBusy(true);
+            statusLabel.Text = LT("Running rules…", "규칙 검사 중…");
+            var progress = new Progress<int>(p =>
+            {
+                if (!cts.IsCancellationRequested)
+                    statusLabel.Text = LT($"Running rules… {p}%", $"규칙 검사 중… {p}%");
+            });
+
+            IReadOnlyList<QualityFinding> findings;
+            var task = Task.Run(() => QualityRuleRunner.Run(_qualityRules, src, options, progress, cts.Token), cts.Token);
+            _qualityTask = task;
+            try { findings = await task; }
+            catch (OperationCanceledException) { return; }
+            catch (QualityRuleCompileException ex)
+            {
+                statusLabel.Text = LT("Rule compile error", "규칙 컴파일 오류");
+                MessageBox.Show(this, ex.Message, LT("Validation Rules", "타당성 규칙"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("Rule run failed", "규칙 검사 실패");
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return;
+
+            _qualityFindings.RemoveAll(f => f.Kind == QualityCheckKind.Rule); // 재실행 = 이전 규칙 결과 대체
+            _qualityFindings.AddRange(findings);
+            ShowQualityFindings();
+            statusLabel.Text = QualitySummaryText();
+        }
+
+        // ---------------------------------------------------------------- 품질 보고서 내보내기
+
+        private void ExportQualityReport()
+        {
+            if (_doc is null) return;
+            if (_qualityReport is null && _qualityFindings.Count == 0)
+            {
+                statusLabel.Text = LT("Run a quality profile first", "먼저 품질 프로파일을 실행하세요");
+                return;
+            }
+
+            using var dlg = new SaveFileDialog
+            {
+                Filter = "HTML (*.html)|*.html|Markdown (*.md)|*.md|JSON (*.json)|*.json",
+                FileName = "quality-report.html",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                var baseReport = _qualityReport ?? new QualityReport
+                {
+                    RowsScanned = _doc.DataRowsAvailable,
+                    ScannedFully = !_doc.RowCountTruncated,
+                    ElapsedSeconds = 0,
+                    Columns = Array.Empty<QualityColumnProfile>(),
+                    Findings = Array.Empty<QualityFinding>(),
+                    SourceName = Path.GetFileName(_workbook?.SourcePath ?? _currentPath ?? ""),
+                    SourceBytes = _doc.FileLength,
+                    ScanTimestamp = DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
+                    AppVersion = AppInfo.Version,
+                };
+                var report = baseReport with { Findings = _qualityFindings.ToArray() };
+
+                string ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+                string content = ext switch
+                {
+                    ".json" => QualityReportJson.Serialize(report), // JSON = 안정 스키마 스냅샷(후속 diff 선행물)
+                    ".md" => BuildQualityReportMarkdown(report),
+                    _ => BuildQualityReportHtml(report),
+                };
+                File.WriteAllText(dlg.FileName, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                statusLabel.Text = LT("Quality report saved", "품질 보고서 저장됨");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, LT("Export failed", "내보내기 실패"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private string QualityCheckDisplay(QualityFinding f)
+            => f.Kind == QualityCheckKind.Rule && f.Label is { Length: > 0 }
+                ? $"{QualityText.KindName(f.Kind)}: {f.Label}"
+                : QualityText.KindName(f.Kind);
+
+        private static string QualityExampleRows(QualityFinding f)
+            => string.Join(", ", f.Examples.Take(5).Select(e => e.SourceRow));
+
+        private string BuildQualityReportMarkdown(QualityReport r)
+        {
+            static string Md(string s) => s.Replace("|", "\\|").Replace("\n", " ");
+            var sb = new StringBuilder();
+            sb.AppendLine(LT("# Data Quality Report", "# 데이터 품질 보고서"));
+            sb.AppendLine();
+            sb.AppendLine($"- {LT("File", "파일")}: {r.SourceName} ({FormatBytes(r.SourceBytes)})");
+            sb.AppendLine($"- {LT("Rows scanned", "검사 행수")}: {r.RowsScanned:N0} " +
+                (r.ScannedFully ? LT("(full scan)", "(전수)") : LT("(partial)", "(일부)")));
+            if (r.DuplicateRowCheckSkipped)
+                sb.AppendLine($"- {LT("Duplicate-row check skipped (row-count guard)", "중복 행 검사 생략(행 수 가드)")}");
+            sb.AppendLine($"- {LT("Scanned at", "검사 시각")}: {r.ScanTimestamp} · NanumCsvViewer {r.AppVersion}");
+            sb.AppendLine();
+
+            sb.AppendLine(LT("## Findings", "## 발견 항목"));
+            sb.AppendLine($"| {LT("Severity", "심각도")} | {LT("Check", "검사")} | {LT("Column", "컬럼")} | {LT("Count", "건수")} | {LT("Dimension", "차원")} | {LT("Details", "세부")} | {LT("Example rows", "예시 행")} |");
+            sb.AppendLine("|---|---|---|---:|---|---|---|");
+            foreach (var f in r.Findings)
+                sb.AppendLine($"| {QualityText.SeverityName(f.Severity)} | {Md(QualityCheckDisplay(f))} " +
+                    $"| {Md(f.ColumnName.Length > 0 ? f.ColumnName : "—")} | {(f.Approximate ? "≈" : "")}{f.ViolationCount:N0} " +
+                    $"| {QualityText.DimensionName(f.Dimension)} | {Md(QualityText.Detail(f))} | {QualityExampleRows(f)} |");
+            sb.AppendLine();
+
+            if (r.Columns.Count > 0)
+            {
+                sb.AppendLine(LT("## Column Profile", "## 컬럼 프로파일"));
+                sb.AppendLine($"| # | {LT("Column", "컬럼")} | {LT("Type", "타입")} | {LT("Missing", "결측")} | {LT("Distinct", "고유값")} | {LT("Type viol.", "타입 위반")} | {LT("Codebook viol.", "코드북 위반")} | Min | Max |");
+                sb.AppendLine("|---:|---|---|---:|---:|---:|---:|---|---|");
+                foreach (var c in r.Columns)
+                {
+                    string distinct = (c.DistinctIsLowerBound ? "≥" : "") + c.DistinctCount.ToString("N0");
+                    string min = c.NumericMin?.ToString("G6", CultureInfo.InvariantCulture) ?? c.TemporalMin ?? "";
+                    string max = c.NumericMax?.ToString("G6", CultureInfo.InvariantCulture) ?? c.TemporalMax ?? "";
+                    sb.AppendLine($"| {c.Index + 1} | {Md(c.Name)} | {c.ExpectedType.DisplayName()} | {c.MissingCount:N0} " +
+                        $"| {distinct} | {c.TypeViolationCount:N0} | {c.CodebookViolationCount:N0} | {min} | {max} |");
+                }
+            }
+            return sb.ToString();
+        }
+
+        private string BuildQualityReportHtml(QualityReport r)
+        {
+            static string H(string s) => System.Net.WebUtility.HtmlEncode(s);
+            var sb = new StringBuilder();
+            sb.AppendLine("<!DOCTYPE html><html><head><meta charset=\"utf-8\">");
+            sb.AppendLine($"<title>{H(LT("Data Quality Report", "데이터 품질 보고서"))} — {H(r.SourceName)}</title>");
+            sb.AppendLine("<style>body{font-family:'Segoe UI',sans-serif;margin:24px;color:#222}" +
+                "table{border-collapse:collapse;margin:12px 0;font-size:13px}" +
+                "th,td{border:1px solid #ccc;padding:4px 10px;text-align:left}" +
+                "th{background:#f0f0f0}td.num{text-align:right}" +
+                ".crit{color:#c62828;font-weight:600}.warn{color:#e65100;font-weight:600}.info{color:#555}</style></head><body>");
+            sb.AppendLine($"<h1>{H(LT("Data Quality Report", "데이터 품질 보고서"))}</h1>");
+            sb.AppendLine("<ul>");
+            sb.AppendLine($"<li>{H(LT("File", "파일"))}: {H(r.SourceName)} ({H(FormatBytes(r.SourceBytes))})</li>");
+            sb.AppendLine($"<li>{H(LT("Rows scanned", "검사 행수"))}: {r.RowsScanned:N0} " +
+                H(r.ScannedFully ? LT("(full scan)", "(전수)") : LT("(partial)", "(일부)")) + "</li>");
+            if (r.DuplicateRowCheckSkipped)
+                sb.AppendLine($"<li>{H(LT("Duplicate-row check skipped (row-count guard)", "중복 행 검사 생략(행 수 가드)"))}</li>");
+            sb.AppendLine($"<li>{H(LT("Scanned at", "검사 시각"))}: {H(r.ScanTimestamp)} · NanumCsvViewer {H(r.AppVersion)}</li>");
+            sb.AppendLine("</ul>");
+
+            sb.AppendLine($"<h2>{H(LT("Findings", "발견 항목"))}</h2><table><tr>" +
+                $"<th>{H(LT("Severity", "심각도"))}</th><th>{H(LT("Check", "검사"))}</th><th>{H(LT("Column", "컬럼"))}</th>" +
+                $"<th>{H(LT("Count", "건수"))}</th><th>{H(LT("Dimension", "차원"))}</th><th>{H(LT("Details", "세부"))}</th>" +
+                $"<th>{H(LT("Example rows", "예시 행"))}</th></tr>");
+            foreach (var f in r.Findings)
+            {
+                string cls = f.Severity switch
+                {
+                    QualitySeverity.Critical => "crit",
+                    QualitySeverity.Warning => "warn",
+                    _ => "info",
+                };
+                sb.AppendLine($"<tr><td class=\"{cls}\">{H(QualityText.SeverityName(f.Severity))}</td>" +
+                    $"<td>{H(QualityCheckDisplay(f))}</td><td>{H(f.ColumnName.Length > 0 ? f.ColumnName : "—")}</td>" +
+                    $"<td class=\"num\">{(f.Approximate ? "≈" : "")}{f.ViolationCount:N0}</td>" +
+                    $"<td>{H(QualityText.DimensionName(f.Dimension))}</td><td>{H(QualityText.Detail(f))}</td>" +
+                    $"<td>{H(QualityExampleRows(f))}</td></tr>");
+            }
+            sb.AppendLine("</table>");
+
+            if (r.Columns.Count > 0)
+            {
+                sb.AppendLine($"<h2>{H(LT("Column Profile", "컬럼 프로파일"))}</h2><table><tr>" +
+                    $"<th>#</th><th>{H(LT("Column", "컬럼"))}</th><th>{H(LT("Type", "타입"))}</th>" +
+                    $"<th>{H(LT("Missing", "결측"))}</th><th>{H(LT("Distinct", "고유값"))}</th>" +
+                    $"<th>{H(LT("Type viol.", "타입 위반"))}</th><th>{H(LT("Codebook viol.", "코드북 위반"))}</th>" +
+                    "<th>Min</th><th>Max</th></tr>");
+                foreach (var c in r.Columns)
+                {
+                    string distinct = (c.DistinctIsLowerBound ? "≥" : "") + c.DistinctCount.ToString("N0");
+                    string min = c.NumericMin?.ToString("G6", CultureInfo.InvariantCulture) ?? c.TemporalMin ?? "";
+                    string max = c.NumericMax?.ToString("G6", CultureInfo.InvariantCulture) ?? c.TemporalMax ?? "";
+                    sb.AppendLine($"<tr><td class=\"num\">{c.Index + 1}</td><td>{H(c.Name)}</td>" +
+                        $"<td>{H(c.ExpectedType.DisplayName())}</td><td class=\"num\">{c.MissingCount:N0}</td>" +
+                        $"<td class=\"num\">{H(distinct)}</td><td class=\"num\">{c.TypeViolationCount:N0}</td>" +
+                        $"<td class=\"num\">{c.CodebookViolationCount:N0}</td><td>{H(min)}</td><td>{H(max)}</td></tr>");
+                }
+                sb.AppendLine("</table>");
+            }
+            sb.AppendLine("</body></html>");
+            return sb.ToString();
         }
     }
 }

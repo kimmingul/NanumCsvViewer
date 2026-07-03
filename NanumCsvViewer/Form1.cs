@@ -260,6 +260,7 @@ namespace NanumCsvViewer
             // 토글 버튼 아이콘: 현재 다크면 해(라이트로 전환), 라이트면 달(다크로 전환)
             themeToggleButton.Image = theme == AppTheme.Dark ? UiIcons.Sun() : UiIcons.Moon();
             if (_doc is not null) { _detailTimer.Stop(); UpdateDetailPanel(); } // 상세 패널 색 갱신
+            _qualityPanel?.ApplyPalette(_palette); // 품질 패널은 서브아이템 색이 고정돼 별도 재적용 필요(이슈 #26)
             grid.Invalidate();
         }
 
@@ -1248,6 +1249,7 @@ namespace NanumCsvViewer
             _sortKeys.Clear();
             ClearSortGlyphs();
             CloseAllChartForms();         // 열린 차트는 이전 뷰 스냅샷을 보므로 함께 닫는다(이슈 #19)
+            ResetQualityState();          // 품질 발견도 이전 문서 기준이므로 초기화(이슈 #26)
         }
 
         private void ResetViewMapOnly()
@@ -1267,6 +1269,7 @@ namespace NanumCsvViewer
             _indexCts?.Cancel();
             _opCts?.Cancel();
             _findCts?.Cancel();
+            _qualityCts?.Cancel(); // 품질 스캔(이슈 #26)도 문서 교체 전에 중단
         }
 
         // 모든 백그라운드 작업을 취소하고 완료될 때까지 대기. 옛 문서를 Dispose하기 전에 호출해야
@@ -1274,16 +1277,18 @@ namespace NanumCsvViewer
         private async Task CancelAndDrainAsync()
         {
             CancelAll();
-            var tasks = new List<Task>(3);
+            var tasks = new List<Task>(4);
             if (_indexTask is not null) tasks.Add(_indexTask);
             if (_opTask is not null) tasks.Add(_opTask);
             if (_findTask is not null) tasks.Add(_findTask);
+            if (_qualityTask is not null) tasks.Add(_qualityTask); // 스캔이 옛 문서를 읽는 중일 수 있음
             if (tasks.Count > 0)
             {
                 try { await Task.WhenAll(tasks); }
                 catch { /* 취소/오류는 각 메서드가 자체 처리하므로 여기선 무시 */ }
             }
             _indexTask = _opTask = _findTask = null;
+            _qualityTask = null;
         }
 
         private static string FormatBytes(long bytes)

@@ -10,8 +10,11 @@ using SasReader;
 
 namespace NanumCsvViewer.Import
 {
-    /// <summary>임포트된 한 시트의 이름·변환된 임시 CSV 경로·컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).</summary>
-    public sealed record ImportedSheet(string Name, string CsvPath, IReadOnlyList<ColumnTypeHint?>? Hints = null);
+    /// <summary>임포트된 한 시트의 이름·변환된 임시 CSV 경로·컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).
+    /// AllowedCodes = 컬럼별 허용 코드 집합(SPSS 값라벨·SAS 카탈로그, 원값 모드에서만) — 데이터 품질
+    /// 코드북 대조(이슈 #26)의 입력. 라벨 표시 모드에서는 셀이 라벨로 치환되므로 null.</summary>
+    public sealed record ImportedSheet(string Name, string CsvPath, IReadOnlyList<ColumnTypeHint?>? Hints = null,
+        IReadOnlyList<IReadOnlySet<string>?>? AllowedCodes = null);
 
     /// <summary>
     /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav)·SQLite(db/sqlite) 파일을 시트별 UTF-8 CSV로 변환한다.
@@ -100,8 +103,10 @@ namespace NanumCsvViewer.Import
                 ? Path.GetFileNameWithoutExtension(path) : props.getName();
             string csv = Path.Combine(tempDir, "sheet_0.csv");
 
-            // 라벨 모드에서만 카탈로그 탐색: 동일 파일명 우선, 없으면 SAS 관례상 formats.sas7bcat.
-            SasCatalog? catalog = showLabels ? FindSasCatalog(path) : null;
+            // 카탈로그 탐색: 동일 파일명 우선, 없으면 SAS 관례상 formats.sas7bcat.
+            // 라벨 모드는 값 치환용, 원값 모드는 코드북 대조(허용 코드 집합)용으로 쓴다.
+            SasCatalog? found = FindSasCatalog(path);
+            SasCatalog? catalog = showLabels ? found : null;
 
             var columns = reader.getColumns();
             var formatNames = columns.Select(col => col.getFormat()?.getName()).ToArray();
@@ -109,6 +114,10 @@ namespace NanumCsvViewer.Import
             // 그 외 컬럼(헤더만 변경)은 선언 힌트가 항상 유효.
             var hints = columns.Select((col, i) =>
                 catalog?.HasFormat(formatNames[i]) == true ? null : FormatMappers.MapSas(col)).ToArray();
+            // 원값 모드에서만 허용 코드 집합 구성(라벨 모드는 셀이 라벨이라 대조 무의미).
+            var allowedCodes = showLabels || found is null
+                ? null
+                : formatNames.Select(found.TryGetCodes).ToArray();
 
             using (var writer = NewCsvWriter(csv))
             {
@@ -128,7 +137,7 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv, hints) };
+            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes) };
         }
 
         // 동반 카탈로그 탐색: <파일명>.sas7bcat → formats.sas7bcat 순. 읽기 실패는 null(라벨 없이 진행).
@@ -155,6 +164,9 @@ namespace NanumCsvViewer.Import
             // 라벨 표시 모드면 값 라벨로 코드를 치환하므로 선언 타입 힌트는 무의미(문자 표시) → null.
             var hints = showLabels ? null
                 : vars.Select(FormatMappers.MapSpss).ToArray();
+            // 원값 모드에서만 값 라벨 키(허용 코드) 집합 구성 — 코드북 대조(이슈 #26) 입력.
+            // 숫자 코드는 FormatCell과 동일한 형식으로 정규화해 CSV 셀 텍스트와 그대로 비교한다.
+            var allowedCodes = showLabels ? null : vars.Select(SpssAllowedCodes).ToArray();
 
             using (var writer = NewCsvWriter(csv))
             {
@@ -168,7 +180,17 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv, hints) };
+            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes) };
+        }
+
+        // SPSS 변수의 값 라벨 키 집합(숫자 코드 → CSV 셀 텍스트 형식). 라벨이 없으면 null.
+        private static IReadOnlySet<string>? SpssAllowedCodes(Variable v)
+        {
+            if (v.ValueLabels is not { Count: > 0 } labels) return null;
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (double code in labels.Keys)
+                set.Add(code.ToString("0.################", CultureInfo.InvariantCulture));
+            return set;
         }
 
         // 라벨 모드에서 값 라벨이 있으면 코드를 라벨로 치환(예: 1→"남"). 없으면 원값 포맷.
@@ -267,6 +289,7 @@ namespace NanumCsvViewer.Import
         public bool SupportsFieldLabels => TabularImporter.SupportsFieldLabels(SourcePath);
         private readonly string[] _csvPaths;
         private readonly IReadOnlyList<ColumnTypeHint?>?[] _hints;
+        private readonly IReadOnlyList<IReadOnlySet<string>?>?[] _allowedCodes;
         private readonly string _tempDir;
 
         private WorkbookSession(string sourcePath, string tempDir, IReadOnlyList<ImportedSheet> sheets, bool showLabels)
@@ -277,11 +300,16 @@ namespace NanumCsvViewer.Import
             SheetNames = sheets.Select(s => s.Name).ToArray();
             _csvPaths = sheets.Select(s => s.CsvPath).ToArray();
             _hints = sheets.Select(s => s.Hints).ToArray();
+            _allowedCodes = sheets.Select(s => s.AllowedCodes).ToArray();
         }
 
         /// <summary>해당 시트의 컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).</summary>
         public IReadOnlyList<ColumnTypeHint?>? ColumnHints(int sheetIndex)
             => sheetIndex >= 0 && sheetIndex < _hints.Length ? _hints[sheetIndex] : null;
+
+        /// <summary>해당 시트의 컬럼별 허용 코드 집합(코드북 대조용 — 원값 모드 SPSS/SAS만, 없으면 null).</summary>
+        public IReadOnlyList<IReadOnlySet<string>?>? AllowedCodes(int sheetIndex)
+            => sheetIndex >= 0 && sheetIndex < _allowedCodes.Length ? _allowedCodes[sheetIndex] : null;
 
         public static WorkbookSession Create(string path, bool showLabels = false)
         {
