@@ -444,10 +444,10 @@
             <div class="tags"><b data-i18n="f8.t1">F4 인스펙터</b><b data-i18n="f8.t2">원본 행번호</b></div>
           </article>
           <article class="card reveal">
-            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg></div>
-            <h3 data-i18n="f9.h">라이트/다크 · 다국어</h3>
-            <p data-i18n="f9.p">Windows 시스템 테마를 따라 시작하고 툴바 토글로 라이트/다크를 전환·저장합니다. 한국어/영어를 자동 감지하고 View ▸ Language에서 즉시 바꿉니다.</p>
-            <div class="tags"><b data-i18n="f9.t1">라이트 / 다크</b><b data-i18n="f9.t2">한 · 영</b></div>
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <h3 data-i18n="f9.h">데이터 품질 검토</h3>
+            <p data-i18n="f9.p">전수 스캔으로 결측·위장결측·타입/코드북 위반·이상치·미래날짜·중복을 한 번에 찾습니다. 발견을 클릭하면 위반 행만 필터로 격리해 바로 확인하고, 규칙은 JSON으로 저장·재사용하며 결과를 보고서로 내보냅니다.</p>
+            <div class="tags"><b data-i18n="f9.t1">전수 프로파일</b><b data-i18n="f9.t2">발견 → 필터</b><b data-i18n="f9.t3">규칙 · 보고서</b></div>
           </article>
         </div>
       </div>
@@ -496,7 +496,7 @@
       <div class="wrap">
         <div class="sec-head center reveal">
           <p class="sec-eyebrow" data-i18n="dl.eyebrow">다운로드</p>
-          <h2 class="sec-title">Nanum CSV Viewer v1.14.0</h2>
+          <h2 class="sec-title">Nanum CSV Viewer v1.15.0</h2>
           <p class="sec-lede" data-i18n="dl.lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
         </div>
         <div class="dl-grid">
@@ -504,16 +504,16 @@
             <div class="arch"><span class="archname">Windows x64</span><span class="pill" data-i18n="dl.x64pill">대부분의 PC</span></div>
             <p class="for" data-i18n="dl.x64for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.14.0/NanumCsvViewer-v1.14.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.14.0/NanumCsvViewer-v1.14.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
           <div class="dl reveal">
             <div class="arch"><span class="archname">Windows ARM64</span><span class="pill" data-i18n="dl.armpill">ARM PC</span></div>
             <p class="for" data-i18n="dl.armfor">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.14.0/NanumCsvViewer-v1.14.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.14.0/NanumCsvViewer-v1.14.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
         </div>
@@ -606,10 +606,11 @@
         'f8.p': { ko: 'F4 우측 상세 패널로 선택한 행의 모든 컬럼을 컬럼명+값으로 봅니다. 행 헤더의 원본 행번호로 필터·정렬해도 위치를 추적하고, 셀 내 줄바꿈도 여러 줄로 표시합니다.', en: 'The F4 inspector shows every column of the selected row as name + value. Source row numbers in the row header track positions through filter and sort, and multi-line cells display across lines.' },
         'f8.t1': { ko: 'F4 인스펙터', en: 'F4 inspector' },
         'f8.t2': { ko: '원본 행번호', en: 'Source row #' },
-        'f9.h': { ko: '라이트/다크 · 다국어', en: 'Light/Dark · multilingual' },
-        'f9.p': { ko: 'Windows 시스템 테마를 따라 시작하고 툴바 토글로 라이트/다크를 전환·저장합니다. 한국어/영어를 자동 감지하고 View ▸ Language에서 즉시 바꿉니다.', en: 'Starts by following the Windows system theme; toggle light/dark from the toolbar and it is remembered. Korean/English is auto-detected and switches instantly via View ▸ Language.' },
-        'f9.t1': { ko: '라이트 / 다크', en: 'Light / Dark' },
-        'f9.t2': { ko: '한 · 영', en: 'KO · EN' },
+        'f9.h': { ko: '데이터 품질 검토', en: 'Data quality review' },
+        'f9.p': { ko: '전수 스캔으로 결측·위장결측·타입/코드북 위반·이상치·미래날짜·중복을 한 번에 찾습니다. 발견을 클릭하면 위반 행만 필터로 격리해 바로 확인하고, 규칙은 JSON으로 저장·재사용하며 결과를 보고서로 내보냅니다.', en: 'A full-file scan finds missing values, disguised missing, type/codebook violations, outliers, future dates, and duplicates at once. Click a finding to isolate just the offending rows as a filter, save rules as JSON to reuse, and export the results as a report.' },
+        'f9.t1': { ko: '전수 프로파일', en: 'Full-file profile' },
+        'f9.t2': { ko: '발견 → 필터', en: 'Findings → filter' },
+        'f9.t3': { ko: '규칙 · 보고서', en: 'Rules · report' },
         'piv.eyebrow': { ko: '피벗 빌더', en: 'Pivot builder' },
         'piv.title': { ko: '필드를 끌어다 놓으면<br>표와 차트가 됩니다.', en: 'Assign fields,<br>get a table and a chart.' },
         'piv.lede1': { ko: '행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.', en: 'Assign fields to Rows, Columns, Values, and Filters — with multiple measures, date grouping, and totals. Pick a day/week/month/year period for date dimensions and a type-aware aggregation for values, right on each chip.' },
