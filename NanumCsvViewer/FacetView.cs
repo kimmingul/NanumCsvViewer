@@ -57,6 +57,7 @@ namespace NanumCsvViewer
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
+            if (e.Button != MouseButtons.Left || e.Y < TitleH) { base.OnMouseClick(e); return; }
             int i = (e.Y - TitleH) / RowH;
             if (i >= 0 && i < _rows.Length) _rows[i].OnClick();
             base.OnMouseClick(e);

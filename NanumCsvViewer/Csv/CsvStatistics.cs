@@ -23,11 +23,14 @@ namespace NanumCsvViewer.Csv
     public sealed class ChiSquareResult
     {
         public double Statistic { get; init; }
-        public int DegreesOfFreedom { get; init; }
+        public long DegreesOfFreedom { get; init; }
         public double PValue { get; init; }
         public IReadOnlyList<string> RowLabels { get; init; } = Array.Empty<string>();
         public IReadOnlyList<string> ColumnLabels { get; init; } = Array.Empty<string>();
         public IReadOnlyList<double[]> Observed { get; init; } = Array.Empty<double[]>();
+        public double MinimumExpectedCount { get; init; }
+        public long ExpectedCellsBelowFive { get; init; }
+        public bool HasReliableApproximation { get; init; }
         public string Interpretation { get; init; } = string.Empty;
     }
 
@@ -163,41 +166,72 @@ namespace NanumCsvViewer.Csv
             return new PairedTTestResult(meanDiff, t, df, p, ciLow, ciHigh, sd == 0 ? 0 : meanDiff / sd, Interpretation(p));
         }
 
-        public static ChiSquareResult ChiSquare(IReadOnlyList<(string Row, string Column)> rows)
+        public static ChiSquareResult ChiSquare(IReadOnlyList<(string Row, string Column)> rows,
+            CancellationToken cancellation = default, long memoryBudgetBytes = 128L * 1024 * 1024)
         {
+            cancellation.ThrowIfCancellationRequested();
             var rowLabels = rows.Select(r => r.Row).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             var columnLabels = rows.Select(r => r.Column).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
-            var observed = new double[rowLabels.Count][];
-            for (int r = 0; r < rowLabels.Count; r++) observed[r] = new double[columnLabels.Count];
-
-            foreach (var (rowVal, colVal) in rows)
-            {
-                int r = rowLabels.IndexOf(rowVal);
-                int c = columnLabels.IndexOf(colVal);
-                if (r >= 0 && c >= 0) observed[r][c] += 1;
-            }
-
-            var rowTotals = observed.Select(row => row.Sum()).ToArray();
+            long estimatedBytes = (rowLabels.Count + (long)columnLabels.Count) * 160L;
+            if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+            var rowIndexes = rowLabels.Select((label, index) => (label, index)).ToDictionary(x => x.label, x => x.index);
+            var columnIndexes = columnLabels.Select((label, index) => (label, index)).ToDictionary(x => x.label, x => x.index);
+            var observed = new Dictionary<int, double>?[rowLabels.Count];
+            var rowTotals = new double[rowLabels.Count];
             var columnTotals = new double[columnLabels.Count];
-            for (int c = 0; c < columnLabels.Count; c++)
-                for (int r = 0; r < rowLabels.Count; r++)
-                    columnTotals[c] += observed[r][c];
-            double total = rowTotals.Sum();
-
-            double statistic = 0;
-            if (total > 0)
+            for (int i = 0; i < rows.Count; i++)
             {
-                for (int r = 0; r < rowLabels.Count; r++)
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                int r = rowIndexes[rows[i].Row], c = columnIndexes[rows[i].Column];
+                var cells = observed[r] ??= new Dictionary<int, double>();
+                if (cells.TryGetValue(c, out double count)) cells[c] = count + 1;
+                else
                 {
-                    for (int c = 0; c < columnLabels.Count; c++)
-                    {
-                        double expected = rowTotals[r] * columnTotals[c] / total;
-                        if (expected > 0)
-                            statistic += Math.Pow(observed[r][c] - expected, 2) / expected;
-                    }
+                    estimatedBytes += 96;
+                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    cells.Add(c, 1);
                 }
+                rowTotals[r]++;
+                columnTotals[c]++;
             }
-            int df = Math.Max(0, (rowLabels.Count - 1) * (columnLabels.Count - 1));
+
+            double total = rows.Count, statistic = 0;
+            for (int r = 0; r < observed.Length; r++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                double expectedAtObservedCells = 0;
+                if (observed[r] is not { } cells) continue;
+                foreach (var (c, count) in cells)
+                {
+                    double expected = rowTotals[r] * columnTotals[c] / total;
+                    expectedAtObservedCells += expected;
+                    double difference = count - expected;
+                    statistic += difference * difference / expected;
+                }
+                // Zero observations contribute E to Pearson's statistic. Their
+                // expected counts sum to the row margin minus occupied-cell E.
+                statistic += Math.Max(0, rowTotals[r] - expectedAtObservedCells);
+            }
+            long df = (long)Math.Max(0, rowLabels.Count - 1) * Math.Max(0, columnLabels.Count - 1);
+            double minimumExpected = total > 0 ? rowTotals.Min() * columnTotals.Min() / total : 0;
+            var sortedColumnTotals = columnTotals.Order().ToArray();
+            long smallExpectedCells = 0;
+            foreach (double rowTotal in rowTotals)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                int low = 0, high = sortedColumnTotals.Length;
+                while (low < high)
+                {
+                    int middle = low + (high - low) / 2;
+                    if (rowTotal * sortedColumnTotals[middle] / total < 5) low = middle + 1;
+                    else high = middle;
+                }
+                smallExpectedCells += low;
+            }
+            // NIST Dataplot CHI-SQUARE INDEPENDENCE TEST: minimum E<1 or
+            // >=20% of cells with E<5 can make the asymptotic approximation poor.
+            bool reliable = df > 0 && minimumExpected >= 1 &&
+                smallExpectedCells * 5 < rowLabels.Count * (long)columnLabels.Count;
             double p = ChiSquareSurvival(statistic, df);
             return new ChiSquareResult
             {
@@ -206,9 +240,35 @@ namespace NanumCsvViewer.Csv
                 PValue = p,
                 RowLabels = rowLabels,
                 ColumnLabels = columnLabels,
-                Observed = observed,
+                Observed = new SparseObservedTable(observed, columnLabels.Count),
+                MinimumExpectedCount = minimumExpected,
+                ExpectedCellsBelowFive = smallExpectedCells,
+                HasReliableApproximation = reliable,
                 Interpretation = Interpretation(p)
             };
+        }
+
+        // Preserve the existing row-array API without allocating a Cartesian
+        // matrix. A dense row is materialized only when a caller requests it.
+        private sealed class SparseObservedTable(Dictionary<int, double>?[] rows, int columns) : IReadOnlyList<double[]>
+        {
+            public int Count => rows.Length;
+            public double[] this[int index]
+            {
+                get
+                {
+                    if ((uint)index >= (uint)Count) throw new ArgumentOutOfRangeException(nameof(index));
+                    var result = new double[columns];
+                    if (rows[index] is { } cells)
+                        foreach (var (column, count) in cells) result[column] = count;
+                    return result;
+                }
+            }
+            public IEnumerator<double[]> GetEnumerator()
+            {
+                for (int i = 0; i < Count; i++) yield return this[i];
+            }
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
         }
 
         // ---- 기술통계 (이슈 #17) ----
@@ -547,7 +607,7 @@ namespace NanumCsvViewer.Csv
             return high;
         }
 
-        private static double ChiSquareSurvival(double statistic, int degreesOfFreedom)
+        private static double ChiSquareSurvival(double statistic, double degreesOfFreedom)
         {
             if (degreesOfFreedom <= 0) return 1;
             return ClampedProbability(RegularizedGammaQ(degreesOfFreedom / 2.0, Math.Max(0, statistic) / 2));

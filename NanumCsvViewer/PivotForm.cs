@@ -18,7 +18,7 @@ namespace NanumCsvViewer
 
         private readonly string[] _headers;
         private readonly ColumnSummary[] _summaries;
-        private readonly List<string[]> _rows;
+        private readonly IReadOnlyList<string[]> _rows;
         private readonly ThemePalette _palette;
 
         private readonly List<DimItem> _rowDims = new();
@@ -34,6 +34,34 @@ namespace NanumCsvViewer
         private TabControl _resultTabs = null!;
 
         private List<PivotTableResult> _results = new();
+        private Measure[] _resultMeasures = Array.Empty<Measure>();
+        private NumericUpDown _rowPage = null!, _columnPage = null!;
+        private Label _pageInfo = null!;
+        private Label _chartPageInfo = null!;
+        private readonly ToolTip _filterTip = new();
+        private Button _cancelRun = null!;
+        private Label _operationStatus = null!;
+        private bool _paging;
+        private CancellationTokenSource? _runCancellation;
+        private readonly CancellationTokenSource _lifetime = new();
+        private readonly List<Task> _readerTasks = new();
+        private bool _stoppingReaders;
+        internal Task ReaderCompletion => Task.WhenAll(_readerTasks.ToArray());
+
+        internal void CancelReaders()
+        {
+            _stoppingReaders = true;
+            _runCancellation?.Cancel();
+            if (!IsDisposed) _lifetime.Cancel();
+        }
+
+        private void TrackReader(Task reader)
+        {
+            _readerTasks.RemoveAll(task => task.IsCompleted);
+            _readerTasks.Add(reader);
+        }
+        private const int RowsPerPage = 100;
+        private int ColumnsPerPage => Math.Max(1, 40 / Math.Max(1, _results.Count));
 
         private static readonly Color RowAccent = Color.FromArgb(46, 111, 176);
         private static readonly Color ColAccent = Color.FromArgb(27, 158, 119);
@@ -43,7 +71,7 @@ namespace NanumCsvViewer
 
         private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
 
-        public PivotForm(string[] headers, ColumnSummary[] summaries, List<string[]> rows, ThemePalette palette, AppTheme theme)
+        public PivotForm(string[] headers, ColumnSummary[] summaries, IReadOnlyList<string[]> rows, ThemePalette palette, AppTheme theme)
         {
             _headers = headers;
             _summaries = summaries;
@@ -59,6 +87,14 @@ namespace NanumCsvViewer
             ThemeManager.Apply(this, theme); // 폼 배경 + 전역 툴스트립 렌더러
             BuildUi();
             StyleResultGrid();
+            _cancelRun = new Button { Text = LT("Cancel calculation", "계산 취소"), Dock = DockStyle.Bottom, Height = 30, Visible = false };
+            _cancelRun.Click += (_, _) => _runCancellation?.Cancel();
+            Controls.Add(_cancelRun);
+            _operationStatus = new Label { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(8),
+                ForeColor = _palette.Text, BackColor = _palette.Surface, Visible = false };
+            Controls.Add(_operationStatus);
+            FormClosing += (_, _) => CancelReaders();
+            Disposed += (_, _) => { _runCancellation?.Cancel(); _lifetime.Cancel(); _lifetime.Dispose(); _filterTip.Dispose(); };
         }
 
         /// <summary>차트 탭을 선택한 채로 연다(피벗 ▸ 피벗차트 메뉴용).</summary>
@@ -150,10 +186,22 @@ namespace NanumCsvViewer
                 AllowUserToDeleteRows = false,
                 RowHeadersVisible = false,
                 BorderStyle = BorderStyle.None,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
             };
             tabTable.Controls.Add(_resultGrid);
+            var pages = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 62, AutoScroll = true };
+            _rowPage = new NumericUpDown { Minimum = 1, Maximum = 1, Value = 1, Width = 75 };
+            _columnPage = new NumericUpDown { Minimum = 1, Maximum = 1, Value = 1, Width = 75 };
+            _pageInfo = new Label { AutoSize = true };
+            pages.Controls.Add(new Label { Text = LT("Row page", "행 페이지"), AutoSize = true });
+            pages.Controls.Add(_rowPage);
+            pages.Controls.Add(new Label { Text = LT("Column page", "열 페이지"), AutoSize = true });
+            pages.Controls.Add(_columnPage);
+            pages.Controls.Add(_pageInfo);
+            tabTable.Controls.Add(pages);
+            _rowPage.ValueChanged += (_, _) => { if (!_paging) { RenderTable(); RenderChart(); } };
+            _columnPage.ValueChanged += (_, _) => { if (!_paging) { RenderTable(); RenderChart(); } };
 
             var tabChart = new TabPage(LT("Chart", "차트")) { BackColor = _palette.Window };
             var chartTop = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 38, Padding = new Padding(6, 7, 6, 4), BackColor = _palette.Window };
@@ -170,6 +218,8 @@ namespace NanumCsvViewer
             _chart = new ChartControl { Dock = DockStyle.Fill, BackColor = _palette.Surface };
             tabChart.Controls.Add(_chart);
             tabChart.Controls.Add(chartTop);
+            _chartPageInfo = new Label { Dock = DockStyle.Bottom, Height = 38, ForeColor = _palette.Text };
+            tabChart.Controls.Add(_chartPageInfo);
 
             _resultTabs.TabPages.Add(tabTable);
             _resultTabs.TabPages.Add(tabChart);
@@ -353,11 +403,12 @@ namespace NanumCsvViewer
 
                 var vc = MakeCombo(130);
                 vc.Margin = new Padding(2, 4, 2, 0);
-                foreach (var v in FilterValues(f.Col, f.Period)) vc.Items.Add(v);
-                int vsel = vc.Items.IndexOf(f.Value);
-                if (vsel < 0 && vc.Items.Count > 0) { vsel = 0; f.Value = vc.Items[0]?.ToString() ?? ""; }
-                if (vsel >= 0) vc.SelectedIndex = vsel;
-                vc.SelectedIndexChanged += (s, _) => f.Value = vc.SelectedItem?.ToString() ?? "";
+                vc.DropDownStyle = ComboBoxStyle.DropDown;
+                vc.Text = f.Value;
+                vc.TextChanged += (_, _) => f.Value = vc.Text;
+                _filterTip.SetToolTip(vc, LT("Type an exact value, or choose a suggestion (up to 500). Empty = no filter; null = missing values.",
+                    "값을 직접 입력하거나 추천 값(최대 500개)을 선택하세요. 공란은 필터 없음, null은 결측값입니다."));
+                _ = LoadFilterValuesAsync(vc, f.Col, f.Period);
                 right.Controls.Add(vc);
 
                 if (IsDate(f.Col))
@@ -396,11 +447,39 @@ namespace NanumCsvViewer
                 ? Enum.GetValues<AggregationFunction>()
                 : new[] { AggregationFunction.Count, AggregationFunction.UniqueCount };
 
-        private string[] FilterValues(int col, DateBinPeriod? period)
+        private async Task LoadFilterValuesAsync(ComboBox combo, int col, DateBinPeriod? period)
         {
+            if (_stoppingReaders || IsDisposed) return;
             var dict = period is DateBinPeriod p ? new Dictionary<int, DateBinPeriod> { { col, p } } : new();
-            return _rows.Select(r => CsvAnalytics.PivotKeyValue(r, col, dict))
-                .Distinct().OrderBy(s => s, StringComparer.OrdinalIgnoreCase).Take(500).ToArray();
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            void Cancel(object? sender, EventArgs e) => cancellation.Cancel();
+            combo.Disposed += Cancel;
+            try
+            {
+                var reader = Task.Run(() =>
+                {
+                    var candidates = new HashSet<string>(StringComparer.Ordinal);
+                    for (int i = 0; i < _rows.Count && candidates.Count < 500; i++)
+                    {
+                        cancellation.Token.ThrowIfCancellationRequested();
+                        string value = CsvAnalytics.PivotKeyValue(_rows[i], col, dict);
+                        if (value.Length <= 300) candidates.Add(value);
+                    }
+                    return candidates.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToArray();
+                }, cancellation.Token);
+                TrackReader(reader);
+                var values = await reader;
+                if (combo.IsDisposed || IsDisposed || cancellation.IsCancellationRequested) return;
+                combo.Items.AddRange(values);
+                // Suggestions are bounded; arbitrary exact values remain editable.
+                combo.AccessibleDescription = LT("Suggestions only. Type any exact value.", "추천 목록입니다. 원하는 값을 직접 입력할 수 있습니다.");
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (!combo.IsDisposed) combo.AccessibleDescription = ex.Message;
+            }
+            finally { combo.Disposed -= Cancel; }
         }
 
         // ---------------------------------------------------------------- 필드 배정
@@ -429,6 +508,12 @@ namespace NanumCsvViewer
         {
             int f = _fieldsList.SelectedIndex;
             if (f < 0) return;
+            if (_measures.Count >= 32)
+            {
+                MessageBox.Show(this, LT("Use up to 32 measures per pivot. Open another pivot for additional measures.",
+                    "피벗 하나에 측정값을 최대 32개 사용할 수 있습니다. 추가 측정값은 별도 피벗에서 확인하세요."), Text);
+                return;
+            }
             _measures.Add(new Measure { Field = f, Func = IsNumeric(f) ? AggregationFunction.Sum : AggregationFunction.Count });
             RefreshValues();
         }
@@ -454,7 +539,7 @@ namespace NanumCsvViewer
 
         private int[] RowFields() => _rowDims.Select(d => d.Field).ToArray();
         private int[] ColFields() => _colDims.Select(d => d.Field).ToArray();
-        private List<PivotFilter> Filters() => _filters.Select(f => new PivotFilter(f.Col, f.Value)).ToList();
+        private List<PivotFilter> Filters() => _filters.Select(f => new PivotFilter(f.Col, f.Value.Length == 0 ? null : f.Value)).ToList();
 
         private Dictionary<int, DateBinPeriod> DateGroupings()
         {
@@ -468,6 +553,8 @@ namespace NanumCsvViewer
 
         private async Task RefreshResultAsync()
         {
+            if (_stoppingReaders || IsDisposed) return;
+            if (_runCancellation is not null) return;
             if (_measures.Count == 0)
             {
                 MessageBox.Show(LT("Add at least one Value (measure).", "값(측정값)을 하나 이상 추가하세요."),
@@ -481,28 +568,78 @@ namespace NanumCsvViewer
             var filters = Filters();
             var groupings = DateGroupings();
             var rowNames = rowDims.Select(ColName).ToArray();
+            long memoryBudget = 256L * 1024 * 1024 / (measures.Length * 4L);
 
             Cursor = Cursors.WaitCursor;
+            _operationStatus.Text = "";
+            _operationStatus.Visible = false;
+            using var cancellation = new CancellationTokenSource();
+            _runCancellation = cancellation;
+            foreach (Control control in Controls) if (control != _cancelRun) control.Enabled = false;
+            _cancelRun.Visible = true;
             try
             {
-                var results = await Task.Run(() =>
+                var reader = Task.Run(() =>
                 {
                     var list = new List<PivotTableResult>(measures.Length);
+                    var rowTotals = new Dictionary<int, PivotTableResult>();
+                    var colTotals = new Dictionary<int, PivotTableResult>();
+                    var grandTotals = new Dictionary<int, double>();
                     foreach (var (field, func) in measures)
-                        list.Add(CsvAnalytics.PivotTable(_rows, rowDims, colDims, field, func, rowNames, filters, groupings));
-                    return list;
+                    {
+                        int m = list.Count;
+                        list.Add(CsvAnalytics.PivotTable(_rows, rowDims, colDims, field, func, rowNames, filters, groupings, cancellation.Token, memoryBudget));
+                        rowTotals[m] = colDims.Length == 0 ? list[m] : CsvAnalytics.PivotTable(_rows, rowDims, Array.Empty<int>(), field, func, rowNames, filters, groupings, cancellation.Token, memoryBudget);
+                        colTotals[m] = rowDims.Length == 0 ? list[m] : CsvAnalytics.PivotTable(_rows, Array.Empty<int>(), colDims, field, func, null, filters, groupings, cancellation.Token, memoryBudget);
+                        grandTotals[m] = CsvAnalytics.PivotTable(_rows, Array.Empty<int>(), Array.Empty<int>(), field, func, null, filters, groupings, cancellation.Token, memoryBudget).Value(Array.Empty<string>(), Array.Empty<string>());
+                    }
+                    return (list, rowTotals, colTotals, grandTotals);
                 });
-                _results = results;
+                TrackReader(reader);
+                var results = await reader;
+                if (IsDisposed || cancellation.IsCancellationRequested) return;
+                _results = results.list;
+                _resultMeasures = measures.Select(m => new Measure { Field = m.Field, Func = m.Func }).ToArray();
                 ClearTotalCaches();
+                foreach (var pair in results.rowTotals) _rowTotalCache.Add(pair.Key, pair.Value);
+                foreach (var pair in results.colTotals) _colTotalCache.Add(pair.Key, pair.Value);
+                foreach (var pair in results.grandTotals) _grandCache.Add(pair.Key, pair.Value);
+                _paging = true;
+                _rowPage.Value = _columnPage.Value = 1;
+                _rowPage.Maximum = Math.Max(1, (_results[0].RowKeys.Count + RowsPerPage - 1) / RowsPerPage);
+                _columnPage.Maximum = Math.Max(1, (_results[0].ColumnKeys.Count + ColumnsPerPage - 1) / ColumnsPerPage);
+                _paging = false;
                 RenderTable();
                 UpdateMeasureCombo();
                 RenderChart();
             }
+            catch (OperationCanceledException) { }
+            catch (PivotMemoryLimitException)
+            {
+                ShowOperationError(LT("This pivot exceeds the memory budget. Filter the rows, group dates, or reduce dimensions/measures. The previous result is preserved.",
+                    "피벗의 예상 메모리가 예산을 초과했습니다. 행 필터·날짜 그룹을 적용하거나 차원·측정값을 줄여 주세요. 이전 결과는 유지됩니다."));
+            }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowOperationError(ex.Message);
             }
-            finally { Cursor = Cursors.Default; }
+            finally
+            {
+                _runCancellation = null;
+                if (!IsDisposed)
+                {
+                    Cursor = Cursors.Default;
+                    _cancelRun.Visible = false;
+                    foreach (Control control in Controls) control.Enabled = true;
+                }
+            }
+        }
+
+        private void ShowOperationError(string message)
+        {
+            if (IsDisposed) return;
+            _operationStatus.Text = message;
+            _operationStatus.Visible = true;
         }
 
         private void InitializeComponent()
@@ -513,103 +650,77 @@ namespace NanumCsvViewer
         private void RenderTable()
         {
             _resultGrid.SuspendLayout();
-            _resultGrid.Columns.Clear();
-            _resultGrid.Rows.Clear();
-
-            if (_results.Count == 0) { _resultGrid.ResumeLayout(); return; }
-            var first = _results[0];
-            var rowKeys = first.RowKeys;
-            var colKeys = first.ColumnKeys;
-            bool hasCols = _colDims.Count > 0;
-
-            foreach (var name in first.RowColumnNames)
-                _resultGrid.Columns.Add("d_" + _resultGrid.Columns.Count, name);
-
-            var valueColIndex = new List<(int measure, string[]? colKey, bool total)>();
-            if (hasCols)
+            try
             {
-                foreach (var ck in colKeys)
+                _resultGrid.Columns.Clear();
+                _resultGrid.Rows.Clear();
+
+                if (_results.Count == 0) return;
+                var first = _results[0];
+                var rowKeys = first.RowKeys.Skip(((int)_rowPage.Value - 1) * RowsPerPage).Take(RowsPerPage).ToArray();
+                var colKeys = first.ColumnKeys.Skip(((int)_columnPage.Value - 1) * ColumnsPerPage).Take(ColumnsPerPage).ToArray();
+                _pageInfo.Text = LT($"{first.RowKeys.Count:N0} rows / {first.ColumnKeys.Count:N0} column groups. Chart: current page.", $"전체 {first.RowKeys.Count:N0}행 / {first.ColumnKeys.Count:N0}열 그룹. 차트: 현재 페이지.");
+                bool hasCols = first.ColumnColumns.Count > 0;
+
+                foreach (var name in first.RowColumnNames)
+                    _resultGrid.Columns.Add("d_" + _resultGrid.Columns.Count, name);
+
+                var valueColIndex = new List<(int measure, string[]? colKey, bool total)>();
+                if (hasCols)
+                {
+                    foreach (var ck in colKeys)
+                        for (int m = 0; m < _results.Count; m++)
+                        {
+                            _resultGrid.Columns.Add("v" + _resultGrid.Columns.Count, $"{string.Join(" | ", ck)} · {MeasureLabel(_resultMeasures[m])}");
+                            valueColIndex.Add((m, ck, false));
+                        }
                     for (int m = 0; m < _results.Count; m++)
                     {
-                        _resultGrid.Columns.Add("v" + _resultGrid.Columns.Count, $"{string.Join(" | ", ck)} · {MeasureLabel(_measures[m])}");
-                        valueColIndex.Add((m, ck, false));
+                        _resultGrid.Columns.Add("t" + _resultGrid.Columns.Count, $"{LT("Total", "합계")} · {MeasureLabel(_resultMeasures[m])}");
+                        valueColIndex.Add((m, null, true));
                     }
-                for (int m = 0; m < _results.Count; m++)
-                {
-                    _resultGrid.Columns.Add("t" + _resultGrid.Columns.Count, $"{LT("Total", "합계")} · {MeasureLabel(_measures[m])}");
-                    valueColIndex.Add((m, null, true));
                 }
-            }
-            else
-            {
-                for (int m = 0; m < _results.Count; m++)
+                else
                 {
-                    _resultGrid.Columns.Add("v" + _resultGrid.Columns.Count, MeasureLabel(_measures[m]));
-                    valueColIndex.Add((m, Array.Empty<string>(), false));
+                    for (int m = 0; m < _results.Count; m++)
+                    {
+                        _resultGrid.Columns.Add("v" + _resultGrid.Columns.Count, MeasureLabel(_resultMeasures[m]));
+                        valueColIndex.Add((m, Array.Empty<string>(), false));
+                    }
                 }
-            }
 
-            int cap = Math.Min(rowKeys.Count, 5000);
-            for (int ri = 0; ri < cap; ri++)
-            {
-                var rk = rowKeys[ri];
-                var cells = new List<object>();
-                cells.AddRange(rk.Cast<object>());
-                foreach (var (m, ck, total) in valueColIndex)
-                    cells.Add(Fmt(total ? RowTotal(m, rk) : _results[m].Value(rk, ck!)));
-                _resultGrid.Rows.Add(cells.ToArray());
-            }
+                int cap = rowKeys.Length;
+                for (int ri = 0; ri < cap; ri++)
+                {
+                    var rk = rowKeys[ri];
+                    var cells = new List<object>();
+                    cells.AddRange(rk.Cast<object>());
+                    foreach (var (m, ck, total) in valueColIndex)
+                        cells.Add(Fmt(total ? RowTotal(m, rk) : _results[m].Value(rk, ck!)));
+                    _resultGrid.Rows.Add(cells.ToArray());
+                }
 
-            if (_rowDims.Count > 0)
-            {
-                var totalCells = new List<object>();
-                for (int d = 0; d < _rowDims.Count; d++) totalCells.Add(d == 0 ? LT("Total", "합계") : "");
-                foreach (var (m, ck, total) in valueColIndex)
-                    totalCells.Add(Fmt(total ? GrandTotal(m) : ColTotal(m, ck!)));
-                if (_resultGrid.Columns.Count == totalCells.Count)
-                    _resultGrid.Rows.Add(totalCells.ToArray());
-            }
+                if (first.RowColumns.Count > 0)
+                {
+                    var totalCells = new List<object>();
+                    for (int d = 0; d < first.RowColumns.Count; d++) totalCells.Add(d == 0 ? LT("Total", "합계") : "");
+                    foreach (var (m, ck, total) in valueColIndex)
+                        totalCells.Add(Fmt(total ? GrandTotal(m) : ColTotal(m, ck!)));
+                    if (_resultGrid.Columns.Count == totalCells.Count)
+                        _resultGrid.Rows.Add(totalCells.ToArray());
+                }
 
-            _resultGrid.ResumeLayout();
+            }
+            finally { _resultGrid.ResumeLayout(); }
         }
 
         private readonly Dictionary<int, PivotTableResult> _rowTotalCache = new();
         private readonly Dictionary<int, PivotTableResult> _colTotalCache = new();
         private readonly Dictionary<int, double> _grandCache = new();
 
-        private double RowTotal(int m, string[] rk)
-        {
-            if (!_rowTotalCache.TryGetValue(m, out var pt))
-            {
-                pt = CsvAnalytics.PivotTable(_rows, RowFields(), Array.Empty<int>(), _measures[m].Field, _measures[m].Func,
-                    RowFields().Select(ColName).ToArray(), Filters(), DateGroupings());
-                _rowTotalCache[m] = pt;
-            }
-            return pt.Value(rk, Array.Empty<string>());
-        }
-
-        private double ColTotal(int m, string[] ck)
-        {
-            if (!_colTotalCache.TryGetValue(m, out var pt))
-            {
-                pt = CsvAnalytics.PivotTable(_rows, Array.Empty<int>(), ColFields(), _measures[m].Field, _measures[m].Func,
-                    Array.Empty<string>(), Filters(), DateGroupings());
-                _colTotalCache[m] = pt;
-            }
-            return pt.Value(Array.Empty<string>(), ck);
-        }
-
-        private double GrandTotal(int m)
-        {
-            if (!_grandCache.TryGetValue(m, out double v))
-            {
-                var pt = CsvAnalytics.PivotTable(_rows, Array.Empty<int>(), Array.Empty<int>(), _measures[m].Field, _measures[m].Func,
-                    Array.Empty<string>(), Filters(), DateGroupings());
-                v = pt.Value(Array.Empty<string>(), Array.Empty<string>());
-                _grandCache[m] = v;
-            }
-            return v;
-        }
+        private double RowTotal(int m, string[] rk) => _rowTotalCache[m].Value(rk, Array.Empty<string>());
+        private double ColTotal(int m, string[] ck) => _colTotalCache[m].Value(Array.Empty<string>(), ck);
+        private double GrandTotal(int m) => _grandCache[m];
 
         private void ClearTotalCaches() { _rowTotalCache.Clear(); _colTotalCache.Clear(); _grandCache.Clear(); }
 
@@ -619,7 +730,7 @@ namespace NanumCsvViewer
         private void UpdateMeasureCombo()
         {
             _measureCombo.Items.Clear();
-            foreach (var m in _measures) _measureCombo.Items.Add(MeasureLabel(m));
+            foreach (var m in _resultMeasures) _measureCombo.Items.Add(MeasureLabel(m));
             if (_measureCombo.Items.Count > 0) _measureCombo.SelectedIndex = 0;
         }
 
@@ -629,12 +740,16 @@ namespace NanumCsvViewer
             int mi = Math.Max(0, _measureCombo.SelectedIndex);
             if (mi >= _results.Count) mi = 0;
             var pivot = _results[mi];
-            bool hasCols = _colDims.Count > 0;
+            _chartPageInfo.Text = LT($"Chart: row page {_rowPage.Value}/{_rowPage.Maximum}, column page {_columnPage.Value}/{_columnPage.Maximum}. Change pages in the Table tab.",
+                $"차트: 행 {_rowPage.Value}/{_rowPage.Maximum}페이지, 열 {_columnPage.Value}/{_columnPage.Maximum}페이지. 표 탭에서 페이지를 변경하세요.");
+            bool hasCols = pivot.ColumnColumns.Count > 0;
+            var chartRows = pivot.RowKeys.Skip(((int)_rowPage.Value - 1) * RowsPerPage).Take(RowsPerPage).ToArray();
+            var chartColumns = pivot.ColumnKeys.Skip(((int)_columnPage.Value - 1) * ColumnsPerPage).Take(ColumnsPerPage).ToArray();
             string[] categories;
             var series = new List<ChartSeries>();
-            string xTitle, yTitle = MeasureLabel(_measures[mi]);
+            string xTitle, yTitle = MeasureLabel(_resultMeasures[mi]);
 
-            if (_rowDims.Count == 0)
+            if (pivot.RowColumns.Count == 0)
             {
                 if (!hasCols)
                 {
@@ -643,21 +758,21 @@ namespace NanumCsvViewer
                 }
                 else
                 {
-                    categories = pivot.ColumnKeys.Select(ck => string.Join(" | ", ck)).ToArray();
-                    series.Add(new ChartSeries(yTitle, pivot.ColumnKeys.Select(ck => pivot.Value(Array.Empty<string>(), ck)).ToArray()));
+                    categories = chartColumns.Select(ck => string.Join(" | ", ck)).ToArray();
+                    series.Add(new ChartSeries(yTitle, chartColumns.Select(ck => pivot.Value(Array.Empty<string>(), ck)).ToArray()));
                 }
                 xTitle = hasCols ? LT("Columns", "열") : LT("Metric", "지표");
             }
             else
             {
-                categories = pivot.RowKeys.Select(rk => string.Join(" | ", rk)).ToArray();
-                var colKeys = hasCols ? pivot.ColumnKeys : new List<string[]> { Array.Empty<string>() };
+                categories = chartRows.Select(rk => string.Join(" | ", rk)).ToArray();
+                var colKeys = hasCols ? chartColumns : new[] { Array.Empty<string>() };
                 foreach (var ck in colKeys)
                 {
                     string name = ck.Length == 0 ? yTitle : string.Join(" | ", ck);
-                    series.Add(new ChartSeries(name, pivot.RowKeys.Select(rk => pivot.Value(rk, ck)).ToArray()));
+                    series.Add(new ChartSeries(name, chartRows.Select(rk => pivot.Value(rk, ck)).ToArray()));
                 }
-                xTitle = string.Join(" | ", _rowDims.Select(d => ColName(d.Field)));
+                xTitle = string.Join(" | ", pivot.RowColumnNames);
             }
 
             if (LooksTemporal(categories) && _chartTypeCombo.SelectedIndex == 0)

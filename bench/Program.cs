@@ -11,7 +11,7 @@ using NanumCsvViewer.Csv;
 //   icon  <path.ico>    : 앱 아이콘(.ico, 멀티 해상도) 생성
 if (args.Length < 2)
 {
-    Console.WriteLine("usage: gen <path> [gb] | index <path> | icon <path.ico>");
+    Console.WriteLine("usage: gen <path> [gb] | index <path> | icon <path.ico> | cardinality <new-path> [rows] [padding-chars]");
     return;
 }
 
@@ -48,6 +48,47 @@ else if (mode == "icon")
 {
     GenerateIcon(path);
     Console.WriteLine($"icon → {path}  ({new FileInfo(path).Length} bytes)");
+}
+else if (mode == "cardinality")
+{
+    int rowCount = args.Length > 2 ? int.Parse(args[2]) : 2_100_000;
+    string padding = args.Length > 3 ? new string('x', int.Parse(args[3])) : "";
+    using (var writer = new StreamWriter(new FileStream(path, FileMode.CreateNew), new UTF8Encoding(false)))
+    {
+        writer.WriteLine("id,row,column,value,payload");
+        for (int i = 0; i < rowCount; i++) writer.WriteLine($"{i},r{i % 20000:D5},c{i % 20000:D5},2,{padding}");
+    }
+    var watch = Stopwatch.StartNew();
+    using var doc = VirtualCsvDocument.Open(path);
+    long openMs = watch.ElapsedMilliseconds;
+    await doc.RunIndexingAsync(new Progress<IndexProgress>(), default);
+    Console.WriteLine($"index: bytes={new FileInfo(path).Length} rows={doc.DataRowsAvailable} open={openMs}ms total={watch.ElapsedMilliseconds}ms");
+    var rows = doc.SnapshotViewRows();
+    watch.Restart();
+    var result = CsvAnalytics.PivotTable(rows, new[] { 1 }, new[] { 2 }, 3, AggregationFunction.Count);
+    if (result.Values.Values.Sum() != rowCount) throw new Exception("Pivot lost rows");
+    Console.WriteLine($"pivot: {watch.ElapsedMilliseconds}ms groups={result.Values.Count} total={result.Values.Values.Sum()}");
+    watch.Restart();
+    try
+    {
+        doc.DistinctValues(0, false, default, 100_000, 8_000_000);
+        if (rowCount > 100_000) throw new Exception("Candidate budget was not enforced");
+    }
+    catch (DistinctValueLimitException) { Console.WriteLine($"distinct budget: handled in {watch.ElapsedMilliseconds}ms"); }
+    watch.Restart();
+    string last = (rowCount - 1).ToString();
+    await doc.ApplyFilterAsync(row => row[0] == last, null, default);
+    if (doc.DisplayRowCount != 1 || doc.GetDisplayRow(0)[0] != last) throw new Exception("Tail row filter failed");
+    Console.WriteLine($"filter tail row: {watch.ElapsedMilliseconds}ms matched={doc.DisplayRowCount}");
+    watch.Restart();
+    using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(5));
+    try
+    {
+        CsvAnalytics.PivotTable(rows, new[] { 1 }, new[] { 2 }, 3, AggregationFunction.Median, cancellation: cancellation.Token);
+        throw new Exception("Cancellation did not interrupt the pivot");
+    }
+    catch (OperationCanceledException) { Console.WriteLine($"pivot cancellation: {watch.ElapsedMilliseconds}ms"); }
+    Console.WriteLine($"peak working set: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024 / 1024} MiB");
 }
 
 static void Generate(string path, long targetBytes)

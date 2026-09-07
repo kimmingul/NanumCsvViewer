@@ -653,34 +653,76 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 현재 뷰 행 수집
 
-        private const int AnalysisRowCap = 2_000_000;
+        private CancellationTokenSource? _analysisCts;
+        private Task? _analysisTask;
 
-        private List<string[]> GatherViewRows(out bool truncated)
+        private Task<AnalysisSnapshot?> GatherAnalysisSnapshotAsync(VirtualCsvDocument doc)
+            => RunAnalysisOperationAsync(doc, (source, cancellation) => AnalysisSnapshot.Collect(source, cancellation));
+
+        private async Task RunAnalysisAsync(Action<AnalysisWork> compute, bool withSourceRows = false)
         {
-            truncated = false;
-            var rows = new List<string[]>();
-            if (_doc is null) return rows;
-            int total = _doc.DisplayRowCount;
-            if (total > AnalysisRowCap) { total = AnalysisRowCap; truncated = true; }
-            for (int i = 0; i < total; i++)
+            if (_doc is null || _closing || _busy) return;
+            var doc = _doc;
+            var labels = ColumnLabels().ToArray();
+            var report = await RunAnalysisOperationAsync(doc, (source, cancellation) =>
             {
-                try { rows.Add(_doc.GetDisplayRow(i)); } catch { }
-            }
-            return rows;
+                var snapshot = AnalysisSnapshot.Collect(source, cancellation);
+                List<(string[], long)>? sourceRows = null;
+                if (withSourceRows)
+                {
+                    sourceRows = new(snapshot.Rows.Count);
+                    for (int i = 0; i < snapshot.Rows.Count; i++)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        sourceRows.Add((snapshot.Rows[i], doc.GetSourceRowNumber(i)));
+                    }
+                }
+                var work = new AnalysisWork(snapshot.Rows, labels, cancellation, sourceRows);
+                compute(work);
+                cancellation.ThrowIfCancellationRequested();
+                return work.Report is { } result ? result with
+                {
+                    Body = LT($"Scope: entire current view ({snapshot.Rows.Count:N0} rows)\n\n",
+                        $"분석 범위: 현재 뷰 전체 ({snapshot.Rows.Count:N0}행)\n\n") + result.Body
+                } : null;
+            });
+            if (report is null || _closing || IsDisposed || !ReferenceEquals(doc, _doc)) return;
+            if (report.Chart is { } chart) ShowResultWithChart(report.Title, report.Body, chart, report.Columns);
+            else ShowResult(report.Title, report.Body);
         }
 
-        private List<(string[] Fields, long SourceRow)> GatherViewRowsWithSource(out bool truncated)
+        private async Task<T?> RunAnalysisOperationAsync<T>(VirtualCsvDocument doc,
+            Func<IReadOnlyList<string[]>, CancellationToken, T?> operation) where T : class
         {
-            truncated = false;
-            var rows = new List<(string[], long)>();
-            if (_doc is null) return rows;
-            int total = _doc.DisplayRowCount;
-            if (total > AnalysisRowCap) { total = AnalysisRowCap; truncated = true; }
-            for (int i = 0; i < total; i++)
+            if (_closing || _drainDepth > 0 || _busy || !ReferenceEquals(doc, _doc)) return null;
+            var source = doc.SnapshotViewRows();
+            using var cancellation = new CancellationTokenSource();
+            _analysisCts = cancellation;
+            SetBusy(true);
+            statusLabel.Text = LT("Reading analysis data…", "분석 데이터 읽는 중…");
+            try
             {
-                try { rows.Add((_doc.GetDisplayRow(i), _doc.GetSourceRowNumber(i))); } catch { }
+                var worker = Task.Run(() => operation(source, cancellation.Token));
+                _analysisTask = worker;
+                var result = await worker;
+                return _closing || IsDisposed || cancellation.IsCancellationRequested || !ReferenceEquals(doc, _doc)
+                    ? null : result;
             }
-            return rows;
+            catch (OperationCanceledException) { return null; }
+            catch (Exception ex)
+            {
+                if (!_closing && !IsDisposed && !cancellation.IsCancellationRequested)
+                    MessageBox.Show(this, ex is AnalysisMemoryLimitException
+                        ? LT("The complete analysis data exceeds the memory budget. Filter the rows and retry. No partial result was produced.",
+                            "전체 분석 데이터가 메모리 예산을 초과했습니다. 행 필터를 적용한 뒤 다시 시도하세요. 일부 행만 분석한 결과는 생성하지 않았습니다.")
+                        : ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return null;
+            }
+            finally
+            {
+                if (ReferenceEquals(_analysisCts, cancellation)) _analysisCts = null;
+                if (!_closing && !IsDisposed) { SetBusy(false); UpdateFilterStatus(); }
+            }
         }
 
         // 접사 인식 파서(NumericAffix)로 통일 — 타입 시스템(Currency/Percent=numeric)·컬럼 필터·차트 빌더와
@@ -694,19 +736,11 @@ namespace NanumCsvViewer
             return values;
         }
 
-        private void ShowResult(string title, string body) => ShowResult(title, body, false);
-
-        private void ShowResult(string title, string body, bool truncated)
+        private void ShowResult(string title, string body)
         {
-            using var form = new ResultForm(title, PrefixTruncated(body, truncated), _palette);
+            using var form = new ResultForm(title, body, _palette);
             form.ShowDialog(this);
         }
-
-        // 절단 안내 접두의 단일 소스(일반 결과창·"차트로 보기" 결과창 공용).
-        private string PrefixTruncated(string body, bool truncated)
-            => truncated
-                ? LT($"(showing first {AnalysisRowCap:N0} rows)\n\n", $"(처음 {AnalysisRowCap:N0}행만 표시)\n\n") + body
-                : body;
 
         // ---------------------------------------------------------------- 내보내기 (E)
 
@@ -941,7 +975,7 @@ namespace NanumCsvViewer
 
         private async void OpenColumnFilter(int col)
         {
-            if (_doc is null || !_doc.IndexingComplete) return;
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
             var doc = _doc;
             string name = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
             Rectangle rect = grid.GetCellDisplayRectangle(col, -1, true);
@@ -995,9 +1029,47 @@ namespace NanumCsvViewer
             SetBusy(true);
             statusLabel.Text = LT("Loading values…", "값 불러오는 중…");
             IReadOnlyList<(string Value, int Count)> distinct;
-            try { distinct = await Task.Run(() => doc.DistinctValues(col, withinCurrentView: false, CancellationToken.None)); }
-            catch { distinct = Array.Empty<(string, int)>(); }
-            finally { SetBusy(false); }
+            bool useTextFilter = false;
+            _opCts?.Cancel();
+            using var cts = new CancellationTokenSource();
+            _opCts = cts;
+            try
+            {
+                var load = Task.Run(() => doc.DistinctValues(col, withinCurrentView: false, cts.Token,
+                    maxDistinctValues: 100_000, maxValueCharacters: 8_000_000));
+                _opTask = load;
+                distinct = await load;
+            }
+            catch (DistinctValueLimitException)
+            {
+                distinct = Array.Empty<(string, int)>();
+                useTextFilter = true;
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                if (!IsDisposed) MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (ReferenceEquals(_opCts, cts)) _opCts = null;
+                if (!IsDisposed) { SetBusy(false); UpdateFilterStatus(); }
+            }
+            if (IsDisposed || cts.IsCancellationRequested || !ReferenceEquals(doc, _doc)) return;
+
+            if (useTextFilter)
+            {
+                MessageBox.Show(this, LT("This column has too many values for a checklist. Use contains, equals, or a list of values; the filter still scans all rows.",
+                    "이 컬럼은 고유값 목록이 너무 큽니다. 포함·일치·값 목록 조건을 사용하세요. 필터는 전체 행에 적용됩니다."),
+                    name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                using var popup = new ColumnFilterPopup(name, _columnFilters.TextFilters.FirstOrDefault(f => f.Column == col), _palette);
+                if (!popup.ShowAt(this, screenPt)) return;
+                _columnFilters.SetText(col, popup.TextOp, popup.TextValue, popup.TextCaseSensitive);
+                await RebuildFilterAsync(LT("Applying filter…", "필터 적용 중…"));
+                grid.Invalidate();
+                return;
+            }
 
             // 로딩이 끝났으니 "값 불러오는 중…"을 현재 필터 상태로 되돌린다.
             // (팝업을 취소해도 상태줄에 메시지가 남지 않도록)
@@ -1327,6 +1399,8 @@ namespace NanumCsvViewer
 
         private FlowLayoutPanel? _facetsPanel;
         private bool _facetsVisible;
+        private CancellationTokenSource? _facetCts;
+        private Task? _facetTask;
         private const int FacetSampleCap = 50_000;
 
         private void BuildFacetsMenuItem()
@@ -1346,6 +1420,7 @@ namespace NanumCsvViewer
             _facetsVisible = !_facetsVisible;
             _facetsPanel!.Visible = _facetsVisible;
             if (_facetsVisible) BuildFacets();
+            else _facetCts?.Cancel();
         }
 
         private void EnsureFacetsPanel()
@@ -1367,31 +1442,81 @@ namespace NanumCsvViewer
         }
 
         // 현재(필터된) 뷰의 표본으로 컬럼별 분포를 다시 계산 → 크로스필터링.
-        private void BuildFacets()
+        private async void BuildFacets()
         {
-            if (_facetsPanel is null || !_facetsVisible || _doc is null) return;
-
-            int total = Math.Min(_doc.DisplayRowCount, FacetSampleCap);
-            var rows = new List<string[]>(total);
-            for (int i = 0; i < total; i++)
+            if (_closing || _drainDepth > 0 || _facetsPanel is null || !_facetsVisible || _doc is null) return;
+            _facetCts?.Cancel();
+            using var cts = new CancellationTokenSource();
+            _facetCts = cts;
+            var doc = _doc;
+            var view = doc.SnapshotViewRows();
+            var columns = Enumerable.Range(0, doc.ColumnCount)
+                .Where(c => !_hiddenColumns.Contains(c) && c < _columnSummaries.Length)
+                .Select(c => (Index: c, Type: _columnSummaries[c].InferredType,
+                    Name: c < grid.Columns.Count ? grid.Columns[c].HeaderText : $"Column{c + 1}")).ToArray();
+            _facetsPanel.Enabled = false;
+            try
             {
-                try { rows.Add(_doc.GetDisplayRow(i)); } catch { }
+                var worker = Task.Run(() =>
+                {
+                    var rows = new List<string[]>();
+                    long bytes = 0;
+                    for (int i = 0; i < Math.Min(view.Count, FacetSampleCap); i++)
+                    {
+                        cts.Token.ThrowIfCancellationRequested();
+                        var row = view[i];
+                        bytes += 32L + row.Sum(v => 32L + v.Length * 2L);
+                        if (bytes > 32L * 1024 * 1024) break;
+                        rows.Add(row);
+                    }
+                    var facets = new List<(string Name, List<(string, int, Action)> Rows)>();
+                    foreach (var column in columns)
+                    {
+                        cts.Token.ThrowIfCancellationRequested();
+                        var result = BuildFacetRows(column.Index, column.Type, rows);
+                        if (result.Count > 0) facets.Add((column.Name, result));
+                    }
+                    return (facets, count: rows.Count);
+                }, cts.Token);
+                // Include superseded workers: a new file must not dispose the old
+                // document until every outstanding reader has finished.
+                _facetTask = _facetTask is null || _facetTask.IsCompleted ? worker : Task.WhenAll(_facetTask, worker);
+                var result = await worker;
+                if (IsDisposed || cts.IsCancellationRequested || !ReferenceEquals(doc, _doc)) return;
+                _facetsPanel.SuspendLayout();
+                try
+                {
+                    var old = _facetsPanel.Controls.Cast<Control>().ToArray();
+                    _facetsPanel.Controls.Clear();
+                    foreach (var control in old) control.Dispose();
+                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(214, 0),
+                        Text = LT($"Facets: first {result.count:N0} of {view.Count:N0} rows", $"패싯: 전체 {view.Count:N0}행 중 처음 {result.count:N0}행"), ForeColor = _palette.Text });
+                    foreach (var facet in result.facets)
+                        _facetsPanel.Controls.Add(new FacetView(facet.Name, _palette, facet.Rows));
+                }
+                finally { _facetsPanel.ResumeLayout(); }
             }
-
-            _facetsPanel.SuspendLayout();
-            var old = _facetsPanel.Controls.Cast<Control>().ToArray();
-            _facetsPanel.Controls.Clear();
-            foreach (var c in old) c.Dispose();
-
-            for (int col = 0; col < _doc.ColumnCount; col++)
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
             {
-                if (_hiddenColumns.Contains(col) || col >= _columnSummaries.Length) continue;
-                var facetRows = BuildFacetRows(col, _columnSummaries[col].InferredType, rows);
-                if (facetRows.Count == 0) continue;
-                string name = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
-                _facetsPanel.Controls.Add(new FacetView(name, _palette, facetRows));
+                Debug.WriteLine($"[Facets] {ex}");
+                if (!IsDisposed && !cts.IsCancellationRequested && ReferenceEquals(doc, _doc))
+                {
+                    var old = _facetsPanel.Controls.Cast<Control>().ToArray();
+                    _facetsPanel.Controls.Clear();
+                    foreach (var control in old) control.Dispose();
+                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(214, 0),
+                        Text = LT("Unable to calculate facets. Toggle the panel to retry.", "패싯을 계산하지 못했습니다. 패널을 다시 열어 재시도하세요."), ForeColor = _palette.Text });
+                }
             }
-            _facetsPanel.ResumeLayout();
+            finally
+            {
+                if (ReferenceEquals(_facetCts, cts))
+                {
+                    _facetCts = null;
+                    if (!IsDisposed) _facetsPanel.Enabled = true;
+                }
+            }
         }
 
         private List<(string, int, Action)> BuildFacetRows(int col, ColumnValueType type, List<string[]> rows)
@@ -1689,45 +1814,50 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 분석 (M)
 
-        private void AnalyzeDistribution()
+        private async void AnalyzeDistribution()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Numeric Distribution", "수치 분포"), _palette);
             var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), FirstNumericColumn());
             var bins = dlg.AddNumeric(LT("Bins", "구간 수"), 1, 100, 10);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var values = NumericColumn(rows, col.SelectedIndex);
-            if (values.Count == 0) { ShowResult(LT("Numeric Distribution", "수치 분포"), LT("No numeric values.", "수치 값이 없습니다.")); return; }
-
-            var d = CsvAnalytics.NumericDistributionOf(values, col.SelectedIndex, (int)bins.Value);
-            var sb = new StringBuilder();
-            sb.AppendLine(ColumnLabel(col.SelectedIndex));
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"count  {d.Count:N0}");
-            sb.AppendLine($"min    {d.Min:G6}");
-            sb.AppendLine($"q1     {d.Q1:G6}");
-            sb.AppendLine($"median {d.Median:G6}");
-            sb.AppendLine($"mean   {d.Mean:G6}");
-            sb.AppendLine($"q3     {d.Q3:G6}");
-            sb.AppendLine($"max    {d.Max:G6}");
-            sb.AppendLine($"std    {d.StandardDeviation:G6}");
-            sb.AppendLine();
-            sb.AppendLine(LT("Histogram", "히스토그램") + ":");
-            int maxCount = d.Bins.Count > 0 ? d.Bins.Max(b => b.Count) : 0;
-            foreach (var b in d.Bins)
+            var colSelection = col.SelectedIndex;
+            var binsInput = bins.Value;
+            await RunAnalysisAsync(work =>
             {
-                int barLen = maxCount > 0 ? b.Count * 30 / maxCount : 0;
-                sb.AppendLine($"[{b.LowerBound,10:G5} – {b.UpperBound,10:G5}) {b.Count,8:N0} {new string('█', barLen)}");
-            }
-            ShowResultWithChart(LT("Numeric Distribution", "수치 분포"), sb.ToString(), truncated,
-                ChartKind.Histogram, new[] { col.SelectedIndex });
+                var rows = work.Rows;
+                var values = NumericColumn(rows, colSelection);
+                if (values.Count == 0) { work.SetResult(LT("Numeric Distribution", "수치 분포"), LT("No numeric values.", "수치 값이 없습니다.")); return; }
+
+                var d = CsvAnalytics.NumericDistributionOf(values, colSelection, (int)binsInput);
+                var sb = new StringBuilder();
+                sb.AppendLine(work.ColumnLabel(colSelection));
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"count  {d.Count:N0}");
+                sb.AppendLine($"min    {d.Min:G6}");
+                sb.AppendLine($"q1     {d.Q1:G6}");
+                sb.AppendLine($"median {d.Median:G6}");
+                sb.AppendLine($"mean   {d.Mean:G6}");
+                sb.AppendLine($"q3     {d.Q3:G6}");
+                sb.AppendLine($"max    {d.Max:G6}");
+                sb.AppendLine($"std    {d.StandardDeviation:G6}");
+                sb.AppendLine();
+                sb.AppendLine(LT("Histogram", "히스토그램") + ":");
+                int maxCount = d.Bins.Count > 0 ? d.Bins.Max(b => b.Count) : 0;
+                foreach (var b in d.Bins)
+                {
+                    int barLen = maxCount > 0 ? b.Count * 30 / maxCount : 0;
+                    sb.AppendLine($"[{b.LowerBound,10:G5} – {b.UpperBound,10:G5}) {b.Count,8:N0} {new string('█', barLen)}");
+                }
+                work.SetChartResult(LT("Numeric Distribution", "수치 분포"), sb.ToString(),
+                    ChartKind.Histogram, new[] { colSelection });
+            });
         }
 
-        private void AnalyzeDateHistogram()
+        private async void AnalyzeDateHistogram()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Date Histogram", "날짜 히스토그램"), _palette);
             var dateCol = dlg.AddCombo(LT("Date column", "날짜 컬럼"), ColumnLabels(), FirstDateColumn());
             var valueCol = dlg.AddCombo(LT("Value column (optional)", "값 컬럼(선택)"),
@@ -1735,46 +1865,55 @@ namespace NanumCsvViewer
             var period = dlg.AddCombo(LT("Period", "주기"), new[] { "Day", "Week", "Month", "Year" }, 2);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            int? vc = valueCol.SelectedIndex == 0 ? null : valueCol.SelectedIndex - 1;
-            var p = (DateBinPeriod)period.SelectedIndex;
-            var hist = CsvAnalytics.DateHistogramOf(rows, dateCol.SelectedIndex, vc, p);
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(dateCol.SelectedIndex)} · {p}");
-            sb.AppendLine(new string('─', 40));
-            foreach (var b in hist.Bins)
+            var valueColSelection = valueCol.SelectedIndex;
+            var periodSelection = period.SelectedIndex;
+            var dateColSelection = dateCol.SelectedIndex;
+            await RunAnalysisAsync(work =>
             {
-                sb.Append($"{b.Label,-12} {b.Count,8:N0}");
-                if (b.Sum is double s) sb.Append($"  sum={s:G6}  avg={b.Average:G6}");
-                sb.AppendLine();
-            }
-            ShowResult(LT("Date Histogram", "날짜 히스토그램"), sb.ToString(), truncated);
+                var rows = work.Rows;
+                int? vc = valueColSelection == 0 ? null : valueColSelection - 1;
+                var p = (DateBinPeriod)periodSelection;
+                var hist = CsvAnalytics.DateHistogramOf(rows, dateColSelection, vc, p);
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(dateColSelection)} · {p}");
+                sb.AppendLine(new string('─', 40));
+                foreach (var b in hist.Bins)
+                {
+                    sb.Append($"{b.Label,-12} {b.Count,8:N0}");
+                    if (b.Sum is double s) sb.Append($"  sum={s:G6}  avg={b.Average:G6}");
+                    sb.AppendLine();
+                }
+                work.SetResult(LT("Date Histogram", "날짜 히스토그램"), sb.ToString());
+            });
         }
 
-        private void AnalyzeDuplicates()
+        private async void AnalyzeDuplicates()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Find Duplicates", "중복 찾기"), _palette);
             var list = dlg.AddCheckedList(LT("Key columns", "키 컬럼"), ColumnLabels(), Math.Min(12, _doc.ColumnCount));
             if (!dlg.ShowOk(this)) return;
             var keys = CheckedIndexes(list);
             if (keys.Count == 0) { ShowResult(LT("Find Duplicates", "중복 찾기"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요.")); return; }
 
-            var rows = GatherViewRowsWithSource(out bool truncated);
-            var dups = CsvAnalytics.FindDuplicates(rows, keys);
-            var sb = new StringBuilder();
-            sb.AppendLine(LT($"Duplicate groups: {dups.Count:N0}", $"중복 그룹: {dups.Count:N0}"));
-            sb.AppendLine(new string('─', 40));
-            foreach (var g in dups.Take(1000))
-                sb.AppendLine($"{string.Join(" | ", g.Key)}  ×{g.SourceRows.Count}  → " +
-                    LT("rows ", "행 ") + string.Join(", ", g.SourceRows.Take(20)) + (g.SourceRows.Count > 20 ? " …" : ""));
-            if (dups.Count > 1000) sb.AppendLine("…");
-            ShowResult(LT("Find Duplicates", "중복 찾기"), sb.ToString(), truncated);
+            await RunAnalysisAsync(work =>
+            {
+                var rows = work.SourceRows;
+                var dups = CsvAnalytics.FindDuplicates(rows, keys, work.Cancellation);
+                var sb = new StringBuilder();
+                sb.AppendLine(LT($"Duplicate groups: {dups.Count:N0}", $"중복 그룹: {dups.Count:N0}"));
+                sb.AppendLine(new string('─', 40));
+                foreach (var g in dups.Take(1000))
+                    sb.AppendLine($"{string.Join(" | ", g.Key)}  ×{g.SourceRows.Count}  → " +
+                        LT("rows ", "행 ") + string.Join(", ", g.SourceRows.Take(20)) + (g.SourceRows.Count > 20 ? " …" : ""));
+                if (dups.Count > 1000) sb.AppendLine("…");
+                work.SetResult(LT("Find Duplicates", "중복 찾기"), sb.ToString());
+            }, withSourceRows: true);
         }
 
-        private void AnalyzeGroupBy()
+        private async void AnalyzeGroupBy()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Group By", "그룹별 집계"), _palette);
             var groupList = dlg.AddCheckedList(LT("Group columns", "그룹 컬럼"), ColumnLabels(), Math.Min(8, _doc.ColumnCount));
             var valueCol = dlg.AddCombo(LT("Value column", "값 컬럼"), ColumnLabels(), FirstNumericColumn());
@@ -1790,150 +1929,182 @@ namespace NanumCsvViewer
             var funcs = CheckedIndexes(funcList).Select(i => (AggregationFunction)i).ToList();
             if (funcs.Count == 0) funcs.Add(AggregationFunction.Count);
 
-            var rows = GatherViewRows(out bool truncated);
-            var result = CsvAnalytics.GroupBy(rows, groups, valueCol.SelectedIndex, funcs);
-            var sb = new StringBuilder();
-            sb.AppendLine(string.Join(" | ", groups.Select(ColumnLabel)) + "  →  " + string.Join(", ", funcs.Select(f => f.DisplayName())));
-            sb.AppendLine(new string('─', 50));
-            foreach (var r in result.Rows.Take(5000))
-                sb.AppendLine($"{string.Join(" | ", r.Key),-30}  " +
-                    string.Join("  ", funcs.Select(f => $"{f.DisplayName()}={r.Values[f]:G6}")));
-            if (result.Rows.Count > 5000) sb.AppendLine("…");
-            ShowResult(LT("Group By", "그룹별 집계"), sb.ToString(), truncated);
+            var valueColSelection = valueCol.SelectedIndex;
+            await RunAnalysisAsync(work =>
+            {
+                var rows = work.Rows;
+                var result = CsvAnalytics.GroupBy(rows, groups, valueColSelection, funcs, work.Cancellation);
+                var sb = new StringBuilder();
+                sb.AppendLine(string.Join(" | ", groups.Select(work.ColumnLabel)) + "  →  " + string.Join(", ", funcs.Select(f => f.DisplayName())));
+                sb.AppendLine(new string('─', 50));
+                foreach (var r in result.Rows.Take(5000))
+                    sb.AppendLine($"{string.Join(" | ", r.Key),-30}  " +
+                        string.Join("  ", funcs.Select(f => $"{f.DisplayName()}={r.Values[f]:G6}")));
+                if (result.Rows.Count > 5000) sb.AppendLine("…");
+                work.SetResult(LT("Group By", "그룹별 집계"), sb.ToString());
+            });
         }
 
         // ---------------------------------------------------------------- 통계 (N)
 
-        private void AnalyzeCorrelation()
+        private async void AnalyzeCorrelation()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Correlation", "상관분석"), _palette);
             var x = dlg.AddCombo("X", ColumnLabels(), FirstNumericColumn());
             var y = dlg.AddCombo("Y", ColumnLabels(), Math.Min(FirstNumericColumn() + 1, Math.Max(0, _doc.ColumnCount - 1)));
             var method = dlg.AddCombo(LT("Method", "방법"), new[] { "Pearson", "Spearman" }, 0);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var pairs = new List<(double, double)>();
-            foreach (var row in rows)
-                if (x.SelectedIndex < row.Length && y.SelectedIndex < row.Length &&
-                    NumericAffix.TryParseNumber(row[x.SelectedIndex], out double xv) &&
-                    NumericAffix.TryParseNumber(row[y.SelectedIndex], out double yv))
-                    pairs.Add((xv, yv));
+            var xSelection = x.SelectedIndex;
+            var ySelection = y.SelectedIndex;
+            var methodSelection = method.SelectedIndex;
+            await RunAnalysisAsync(work =>
+            {
+                var rows = work.Rows;
+                var pairs = new List<(double, double)>();
+                foreach (var row in rows)
+                    if (xSelection < row.Length && ySelection < row.Length &&
+                        NumericAffix.TryParseNumber(row[xSelection], out double xv) &&
+                        NumericAffix.TryParseNumber(row[ySelection], out double yv))
+                        pairs.Add((xv, yv));
 
-            var r = CsvStatistics.Correlation(pairs, (CorrelationMethod)method.SelectedIndex);
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(x.SelectedIndex)}  vs  {ColumnLabel(y.SelectedIndex)}");
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"method       {r.Method}");
-            sb.AppendLine($"coefficient  {r.Coefficient:0.0000}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"sample size  {r.SampleSize:N0}");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResultWithChart(LT("Correlation", "상관분석"), sb.ToString(), truncated,
-                ChartKind.Scatter, new[] { x.SelectedIndex, y.SelectedIndex });
+                var r = CsvStatistics.Correlation(pairs, (CorrelationMethod)methodSelection);
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(xSelection)}  vs  {work.ColumnLabel(ySelection)}");
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"method       {r.Method}");
+                sb.AppendLine($"coefficient  {r.Coefficient:0.0000}");
+                sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine($"sample size  {r.SampleSize:N0}");
+                sb.AppendLine($"→ {r.Interpretation}");
+                work.SetChartResult(LT("Correlation", "상관분석"), sb.ToString(),
+                    ChartKind.Scatter, new[] { xSelection, ySelection });
+            });
         }
 
-        private void AnalyzeIndependentTTest()
+        private async void AnalyzeIndependentTTest()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Independent t-test", "독립표본 t검정"), _palette);
             var valueCol = dlg.AddCombo(LT("Value column", "값 컬럼"), ColumnLabels(), FirstNumericColumn());
             var groupCol = dlg.AddCombo(LT("Group column", "그룹 컬럼"), ColumnLabels(), 0);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var groups = new Dictionary<string, List<double>>();
-            int vc = valueCol.SelectedIndex, gc = groupCol.SelectedIndex;
-            foreach (var row in rows)
+            var valueColSelection = valueCol.SelectedIndex;
+            var groupColSelection = groupCol.SelectedIndex;
+            await RunAnalysisAsync(work =>
             {
-                if (vc >= row.Length || gc >= row.Length) continue;
-                if (!NumericAffix.TryParseNumber(row[vc], out double v)) continue;
-                string g = row[gc];
-                if (!groups.TryGetValue(g, out var listv)) { listv = new List<double>(); groups[g] = listv; }
-                listv.Add(v);
-            }
-            var top = groups.OrderByDescending(kv => kv.Value.Count).Take(2).ToList();
-            if (top.Count < 2) { ShowResult(LT("Independent t-test", "독립표본 t검정"), LT("Need at least 2 groups.", "그룹이 2개 이상 필요합니다.")); return; }
+                var rows = work.Rows;
+                var groups = new Dictionary<string, List<double>>();
+                int vc = valueColSelection, gc = groupColSelection;
+                foreach (var row in rows)
+                {
+                    if (vc >= row.Length || gc >= row.Length) continue;
+                    if (!NumericAffix.TryParseNumber(row[vc], out double v)) continue;
+                    string g = row[gc];
+                    if (!groups.TryGetValue(g, out var listv)) { listv = new List<double>(); groups[g] = listv; }
+                    listv.Add(v);
+                }
+                var top = groups.OrderByDescending(kv => kv.Value.Count).Take(2).ToList();
+                if (top.Count < 2) { work.SetResult(LT("Independent t-test", "독립표본 t검정"), LT("Need at least 2 groups.", "그룹이 2개 이상 필요합니다.")); return; }
 
-            var r = CsvStatistics.IndependentTTest(top[0].Key, top[0].Value, top[1].Key, top[1].Value);
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(vc)} by {ColumnLabel(gc)}");
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"group A      {r.GroupA} (mean {r.MeanA:G6}, n {top[0].Value.Count})");
-            sb.AppendLine($"group B      {r.GroupB} (mean {r.MeanB:G6}, n {top[1].Value.Count})");
-            sb.AppendLine($"t            {r.TStatistic:0.0000}");
-            sb.AppendLine($"df           {r.DegreesOfFreedom:0.00}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"95% CI       [{r.ConfidenceIntervalLow:G6}, {r.ConfidenceIntervalHigh:G6}]");
-            sb.AppendLine($"Cohen's d    {r.EffectSize:0.0000}");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResultWithChart(LT("Independent t-test", "독립표본 t검정"), sb.ToString(), truncated,
-                ChartKind.BoxPlot, new[] { vc, gc });
+                var r = CsvStatistics.IndependentTTest(top[0].Key, top[0].Value, top[1].Key, top[1].Value);
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(vc)} by {work.ColumnLabel(gc)}");
+                if (groups.Count > 2)
+                    sb.AppendLine(LT($"Using the two largest groups; {groups.Count - 2:N0} other groups are excluded.",
+                        $"빈도 상위 두 그룹을 비교합니다. 나머지 {groups.Count - 2:N0}개 그룹은 제외됩니다."));
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"group A      {r.GroupA} (mean {r.MeanA:G6}, n {top[0].Value.Count})");
+                sb.AppendLine($"group B      {r.GroupB} (mean {r.MeanB:G6}, n {top[1].Value.Count})");
+                sb.AppendLine($"t            {r.TStatistic:0.0000}");
+                sb.AppendLine($"df           {r.DegreesOfFreedom:0.00}");
+                sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine($"95% CI       [{r.ConfidenceIntervalLow:G6}, {r.ConfidenceIntervalHigh:G6}]");
+                sb.AppendLine($"Cohen's d    {r.EffectSize:0.0000}");
+                sb.AppendLine($"→ {r.Interpretation}");
+                work.SetChartResult(LT("Independent t-test", "독립표본 t검정"), sb.ToString(),
+                    ChartKind.BoxPlot, new[] { vc, gc });
+            });
         }
 
-        private void AnalyzePairedTTest()
+        private async void AnalyzePairedTTest()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Paired t-test", "대응표본 t검정"), _palette);
             var before = dlg.AddCombo(LT("Before column", "이전 컬럼"), ColumnLabels(), FirstNumericColumn());
             var after = dlg.AddCombo(LT("After column", "이후 컬럼"), ColumnLabels(), Math.Min(FirstNumericColumn() + 1, Math.Max(0, _doc.ColumnCount - 1)));
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var b = new List<double>(); var a = new List<double>();
-            foreach (var row in rows)
+            var beforeSelection = before.SelectedIndex;
+            var afterSelection = after.SelectedIndex;
+            await RunAnalysisAsync(work =>
             {
-                if (before.SelectedIndex >= row.Length || after.SelectedIndex >= row.Length) continue;
-                if (NumericAffix.TryParseNumber(row[before.SelectedIndex], out double bv) &&
-                    NumericAffix.TryParseNumber(row[after.SelectedIndex], out double av))
-                { b.Add(bv); a.Add(av); }
-            }
-            if (b.Count < 2) { ShowResult(LT("Paired t-test", "대응표본 t검정"), LT("Need at least 2 paired values.", "쌍을 이룬 값이 2개 이상 필요합니다.")); return; }
+                var rows = work.Rows;
+                var b = new List<double>(); var a = new List<double>();
+                foreach (var row in rows)
+                {
+                    if (beforeSelection >= row.Length || afterSelection >= row.Length) continue;
+                    if (NumericAffix.TryParseNumber(row[beforeSelection], out double bv) &&
+                        NumericAffix.TryParseNumber(row[afterSelection], out double av))
+                    { b.Add(bv); a.Add(av); }
+                }
+                if (b.Count < 2) { work.SetResult(LT("Paired t-test", "대응표본 t검정"), LT("Need at least 2 paired values.", "쌍을 이룬 값이 2개 이상 필요합니다.")); return; }
 
-            var r = CsvStatistics.PairedTTest(b, a);
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(before.SelectedIndex)} → {ColumnLabel(after.SelectedIndex)}");
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"mean diff    {r.MeanDifference:G6}");
-            sb.AppendLine($"t            {r.TStatistic:0.0000}");
-            sb.AppendLine($"df           {r.DegreesOfFreedom:0.00}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"95% CI       [{r.ConfidenceIntervalLow:G6}, {r.ConfidenceIntervalHigh:G6}]");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("Paired t-test", "대응표본 t검정"), sb.ToString(), truncated);
+                var r = CsvStatistics.PairedTTest(b, a);
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(beforeSelection)} → {work.ColumnLabel(afterSelection)}");
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"mean diff    {r.MeanDifference:G6}");
+                sb.AppendLine($"t            {r.TStatistic:0.0000}");
+                sb.AppendLine($"df           {r.DegreesOfFreedom:0.00}");
+                sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine($"95% CI       [{r.ConfidenceIntervalLow:G6}, {r.ConfidenceIntervalHigh:G6}]");
+                sb.AppendLine($"→ {r.Interpretation}");
+                work.SetResult(LT("Paired t-test", "대응표본 t검정"), sb.ToString());
+            });
         }
 
-        private void AnalyzeChiSquare()
+        private async void AnalyzeChiSquare()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Chi-square", "카이제곱 검정"), _palette);
             var rowCol = dlg.AddCombo(LT("Row column", "행 컬럼"), ColumnLabels(), 0);
             var colCol = dlg.AddCombo(LT("Column column", "열 컬럼"), ColumnLabels(), Math.Min(1, Math.Max(0, _doc.ColumnCount - 1)));
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var pairs = new List<(string, string)>();
-            foreach (var row in rows)
-                if (rowCol.SelectedIndex < row.Length && colCol.SelectedIndex < row.Length)
-                    pairs.Add((row[rowCol.SelectedIndex], row[colCol.SelectedIndex]));
+            var rowColSelection = rowCol.SelectedIndex;
+            var colColSelection = colCol.SelectedIndex;
+            await RunAnalysisAsync(work =>
+            {
+                var rows = work.Rows;
+                var pairs = new List<(string, string)>();
+                foreach (var row in rows)
+                    if (rowColSelection < row.Length && colColSelection < row.Length)
+                        pairs.Add((row[rowColSelection], row[colColSelection]));
 
-            var r = CsvStatistics.ChiSquare(pairs);
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(rowCol.SelectedIndex)} × {ColumnLabel(colCol.SelectedIndex)}");
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"χ²           {r.Statistic:0.0000}");
-            sb.AppendLine($"df           {r.DegreesOfFreedom}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResult(LT("Chi-square", "카이제곱 검정"), sb.ToString(), truncated);
+                var r = CsvStatistics.ChiSquare(pairs, work.Cancellation);
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(rowColSelection)} × {work.ColumnLabel(colColSelection)}");
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"χ²           {r.Statistic:0.0000}");
+                sb.AppendLine($"df           {r.DegreesOfFreedom}");
+                sb.AppendLine($"min expected {r.MinimumExpectedCount:G6}");
+                sb.AppendLine($"expected <5  {r.ExpectedCellsBelowFive:N0}");
+                if (r.HasReliableApproximation) sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine(r.HasReliableApproximation ? $"→ {r.Interpretation}" :
+                    LT("Expected counts are too sparse (or there is only one category). The approximate p-value and significance interpretation are not reported.",
+                        "기대빈도가 너무 작거나 범주가 하나뿐입니다. 근사 p값과 유의성 해석은 표시하지 않습니다."));
+                work.SetResult(LT("Chi-square", "카이제곱 검정"), sb.ToString());
+            });
         }
 
         // ---------------------------------------------------------------- 기본통계 (이슈 #17)
 
-        private void AnalyzeDescriptives()
+        private async void AnalyzeDescriptives()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Descriptive Statistics", "기술통계"), _palette);
             var list = dlg.AddCheckedList(LT("Columns", "컬럼"), ColumnLabels(), Math.Min(12, _doc.ColumnCount));
             for (int c = 0; c < _columnSummaries.Length && c < list.Items.Count; c++)
@@ -1942,145 +2113,162 @@ namespace NanumCsvViewer
             var cols = CheckedIndexes(list);
             if (cols.Count == 0) { ShowResult(LT("Descriptive Statistics", "기술통계"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요.")); return; }
 
-            var rows = GatherViewRows(out bool truncated);
-            var sb = new StringBuilder();
-            foreach (int c in cols)
+            await RunAnalysisAsync(work =>
             {
-                var values = NumericColumn(rows, c);
-                sb.AppendLine(ColumnLabel(c));
-                sb.AppendLine(new string('─', 44));
-                var d = CsvStatistics.Describe(values);
-                if (d is null)
+                var rows = work.Rows;
+                var sb = new StringBuilder();
+                foreach (int c in cols)
                 {
-                    sb.AppendLine(LT("No numeric values.", "수치 값이 없습니다."));
+                    var values = NumericColumn(rows, c);
+                    sb.AppendLine(work.ColumnLabel(c));
+                    sb.AppendLine(new string('─', 44));
+                    var d = CsvStatistics.Describe(values);
+                    if (d is null)
+                    {
+                        sb.AppendLine(LT("No numeric values.", "수치 값이 없습니다."));
+                        sb.AppendLine();
+                        continue;
+                    }
+                    int missing = rows.Count - d.Count;
+                    sb.AppendLine($"N (valid)    {d.Count:N0}");
+                    sb.AppendLine(LT($"missing      {missing:N0}", $"결측/비수치   {missing:N0}"));
+                    sb.AppendLine($"sum          {d.Sum:G6}");
+                    sb.AppendLine($"mean         {d.Mean:G6}");
+                    sb.AppendLine($"sd           {d.StandardDeviation:G6}");
+                    sb.AppendLine($"se           {d.StandardError:G6}");
+                    sb.AppendLine($"95% CI       [{d.ConfidenceIntervalLow:G6}, {d.ConfidenceIntervalHigh:G6}]");
+                    sb.AppendLine($"min          {d.Min:G6}");
+                    sb.AppendLine($"q1           {d.Q1:G6}");
+                    sb.AppendLine($"median       {d.Median:G6}");
+                    sb.AppendLine($"q3           {d.Q3:G6}");
+                    sb.AppendLine($"max          {d.Max:G6}");
+                    sb.AppendLine($"range        {d.Range:G6}");
+                    sb.AppendLine($"IQR          {d.InterquartileRange:G6}");
+                    if (d.Modes.Count > 0)
+                        sb.AppendLine(LT("mode         ", "최빈값        ").TrimEnd() + "  " +
+                            string.Join(", ", d.Modes.Take(3).Select(m => m.ToString("G6", CultureInfo.InvariantCulture))) +
+                            (d.Modes.Count > 3 ? " …" : "") + $"  (×{d.ModeFrequency})");
+                    if (!double.IsNaN(d.Skewness)) sb.AppendLine($"skewness     {d.Skewness:0.0000}");
+                    if (!double.IsNaN(d.ExcessKurtosis)) sb.AppendLine($"kurtosis     {d.ExcessKurtosis:0.0000}");
+                    if (!double.IsNaN(d.CoefficientOfVariation)) sb.AppendLine($"CV           {d.CoefficientOfVariation:0.0000}");
                     sb.AppendLine();
-                    continue;
                 }
-                int missing = rows.Count - d.Count;
-                sb.AppendLine($"N (valid)    {d.Count:N0}");
-                sb.AppendLine(LT($"missing      {missing:N0}", $"결측/비수치   {missing:N0}"));
-                sb.AppendLine($"sum          {d.Sum:G6}");
-                sb.AppendLine($"mean         {d.Mean:G6}");
-                sb.AppendLine($"sd           {d.StandardDeviation:G6}");
-                sb.AppendLine($"se           {d.StandardError:G6}");
-                sb.AppendLine($"95% CI       [{d.ConfidenceIntervalLow:G6}, {d.ConfidenceIntervalHigh:G6}]");
-                sb.AppendLine($"min          {d.Min:G6}");
-                sb.AppendLine($"q1           {d.Q1:G6}");
-                sb.AppendLine($"median       {d.Median:G6}");
-                sb.AppendLine($"q3           {d.Q3:G6}");
-                sb.AppendLine($"max          {d.Max:G6}");
-                sb.AppendLine($"range        {d.Range:G6}");
-                sb.AppendLine($"IQR          {d.InterquartileRange:G6}");
-                if (d.Modes.Count > 0)
-                    sb.AppendLine(LT("mode         ", "최빈값        ").TrimEnd() + "  " +
-                        string.Join(", ", d.Modes.Take(3).Select(m => m.ToString("G6", CultureInfo.InvariantCulture))) +
-                        (d.Modes.Count > 3 ? " …" : "") + $"  (×{d.ModeFrequency})");
-                if (!double.IsNaN(d.Skewness)) sb.AppendLine($"skewness     {d.Skewness:0.0000}");
-                if (!double.IsNaN(d.ExcessKurtosis)) sb.AppendLine($"kurtosis     {d.ExcessKurtosis:0.0000}");
-                if (!double.IsNaN(d.CoefficientOfVariation)) sb.AppendLine($"CV           {d.CoefficientOfVariation:0.0000}");
-                sb.AppendLine();
-            }
-            ShowResultWithChart(LT("Descriptive Statistics", "기술통계"), sb.ToString(), truncated,
-                ChartKind.Histogram, new[] { cols[0] });
+                work.SetChartResult(LT("Descriptive Statistics", "기술통계"), sb.ToString(),
+                    ChartKind.Histogram, new[] { cols[0] });
+            });
         }
 
-        private void AnalyzeFrequency()
+        private async void AnalyzeFrequency()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Frequency Table", "빈도분석"), _palette);
             var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), 0);
             var topN = dlg.AddNumeric(LT("Max rows", "최대 행 수"), 1, 10_000, 100);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            int c = col.SelectedIndex;
-            var values = new List<string>(rows.Count);
-            foreach (var row in rows) values.Add(c < row.Length ? row[c] : string.Empty);
-
-            var t = CsvStatistics.FrequencyTable(values);
-            var sb = new StringBuilder();
-            sb.AppendLine(ColumnLabel(c));
-            sb.AppendLine(LT($"total {t.TotalCount:N0} · unique {t.UniqueCount:N0}", $"전체 {t.TotalCount:N0} · 고유값 {t.UniqueCount:N0}"));
-            sb.AppendLine(new string('─', 56));
-            sb.AppendLine(LT($"{"value",-24} {"count",8} {"%",8} {"cum%",8}", $"{"값",-24} {"빈도",8} {"%",8} {"누적%",8}"));
-            int limit = (int)topN.Value;
-            foreach (var e in t.Entries.Take(limit))
+            var colSelection = col.SelectedIndex;
+            var topNInput = topN.Value;
+            await RunAnalysisAsync(work =>
             {
-                string label = e.Value.Length == 0 ? LT("(empty)", "(빈값)") : e.Value;
-                if (label.Length > 24) label = label[..23] + "…";
-                sb.AppendLine($"{label,-24} {e.Count,8:N0} {e.Percent,7:0.00}% {e.CumulativePercent,7:0.00}%");
-            }
-            if (t.Entries.Count > limit)
-                sb.AppendLine(LT($"… {t.Entries.Count - limit:N0} more values", $"… 외 {t.Entries.Count - limit:N0}개 값"));
-            ShowResultWithChart(LT("Frequency Table", "빈도분석"), sb.ToString(), truncated,
-                ChartKind.Pareto, new[] { c });
+                var rows = work.Rows;
+                int c = colSelection;
+                var values = new List<string>(rows.Count);
+                foreach (var row in rows) values.Add(c < row.Length ? row[c] : string.Empty);
+
+                var t = CsvStatistics.FrequencyTable(values);
+                var sb = new StringBuilder();
+                sb.AppendLine(work.ColumnLabel(c));
+                sb.AppendLine(LT($"total {t.TotalCount:N0} · unique {t.UniqueCount:N0}", $"전체 {t.TotalCount:N0} · 고유값 {t.UniqueCount:N0}"));
+                sb.AppendLine(new string('─', 56));
+                sb.AppendLine(LT($"{"value",-24} {"count",8} {"%",8} {"cum%",8}", $"{"값",-24} {"빈도",8} {"%",8} {"누적%",8}"));
+                int limit = (int)topNInput;
+                foreach (var e in t.Entries.Take(limit))
+                {
+                    string label = e.Value.Length == 0 ? LT("(empty)", "(빈값)") : e.Value;
+                    if (label.Length > 24) label = label[..23] + "…";
+                    sb.AppendLine($"{label,-24} {e.Count,8:N0} {e.Percent,7:0.00}% {e.CumulativePercent,7:0.00}%");
+                }
+                if (t.Entries.Count > limit)
+                    sb.AppendLine(LT($"… {t.Entries.Count - limit:N0} more values", $"… 외 {t.Entries.Count - limit:N0}개 값"));
+                work.SetChartResult(LT("Frequency Table", "빈도분석"), sb.ToString(),
+                    ChartKind.Pareto, new[] { c });
+            });
         }
 
-        private void AnalyzeOneWayAnova()
+        private async void AnalyzeOneWayAnova()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("One-way ANOVA", "일원배치 분산분석"), _palette);
             var valueCol = dlg.AddCombo(LT("Value column", "값 컬럼"), ColumnLabels(), FirstNumericColumn());
             var groupCol = dlg.AddCombo(LT("Group column", "그룹 컬럼"), ColumnLabels(), 0);
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            int vc = valueCol.SelectedIndex, gc = groupCol.SelectedIndex;
-            var obs = new List<(string, double)>();
-            foreach (var row in rows)
-                if (vc < row.Length && gc < row.Length &&
-                    NumericAffix.TryParseNumber(row[vc], out double v))
-                    obs.Add((row[gc].Trim(), v));
+            var valueColSelection = valueCol.SelectedIndex;
+            var groupColSelection = groupCol.SelectedIndex;
+            await RunAnalysisAsync(work =>
+            {
+                var rows = work.Rows;
+                int vc = valueColSelection, gc = groupColSelection;
+                var obs = new List<(string, double)>();
+                foreach (var row in rows)
+                    if (vc < row.Length && gc < row.Length &&
+                        NumericAffix.TryParseNumber(row[vc], out double v))
+                        obs.Add((row[gc].Trim(), v));
 
-            var r = CsvStatistics.OneWayAnova(obs);
-            if (r is null) { ShowResult(LT("One-way ANOVA", "일원배치 분산분석"), LT("Need at least 2 groups with numeric values.", "수치 값을 가진 그룹이 2개 이상 필요합니다.")); return; }
+                var r = CsvStatistics.OneWayAnova(obs);
+                if (r is null) { work.SetResult(LT("One-way ANOVA", "일원배치 분산분석"), LT("Need at least 2 groups with numeric values.", "수치 값을 가진 그룹이 2개 이상 필요합니다.")); return; }
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"{ColumnLabel(vc)} by {ColumnLabel(gc)}");
-            sb.AppendLine(new string('─', 44));
-            foreach (var g in r.Groups.Take(30))
-                sb.AppendLine($"  {g.Name,-16} n={g.Count,-6:N0} mean={g.Mean:G6}  sd={g.StandardDeviation:G6}");
-            if (r.Groups.Count > 30) sb.AppendLine($"  … +{r.Groups.Count - 30:N0}");
-            sb.AppendLine();
-            sb.AppendLine($"F            {r.FStatistic:0.0000}");
-            sb.AppendLine($"df           {r.DfBetween}, {r.DfWithin}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"η² (eta²)    {r.EtaSquared:0.0000}");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResultWithChart(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(), truncated,
-                ChartKind.BoxPlot, new[] { vc, gc });
+                var sb = new StringBuilder();
+                sb.AppendLine($"{work.ColumnLabel(vc)} by {work.ColumnLabel(gc)}");
+                sb.AppendLine(new string('─', 44));
+                foreach (var g in r.Groups.Take(30))
+                    sb.AppendLine($"  {g.Name,-16} n={g.Count,-6:N0} mean={g.Mean:G6}  sd={g.StandardDeviation:G6}");
+                if (r.Groups.Count > 30) sb.AppendLine($"  … +{r.Groups.Count - 30:N0}");
+                sb.AppendLine();
+                sb.AppendLine($"F            {r.FStatistic:0.0000}");
+                sb.AppendLine($"df           {r.DfBetween}, {r.DfWithin}");
+                sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine($"η² (eta²)    {r.EtaSquared:0.0000}");
+                sb.AppendLine($"→ {r.Interpretation}");
+                work.SetChartResult(LT("One-way ANOVA", "일원배치 분산분석"), sb.ToString(),
+                    ChartKind.BoxPlot, new[] { vc, gc });
+            });
         }
 
-        private void AnalyzeNormality()
+        private async void AnalyzeNormality()
         {
-            if (_doc is null) return;
+            if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), _palette);
             var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), FirstNumericColumn());
             if (!dlg.ShowOk(this)) return;
 
-            var rows = GatherViewRows(out bool truncated);
-            var values = NumericColumn(rows, col.SelectedIndex);
-            // Royston p값 근사는 n≤5000에서 검증됨 → 초과 시 앞 5,000개만 사용하고 표기.
-            const int swCap = 5000;
-            bool capped = values.Count > swCap;
-            if (capped) values = values.Take(swCap).ToList();
-
-            var r = CsvStatistics.ShapiroWilk(values);
-            if (r is null)
+            var colSelection = col.SelectedIndex;
+            await RunAnalysisAsync(work =>
             {
-                ShowResult(LT("Normality Test", "정규성 검정"),
-                    LT("Need at least 3 distinct numeric values.", "서로 다른 수치 값이 3개 이상 필요합니다."));
-                return;
-            }
-            var sb = new StringBuilder();
-            sb.AppendLine(ColumnLabel(col.SelectedIndex));
-            sb.AppendLine(new string('─', 40));
-            sb.AppendLine($"n            {r.SampleSize:N0}" + (capped ? LT("  (first 5,000)", "  (처음 5,000개)") : ""));
-            sb.AppendLine($"W            {r.W:0.0000}");
-            sb.AppendLine($"p-value      {r.PValue:0.0000}");
-            sb.AppendLine($"→ {r.Interpretation}");
-            ShowResultWithChart(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(), truncated,
-                ChartKind.QqPlot, new[] { col.SelectedIndex });
+                var rows = work.Rows;
+                var values = NumericColumn(rows, colSelection);
+                // Royston p값 근사는 n≤5000에서 검증됨 → 초과 시 앞 5,000개만 사용하고 표기.
+                const int swCap = 5000;
+                bool capped = values.Count > swCap;
+                if (capped) values = values.Take(swCap).ToList();
+
+                var r = CsvStatistics.ShapiroWilk(values);
+                if (r is null)
+                {
+                    work.SetResult(LT("Normality Test", "정규성 검정"),
+                        LT("Need at least 3 distinct numeric values.", "서로 다른 수치 값이 3개 이상 필요합니다."));
+                    return;
+                }
+                var sb = new StringBuilder();
+                sb.AppendLine(work.ColumnLabel(colSelection));
+                sb.AppendLine(new string('─', 40));
+                sb.AppendLine($"n            {r.SampleSize:N0}" + (capped ? LT("  (first 5,000)", "  (처음 5,000개)") : ""));
+                sb.AppendLine($"W            {r.W:0.0000}");
+                sb.AppendLine($"p-value      {r.PValue:0.0000}");
+                sb.AppendLine($"→ {r.Interpretation}");
+                work.SetChartResult(LT("Normality Test (Shapiro-Wilk)", "정규성 검정(Shapiro-Wilk)"), sb.ToString(),
+                    ChartKind.QqPlot, new[] { colSelection });
+            });
         }
 
         // ---------------------------------------------------------------- 시각화 (이슈 #19)
@@ -2090,9 +2278,10 @@ namespace NanumCsvViewer
         /// 컨텍스트 객체는 창마다 복제한다 — 한 창의 "현재 뷰로 새로고침"이 다른 창의 데이터 소스를
         /// 몰래 바꾸지 않도록(스냅샷 List 자체는 어디서도 변경하지 않는 읽기 전용 계약).
         /// </summary>
-        private void OpenChartBuilder(ChartKind kind, int[]? presetCols = null, ChartContext? shareCtx = null)
+        private async void OpenChartBuilder(ChartKind kind, int[]? presetCols = null, ChartContext? shareCtx = null)
         {
-            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            if (_closing || _doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
 
             List<string[]> rows;
             if (shareCtx is not null)
@@ -2101,9 +2290,9 @@ namespace NanumCsvViewer
             }
             else
             {
-                rows = GatherViewRows(out bool truncated);
-                if (truncated)
-                    statusLabel.Text = LT($"Chart uses first {AnalysisRowCap:N0} rows", $"차트는 처음 {AnalysisRowCap:N0}행 사용");
+                var snapshot = await GatherAnalysisSnapshotAsync(doc);
+                if (snapshot is null || _closing || IsDisposed || !ReferenceEquals(doc, _doc)) return;
+                rows = snapshot.Rows;
             }
 
             var names = shareCtx?.ColumnNames;
@@ -2120,7 +2309,7 @@ namespace NanumCsvViewer
                 ColumnNames = names,
                 Summaries = shareCtx?.Summaries ?? _columnSummaries,
                 Palette = _palette,
-                RefreshRows = () => GatherViewRows(out _),
+                RefreshRowsAsync = () => GatherAnalysisSnapshotAsync(doc),
             };
             ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx);
 
@@ -2141,11 +2330,11 @@ namespace NanumCsvViewer
         }
 
         /// <summary>통계 결과창 + "차트로 보기" 버튼(이슈 #19 역방향 진입): 결과를 해당 차트로 이어본다.
-        /// truncated 접두는 ShowResult와 동일 규칙(단일 경로), 차트는 모달이 완전히 닫힌 뒤 연다.</summary>
-        private void ShowResultWithChart(string title, string body, bool truncated, ChartKind kind, int[]? presetCols)
+        /// 차트는 모달이 완전히 닫힌 뒤 연다.</summary>
+        private void ShowResultWithChart(string title, string body, ChartKind kind, int[]? presetCols)
         {
             bool requested;
-            using (var form = new ResultForm(title, PrefixTruncated(body, truncated), _palette,
+            using (var form = new ResultForm(title, body, _palette,
                        LT("View as Chart", "차트로 보기")))
             {
                 form.ShowDialog(this);
@@ -2156,15 +2345,28 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 피벗 빌더 (O · P)
 
-        private void OpenPivotBuilder(bool chartTab = false)
+        private PivotForm? _pivotForm;
+        private Task? _pivotDrainTask;
+
+        private async void OpenPivotBuilder(bool chartTab = false)
         {
-            if (_doc is null || !_doc.IndexingComplete) return;
-            var rows = GatherViewRows(out bool truncated);
-            if (truncated)
-                statusLabel.Text = LT($"Pivot uses first {AnalysisRowCap:N0} rows", $"피벗은 처음 {AnalysisRowCap:N0}행 사용");
+            if (_closing || _doc is null || !_doc.IndexingComplete || _busy) return;
+            var rows = _doc.SnapshotViewRows();
             using var form = new PivotForm(_doc.Header, _columnSummaries, rows, _palette, _theme);
+            _pivotForm = form;
             if (chartTab) form.SelectChartTab();
-            form.ShowDialog(this);
+            try { form.ShowDialog(this); }
+            finally
+            {
+                form.CancelReaders();
+                _pivotDrainTask = form.ReaderCompletion;
+                _pivotForm = null;
+                if (!_closing && !IsDisposed) SetBusy(true);
+                try { await _pivotDrainTask; }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { Debug.WriteLine($"[Pivot drain] {ex}"); }
+                finally { if (!_closing && !IsDisposed) SetBusy(false); }
+            }
         }
 
         private static List<int> CheckedIndexes(CheckedListBox list)

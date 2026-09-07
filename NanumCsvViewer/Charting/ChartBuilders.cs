@@ -298,6 +298,8 @@ namespace NanumCsvViewer.Charting
         public static PlotModel? CorrelationHeatmap(List<string[]> rows, IReadOnlyList<int> cols, IReadOnlyList<string> names)
         {
             if (cols.Count < 2) return null;
+            if (cols.Count > 128 || cols.Count * (long)rows.Count * sizeof(double) + cols.Count * (long)cols.Count * 64 > 128L * 1024 * 1024)
+                throw new AnalysisMemoryLimitException();
             var columns = new List<double[]>(cols.Count);
             foreach (int c in cols)
             {

@@ -230,6 +230,24 @@ namespace NanumCsvViewer.Csv
         /// <summary>그리드에 표시할 행 수(필터 적용 시 일치 행 수).</summary>
         public int DisplayRowCount => _viewMap?.Length ?? DataRowsAvailable;
 
+        /// <summary>Freeze the current row order without materializing CSV fields.
+        /// The caller must keep this document open while enumerating the snapshot.</summary>
+        public IReadOnlyList<string[]> SnapshotViewRows()
+            => new ViewRows(this, _viewMap?.ToArray(), DataRowsAvailable);
+
+        private sealed class ViewRows(VirtualCsvDocument document, int[]? map, int total) : IReadOnlyList<string[]>
+        {
+            public int Count => map?.Length ?? total;
+            public string[] this[int index] => index >= 0 && index < Count
+                ? document.GetDataRowUncached(map is null ? index : map[index])
+                : throw new ArgumentOutOfRangeException(nameof(index));
+            public IEnumerator<string[]> GetEnumerator()
+            {
+                for (int i = 0; i < Count; i++) yield return this[i];
+            }
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        }
+
         /// <summary>표시 행(viewIndex)을 데이터 행으로 변환. 뷰맵 스냅샷 1회 + 범위 가드(레이스 안전).</summary>
         private bool TryMapToDataRow(int viewIndex, out int dataRow)
         {
@@ -444,14 +462,24 @@ namespace NanumCsvViewer.Csv
         /// 한 컬럼의 고유값과 개수를 수집(헤더 필터·범주 선택용). 개수 내림차순→값 오름차순 정렬.
         /// 빈 값은 ""로 보존한다. 캐시를 오염시키지 않도록 uncached 경로로 스캔하며 취소 가능.
         /// </summary>
-        public IReadOnlyList<(string Value, int Count)> DistinctValues(int column, bool withinCurrentView, CancellationToken ct)
+        public IReadOnlyList<(string Value, int Count)> DistinctValues(int column, bool withinCurrentView, CancellationToken ct,
+            int maxDistinctValues = int.MaxValue, long maxValueCharacters = long.MaxValue)
         {
             var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            long characters = 0;
+            ct.ThrowIfCancellationRequested();
 
             void Tally(string[] row)
             {
                 string v = column >= 0 && column < row.Length ? row[column] : string.Empty;
-                counts[v] = counts.TryGetValue(v, out int c) ? c + 1 : 1;
+                if (counts.TryGetValue(v, out int c)) counts[v] = c + 1;
+                else
+                {
+                    if (counts.Count >= maxDistinctValues || v.Length > maxValueCharacters - characters)
+                        throw new DistinctValueLimitException();
+                    counts.Add(v, 1);
+                    characters += v.Length;
+                }
             }
 
             if (withinCurrentView && _viewMap is { } map)

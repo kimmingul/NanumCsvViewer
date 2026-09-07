@@ -36,7 +36,13 @@ namespace NanumCsvViewer
         private readonly List<(string Value, int Count)> _distinct = new();
         private readonly List<string> _visibleValues = new();
         private readonly Dictionary<string, bool> _checkState = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
         private CheckedListBox? _list;
+        private NumericUpDown _page = null!;
+        private Label _matchesLabel = null!;
+        private List<string> _matches = new();
+        private bool _updatingPage;
+        private const int PageSize = 200;
         private string BlankLabel => LT("(Blank)", "(빈 값)");
 
         public ColumnFilterPopup(string columnName, IReadOnlyList<(string Value, int Count)> distinct, SelectedValuesFilter? current, ThemePalette palette)
@@ -47,8 +53,11 @@ namespace NanumCsvViewer
 
             bool noFilter = current is null;
             var set = current is null ? null : new HashSet<string>(current.Values, StringComparer.Ordinal);
-            foreach (var (val, _) in _distinct)
+            foreach (var (val, count) in _distinct)
+            {
                 _checkState[val] = noFilter || (val.Length == 0 ? current!.IncludeBlanks : set!.Contains(val));
+                _counts[val] = count;
+            }
 
             BuildCategorical();
         }
@@ -133,6 +142,13 @@ namespace NanumCsvViewer
                     _checkState[_visibleValues[e.Index]] = e.NewValue == CheckState.Checked;
             };
             AddRow(_list, SizeType.Percent, 100);
+            var pages = new FlowLayoutPanel { WrapContents = false, Height = 28 };
+            _page = new NumericUpDown { Minimum = 1, Maximum = 1, Value = 1, Width = 70 };
+            _matchesLabel = new Label { AutoSize = true };
+            pages.Controls.Add(_page);
+            pages.Controls.Add(_matchesLabel);
+            AddRow(pages, SizeType.Absolute, 28);
+            _page.ValueChanged += (_, _) => { if (!_updatingPage) PopulatePage(); };
 
             var selectRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = _palette.Surface, Padding = new Padding(6, 2, 6, 2) };
             selectRow.Controls.Add(FlatButton(LT("Select All", "전체 선택"), (_, _) => SetAllChecks(true)));
@@ -154,24 +170,44 @@ namespace NanumCsvViewer
 
         private void Populate(string search)
         {
+            _matches = _distinct.Where(d => search.Length == 0 ||
+                (d.Value.Length == 0 ? BlankLabel : d.Value).Contains(search, StringComparison.OrdinalIgnoreCase))
+                .Select(d => d.Value).ToList();
+            _updatingPage = true;
+            _page.Value = 1;
+            _page.Maximum = Math.Max(1, (_matches.Count + PageSize - 1) / PageSize);
+            _updatingPage = false;
+            _matchesLabel.Text = LT($"/ {_page.Maximum:N0} · {_matches.Count:N0} values", $"/ {_page.Maximum:N0} · {_matches.Count:N0}개 값");
+            PopulatePage();
+        }
+
+        private void PopulatePage()
+        {
             if (_list is null) return;
             _list.BeginUpdate();
-            _list.Items.Clear();
-            _visibleValues.Clear();
-            foreach (var (val, count) in _distinct)
+            try
             {
-                string label = val.Length == 0 ? BlankLabel : val;
-                if (search.Length > 0 && label.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                int idx = _list.Items.Add(count > 0 ? $"{label}  ({count:N0})" : label);
-                _visibleValues.Add(val);
-                _list.SetItemChecked(idx, _checkState.TryGetValue(val, out bool b) && b);
+                _list.Items.Clear();
+                _visibleValues.Clear();
+                // Native CheckedListBox insertion is expensive; preserve selection in
+                // the model and create only the page's controls, never all categories.
+                foreach (var val in _matches.Skip(((int)_page.Value - 1) * PageSize).Take(PageSize))
+                {
+                    string label = val.Length == 0 ? BlankLabel : val;
+                    if (label.Length > 300) label = label[..300] + "…";
+                    int count = _counts[val];
+                    int idx = _list.Items.Add(count > 0 ? $"{label}  ({count:N0})" : label);
+                    _visibleValues.Add(val);
+                    _list.SetItemChecked(idx, _checkState.TryGetValue(val, out bool b) && b);
+                }
             }
-            _list.EndUpdate();
+            finally { _list.EndUpdate(); }
         }
 
         private void SetAllChecks(bool value)
         {
-            foreach (var v in _visibleValues) _checkState[v] = value;
+            // Select/clear affects every search match, including other pages.
+            foreach (var v in _matches) _checkState[v] = value;
             for (int i = 0; i < _list!.Items.Count; i++) _list.SetItemChecked(i, value);
         }
 

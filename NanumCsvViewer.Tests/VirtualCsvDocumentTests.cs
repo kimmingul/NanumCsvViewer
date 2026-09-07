@@ -26,6 +26,34 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public async Task Distinct_candidate_budget_rejects_incomplete_lists_but_not_repeated_values()
+        {
+            using var doc = await OpenIndexedAsync("v\na\na\nb\nc\n");
+            Assert.Throws<DistinctValueLimitException>(() => doc.DistinctValues(0, false, default, maxDistinctValues: 2));
+            Assert.Throws<DistinctValueLimitException>(() => doc.DistinctValues(0, false, default, maxValueCharacters: 2));
+            var values = doc.DistinctValues(0, false, default, maxDistinctValues: 3, maxValueCharacters: 3);
+            Assert.Equal(3, values.Count);
+            Assert.Equal(("a", 2), values[0]);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            Assert.Throws<OperationCanceledException>(() => doc.DistinctValues(0, false, cts.Token));
+        }
+
+        [Fact]
+        public async Task Snapshot_preserves_filtered_row_order_after_view_changes()
+        {
+            using var doc = await OpenIndexedAsync("v\nc\nb\na\n");
+            await doc.ApplyFilterAsync(r => r[0] != "b", null, default);
+            var snapshot = doc.SnapshotViewRows();
+            doc.ClearView();
+            Assert.Equal(2, snapshot.Count);
+            Assert.Equal(new[] { "c", "a" }, snapshot.Select(r => r[0]));
+            Assert.Equal(3, doc.DisplayRowCount);
+            Assert.Throws<ArgumentOutOfRangeException>(() => snapshot[-1]);
+            Assert.Throws<ArgumentOutOfRangeException>(() => snapshot[2]);
+        }
+
+        [Fact]
         public async Task Reads_header_and_rows()
         {
             using var doc = await OpenIndexedAsync("name,age,city\nAlice,30,NY\nBob,25,LA\n");

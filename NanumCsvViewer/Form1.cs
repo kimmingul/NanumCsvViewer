@@ -24,6 +24,10 @@ namespace NanumCsvViewer
         private readonly System.Windows.Forms.Timer _detailTimer;
 
         private bool _busy;
+        private bool _closing;
+        private int _drainDepth;
+        private bool _closeReady;
+        private Task? _shutdownTask;
         private bool _indexing;
         private bool _userResizedRowHeader;   // 사용자가 행번호 칸 폭을 직접 조절하면 자동 조정 중단
         private bool _settingRowHeaderWidth;   // 프로그램이 폭을 설정하는 중(사용자 조작과 구분)
@@ -290,11 +294,13 @@ namespace NanumCsvViewer
 
         private async Task OpenFileAsync(string path)
         {
+            if (_closing) return;
             try
             {
                 // 진행 중인 인덱싱/필터/정렬/검색을 취소하고 완료까지 기다린 뒤에야 옛 문서를 해제한다.
                 // (검색 스레드가 해제된 _doc/디스크 핸들을 참조해 NRE/ObjectDisposedException 나는 것을 방지)
                 await CancelAndDrainAsync();
+                if (_closing) return;
                 DeleteCurrentIndexIfRequested(); // 이전 파일을 닫기 전 캐시 정리(설정 시)
                 var old = _doc;
                 _doc = null;
@@ -1190,6 +1196,7 @@ namespace NanumCsvViewer
 
         private void SetBusy(bool busy)
         {
+            busy |= _closing || _drainDepth > 0;
             _busy = busy;
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
             UpdateFeatureState();
@@ -1270,25 +1277,41 @@ namespace NanumCsvViewer
             _opCts?.Cancel();
             _findCts?.Cancel();
             _qualityCts?.Cancel(); // 품질 스캔(이슈 #26)도 문서 교체 전에 중단
+            _facetCts?.Cancel();
+            _analysisCts?.Cancel();
+            _pivotForm?.CancelReaders();
         }
 
         // 모든 백그라운드 작업을 취소하고 완료될 때까지 대기. 옛 문서를 Dispose하기 전에 호출해야
         // 백그라운드 스레드가 해제된 리소스를 건드리지 않는다.
         private async Task CancelAndDrainAsync()
         {
-            CancelAll();
-            var tasks = new List<Task>(4);
-            if (_indexTask is not null) tasks.Add(_indexTask);
-            if (_opTask is not null) tasks.Add(_opTask);
-            if (_findTask is not null) tasks.Add(_findTask);
-            if (_qualityTask is not null) tasks.Add(_qualityTask); // 스캔이 옛 문서를 읽는 중일 수 있음
-            if (tasks.Count > 0)
+            _drainDepth++;
+            SetBusy(true);
+            try
             {
-                try { await Task.WhenAll(tasks); }
-                catch { /* 취소/오류는 각 메서드가 자체 처리하므로 여기선 무시 */ }
+                CancelAll();
+                var tasks = new List<Task>(4);
+                if (_indexTask is not null) tasks.Add(_indexTask);
+                if (_opTask is not null) tasks.Add(_opTask);
+                if (_findTask is not null) tasks.Add(_findTask);
+                if (_qualityTask is not null) tasks.Add(_qualityTask); // 스캔이 옛 문서를 읽는 중일 수 있음
+                if (_facetTask is not null) tasks.Add(_facetTask);
+                if (_analysisTask is not null) tasks.Add(_analysisTask);
+                if (_pivotForm is not null) tasks.Add(_pivotForm.ReaderCompletion);
+                if (_pivotDrainTask is not null) tasks.Add(_pivotDrainTask);
+                if (tasks.Count > 0)
+                {
+                    try { await Task.WhenAll(tasks); }
+                    catch { /* 취소/오류는 각 메서드가 자체 처리하므로 여기선 무시 */ }
+                }
+                _indexTask = _opTask = _findTask = null;
+                _qualityTask = null;
+                _facetTask = null;
+                _analysisTask = null;
+                _pivotDrainTask = null;
             }
-            _indexTask = _opTask = _findTask = null;
-            _qualityTask = null;
+            finally { _drainDepth--; if (!IsDisposed) SetBusy(false); }
         }
 
         private static string FormatBytes(long bytes)
@@ -1329,6 +1352,29 @@ namespace NanumCsvViewer
             _detailTimer?.Dispose();
             _rowCountTimer?.Dispose();
             base.OnFormClosed(e);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (_closeReady) { base.OnFormClosing(e); return; }
+            if (_closing) { e.Cancel = true; return; }
+            base.OnFormClosing(e);
+            if (e.Cancel) return;
+            e.Cancel = true;
+            _closing = true;
+            Enabled = false;
+            _shutdownTask = FinishCloseAsync();
+        }
+
+        private async Task FinishCloseAsync()
+        {
+            // Leave the initial FormClosing callback before closing again, even
+            // when there are no workers. The message loop stays alive while readers drain.
+            await Task.Yield();
+            await CancelAndDrainAsync();
+            if (IsDisposed) return;
+            _closeReady = true;
+            Close();
         }
     }
 }

@@ -88,18 +88,24 @@ namespace NanumCsvViewer.Csv
     {
         public IReadOnlyList<string> Row { get; }
         public IReadOnlyList<string> Column { get; }
-        private readonly string _composite;
+        private readonly int _hashCode;
 
         public PivotCellKey(IReadOnlyList<string> row, IReadOnlyList<string> column)
         {
             Row = row;
             Column = column;
-            _composite = string.Join('', row) + "" + string.Join('', column);
+            var hash = new HashCode();
+            hash.Add(row.Count);
+            foreach (var part in row) hash.Add(part, StringComparer.Ordinal);
+            hash.Add(column.Count);
+            foreach (var part in column) hash.Add(part, StringComparer.Ordinal);
+            _hashCode = hash.ToHashCode();
         }
 
-        public bool Equals(PivotCellKey? other) => other is not null && _composite == other._composite;
+        public bool Equals(PivotCellKey? other) => other is not null &&
+            Row.SequenceEqual(other.Row) && Column.SequenceEqual(other.Column);
         public override bool Equals(object? obj) => Equals(obj as PivotCellKey);
-        public override int GetHashCode() => _composite.GetHashCode();
+        public override int GetHashCode() => _hashCode;
     }
 
     public sealed class PivotTableResult
@@ -127,18 +133,27 @@ namespace NanumCsvViewer.Csv
         };
 
         public static IReadOnlyList<DuplicateGroup> FindDuplicates(
-            IReadOnlyList<(string[] Fields, long SourceRow)> rows, IReadOnlyList<int> columns)
+            IReadOnlyList<(string[] Fields, long SourceRow)> rows, IReadOnlyList<int> columns,
+            CancellationToken cancellation = default, long memoryBudgetBytes = 128L * 1024 * 1024)
         {
-            var groups = new Dictionary<string, (List<string> Key, List<long> Rows)>();
+            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            cancellation.ThrowIfCancellationRequested();
+            long estimatedBytes = 0;
+            var groups = new Dictionary<PivotCellKey, (List<string> Key, List<long> Rows)>();
             foreach (var row in rows)
             {
+                cancellation.ThrowIfCancellationRequested();
                 var keyParts = columns.Select(c => c < row.Fields.Length ? row.Fields[c] : "").ToList();
-                string composite = string.Join('', keyParts);
+                var composite = new PivotCellKey(keyParts, Array.Empty<string>());
                 if (!groups.TryGetValue(composite, out var entry))
                 {
+                    estimatedBytes += 256L + keyParts.Sum(v => 64L + v.Length * 2L);
+                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
                     entry = (keyParts, new List<long>());
                     groups[composite] = entry;
                 }
+                estimatedBytes += 16;
+                if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
                 entry.Rows.Add(row.SourceRow);
             }
 
@@ -156,39 +171,48 @@ namespace NanumCsvViewer.Csv
 
         public static GroupByResult GroupBy(
             IReadOnlyList<string[]> rows, IReadOnlyList<int> groupColumns, int valueColumn,
-            IReadOnlyList<AggregationFunction> functions)
+            IReadOnlyList<AggregationFunction> functions, CancellationToken cancellation = default,
+            long memoryBudgetBytes = 128L * 1024 * 1024)
         {
-            var groups = new Dictionary<string, (List<string> Key, List<string> Values)>();
-            foreach (var row in rows)
+            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            cancellation.ThrowIfCancellationRequested();
+            var uniqueFunctions = functions.Distinct().ToArray();
+            var groups = new Dictionary<PivotCellKey, PivotAccumulator[]>();
+            long estimatedBytes = 0;
+            for (int i = 0; i < rows.Count; i++)
             {
-                var keyParts = groupColumns.Select(c => c < row.Length ? row[c] : "").ToList();
-                string value = valueColumn < row.Length ? row[valueColumn] : "";
-                string composite = string.Join('', keyParts);
-                if (!groups.TryGetValue(composite, out var entry))
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                var row = rows[i];
+                var parts = groupColumns.Select(c => c >= 0 && c < row.Length ? row[c] : "").ToArray();
+                var key = new PivotCellKey(parts, Array.Empty<string>());
+                if (!groups.TryGetValue(key, out var accumulators))
                 {
-                    entry = (keyParts, new List<string>());
-                    groups[composite] = entry;
+                    estimatedBytes += 256L + parts.Sum(v => 64L + v.Length * 2L) + uniqueFunctions.Length * 128L;
+                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    accumulators = uniqueFunctions.Select(f => new PivotAccumulator(f)).ToArray();
+                    groups.Add(key, accumulators);
                 }
-                entry.Values.Add(value);
+                string value = valueColumn >= 0 && valueColumn < row.Length ? row[valueColumn] : "";
+                foreach (var accumulator in accumulators)
+                {
+                    estimatedBytes += accumulator.RetainedBytesFor(value);
+                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    accumulator.Add(value);
+                }
             }
-
-            var resultRows = groups.Values.Select(g =>
+            var resultRows = new List<GroupByRow>(groups.Count);
+            foreach (var (key, accumulators) in groups)
             {
-                var numbers = ParseNumbers(g.Values);
+                cancellation.ThrowIfCancellationRequested();
                 var output = new Dictionary<AggregationFunction, double>();
-                foreach (var fn in functions)
-                    output[fn] = Aggregate(fn, g.Values, numbers);
-                return new GroupByRow { Key = g.Key, Values = output };
-            })
-            .OrderBy(r => string.Join('', r.Key), StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
+                for (int i = 0; i < uniqueFunctions.Length; i++) output[uniqueFunctions[i]] = accumulators[i].Result();
+                resultRows.Add(new GroupByRow { Key = key.Row, Values = output });
+            }
+            resultRows.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(string.Join('\u001f', a.Key), string.Join('\u001f', b.Key)));
             return new GroupByResult
             {
-                GroupColumns = groupColumns.ToArray(),
-                ValueColumn = valueColumn,
-                Functions = functions.ToArray(),
-                Rows = resultRows
+                GroupColumns = groupColumns.ToArray(), ValueColumn = valueColumn,
+                Functions = functions.ToArray(), Rows = resultRows
             };
         }
 
@@ -266,15 +290,19 @@ namespace NanumCsvViewer.Csv
             IReadOnlyList<string>? rowColumnNames = null,
             IReadOnlyList<PivotFilter>? filters = null,
             IReadOnlyDictionary<int, DateBinPeriod>? dateGroupings = null,
-            CancellationToken cancellation = default)
+            CancellationToken cancellation = default,
+            long memoryBudgetBytes = 256L * 1024 * 1024)
         {
+            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            cancellation.ThrowIfCancellationRequested();
+            long estimatedBytes = 0;
             dateGroupings ??= new Dictionary<int, DateBinPeriod>();
             var activeFilters = (filters ?? Array.Empty<PivotFilter>()).Where(f => f.SelectedValue is not null).ToList();
 
-            var raw = new Dictionary<PivotCellKey, List<string>>();
-            var rowKeySet = new HashSet<string>();
+            var raw = new Dictionary<PivotCellKey, PivotAccumulator>();
+            var rowKeySet = new HashSet<PivotCellKey>();
             var rowKeyList = new List<string[]>();
-            var columnKeySet = new HashSet<string>();
+            var columnKeySet = new HashSet<PivotCellKey>();
             var columnKeyList = new List<string[]>();
 
             int index = 0;
@@ -287,12 +315,22 @@ namespace NanumCsvViewer.Csv
                 var columnKey = columnColumns.Select(c => PivotKeyValue(row, c, dateGroupings)).ToArray();
                 string value = valueColumn < row.Length ? row[valueColumn] : "";
 
-                if (rowKeySet.Add(string.Join('', rowKey))) rowKeyList.Add(rowKey);
-                if (columnKeySet.Add(string.Join('', columnKey))) columnKeyList.Add(columnKey);
+                if (rowKeySet.Add(new PivotCellKey(rowKey, Array.Empty<string>()))) rowKeyList.Add(rowKey);
+                if (columnKeySet.Add(new PivotCellKey(Array.Empty<string>(), columnKey))) columnKeyList.Add(columnKey);
 
                 var cellKey = new PivotCellKey(rowKey, columnKey);
-                if (!raw.TryGetValue(cellKey, out var list)) { list = new List<string>(); raw[cellKey] = list; }
-                list.Add(value);
+                if (!raw.TryGetValue(cellKey, out var accumulator))
+                {
+                    // Include dictionary growth, both axis indexes, key arrays and
+                    // retained strings. Fail before expansion, never return partial totals.
+                    estimatedBytes += 512L + (rowKey.Length + columnKey.Length) * 64L +
+                        rowKey.Sum(v => 2L * v.Length) + columnKey.Sum(v => 2L * v.Length);
+                    if (estimatedBytes > memoryBudgetBytes) throw new PivotMemoryLimitException();
+                    raw[cellKey] = accumulator = new PivotAccumulator(function);
+                }
+                estimatedBytes += accumulator.RetainedBytesFor(value);
+                if (estimatedBytes > memoryBudgetBytes) throw new PivotMemoryLimitException();
+                accumulator.Add(value);
             }
 
             rowKeyList.Sort((a, b) => string.CompareOrdinal(string.Join('', a), string.Join('', b)));
@@ -303,8 +341,7 @@ namespace NanumCsvViewer.Csv
             foreach (var kv in raw)
             {
                 if ((i++ & 0x3FFF) == 0) cancellation.ThrowIfCancellationRequested();
-                var numbers = ParseNumbers(kv.Value);
-                values[kv.Key] = Aggregate(function, kv.Value, numbers);
+                values[kv.Key] = kv.Value.Result();
             }
 
             return new PivotTableResult
@@ -318,6 +355,54 @@ namespace NanumCsvViewer.Csv
                 ColumnKeys = columnKeyList,
                 Values = values
             };
+        }
+
+        // Only median and exact distinct count retain individual values. Other
+        // aggregates use constant space per observed cell, independent of row count.
+        private sealed class PivotAccumulator(AggregationFunction function)
+        {
+            private long _count, _numericCount;
+            private double _sum, _mean, _m2, _min = double.PositiveInfinity, _max = double.NegativeInfinity;
+            private readonly List<double>? _median = function == AggregationFunction.Median ? new() : null;
+            private readonly HashSet<string>? _unique = function == AggregationFunction.UniqueCount ? new(StringComparer.Ordinal) : null;
+
+            public long RetainedBytesFor(string value) => _unique is not null
+                ? (_unique.Contains(value) ? 0 : 80L + value.Length * 2L)
+                : _median is not null ? 24 : 0;
+
+            public void Add(string value)
+            {
+                _count++;
+                if (function == AggregationFunction.Count) return;
+                if (_unique is not null) { _unique.Add(value); return; }
+                if (!double.TryParse(value.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double number)) return;
+                _numericCount++;
+                _sum += number;
+                _min = Math.Min(_min, number);
+                // Match Enumerable.Max<double>: a finite value supersedes NaN;
+                // NaN is retained only if every parsed value is NaN.
+                if (_numericCount == 1 || double.IsNaN(_max) || number > _max) _max = number;
+                double delta = number - _mean;
+                _mean += delta / _numericCount;
+                _m2 += delta * (number - _mean);
+                _median?.Add(number);
+            }
+
+            public double Result()
+            {
+                if (_median is not null) { _median.Sort(); return Percentile(_median.ToArray(), 0.5); }
+                return function switch
+                {
+                    AggregationFunction.Count => _count,
+                    AggregationFunction.UniqueCount => _unique!.Count,
+                    AggregationFunction.Sum => _sum,
+                    AggregationFunction.Mean => _numericCount == 0 ? 0 : _sum / _numericCount,
+                    AggregationFunction.Min => _numericCount == 0 ? 0 : _min,
+                    AggregationFunction.Max => _numericCount == 0 ? 0 : _max,
+                    AggregationFunction.StandardDeviation => _numericCount == 0 ? 0 : Math.Sqrt(Math.Max(0, _m2 / _numericCount)),
+                    _ => 0
+                };
+            }
         }
 
         public static string PivotKeyValue(string[] row, int column, IReadOnlyDictionary<int, DateBinPeriod> dateGroupings)
@@ -345,50 +430,6 @@ namespace NanumCsvViewer.Csv
         }
 
         private static bool IsNull(string value) => NullTokens.Contains(value);
-
-        private static List<double> ParseNumbers(IReadOnlyList<string> values)
-        {
-            var numbers = new List<double>(values.Count);
-            foreach (var v in values)
-                if (double.TryParse(v.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
-                    numbers.Add(d);
-            return numbers;
-        }
-
-        private static double Aggregate(AggregationFunction function, IReadOnlyList<string> rawValues, List<double> numbers)
-        {
-            switch (function)
-            {
-                case AggregationFunction.Count:
-                    return rawValues.Count;
-                case AggregationFunction.Sum:
-                    return numbers.Sum();
-                case AggregationFunction.Mean:
-                    return numbers.Count == 0 ? 0 : numbers.Sum() / numbers.Count;
-                case AggregationFunction.Median:
-                {
-                    var sorted = numbers.ToArray();
-                    Array.Sort(sorted);
-                    return Percentile(sorted, 0.5);
-                }
-                case AggregationFunction.Min:
-                    return numbers.Count == 0 ? 0 : numbers.Min();
-                case AggregationFunction.Max:
-                    return numbers.Count == 0 ? 0 : numbers.Max();
-                case AggregationFunction.UniqueCount:
-                    return new HashSet<string>(rawValues).Count;
-                case AggregationFunction.StandardDeviation:
-                {
-                    if (numbers.Count == 0) return 0;
-                    double mean = numbers.Sum() / numbers.Count;
-                    double acc = 0;
-                    foreach (double v in numbers) acc += (v - mean) * (v - mean);
-                    return Math.Sqrt(acc / numbers.Count);
-                }
-                default:
-                    return 0;
-            }
-        }
 
         public static double Percentile(double[] sorted, double p)
         {

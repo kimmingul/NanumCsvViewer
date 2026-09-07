@@ -13,7 +13,7 @@ namespace NanumCsvViewer
         public required ColumnSummary[] Summaries { get; init; }
         public required ThemePalette Palette { get; init; }
         /// <summary>현재(필터·정렬) 뷰를 다시 수집(새로고침 버튼).</summary>
-        public Func<List<string[]>>? RefreshRows { get; init; }
+        public Func<Task<AnalysisSnapshot?>>? RefreshRowsAsync { get; init; }
         /// <summary>새 차트 창 열기(드릴다운) — Form1이 생성·수명 관리. 자기참조 클로저라 생성 후 주입.</summary>
         public Action<ChartKind, int[]?>? OpenChart { get; set; }
     }
@@ -136,7 +136,7 @@ namespace NanumCsvViewer
             right.Controls.Add(bottom);
             bottom.Controls.Add(MakeButton(LT("Copy", "복사"), (_, _) => CopyToClipboard()));
             bottom.Controls.Add(MakeButton(LT("Save PNG…", "PNG 저장…"), (_, _) => SavePng()));
-            if (_ctx.RefreshRows is not null)
+            if (_ctx.RefreshRowsAsync is not null)
                 bottom.Controls.Add(MakeButton(LT("Refresh from View", "현재 뷰로 새로고침"), (_, _) => RefreshFromView()));
 
             _plot.Dock = DockStyle.Fill;
@@ -381,23 +381,54 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 모델 구축
 
+        private Func<PlotModel?>? _pendingModel;
+        private Task? _modelTask;
+
         private void RebuildModel()
         {
-            if (_building) return;
+            if (_building || IsDisposed) return;
+            _pendingModel = CaptureModelBuilder();
+            if (_modelTask is { IsCompleted: false }) return;
+            _modelTask = BuildModelsAsync();
+        }
+
+        private async Task BuildModelsAsync()
+        {
             Cursor = Cursors.WaitCursor;
+            _plot.Enabled = false;
             try
             {
-                var model = BuildModelCore();
-                _plot.SetModel(model, _ctx.Palette);
-                RebuildBadges(model);
+                while (_pendingModel is { } build && !IsDisposed)
+                {
+                    _pendingModel = null;
+                    try
+                    {
+                        var model = await Task.Run(build);
+                        if (IsDisposed || _pendingModel is not null) continue;
+                        _plot.SetModel(model, _ctx.Palette);
+                        RebuildBadges(model);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (IsDisposed || _pendingModel is not null) continue;
+                        _plot.SetModel(null, _ctx.Palette);
+                        RebuildBadges(null);
+                        _badgeStrip.Controls.Add(new Label { AutoSize = true,
+                            Text = ex is AnalysisMemoryLimitException
+                                ? LT("This chart exceeds the calculation or display budget. Filter rows or select fewer columns (up to 128 for a heatmap).",
+                                    "차트의 계산·표시 예산을 초과했습니다. 행 필터를 적용하거나 컬럼 수를 줄이세요(히트맵 최대 128개).")
+                                : ex.Message, ForeColor = _ctx.Palette.Text });
+                    }
+                }
             }
             finally
             {
-                Cursor = Cursors.Default;
+                _pendingModel = null;
+                if (!IsDisposed) { Cursor = Cursors.Default; _plot.Enabled = true; }
             }
         }
 
-        private PlotModel? BuildModelCore()
+        private Func<PlotModel?> CaptureModelBuilder()
         {
             var rows = _ctx.Rows;
             switch (_kind)
@@ -405,23 +436,25 @@ namespace NanumCsvViewer
                 case ChartKind.Histogram:
                 {
                     int c = SlotCol(0);
-                    if (c < 0) return null;
+                    if (c < 0) return () => null;
                     int bins = (int)_binsInput.Value;
-                    return ChartBuilders.Histogram(rows, c, Name0(c),
-                        new ChartBuilders.HistogramOptions(bins == 0 ? null : bins, _normalCheck.Checked, _kdeCheck.Checked));
+                    bool normal = _normalCheck.Checked, kde = _kdeCheck.Checked;
+                    return () => ChartBuilders.Histogram(rows, c, Name0(c),
+                        new ChartBuilders.HistogramOptions(bins == 0 ? null : bins, normal, kde));
                 }
                 case ChartKind.BoxPlot:
                 {
                     int v = SlotCol(0), g = SlotCol(1);
-                    if (v < 0) return null;
-                    return ChartBuilders.BoxPlot(rows, v, Name0(v), g, g >= 0 ? Name0(g) : "");
+                    if (v < 0) return () => null;
+                    return () => ChartBuilders.BoxPlot(rows, v, Name0(v), g, g >= 0 ? Name0(g) : "");
                 }
                 case ChartKind.Scatter:
                 {
                     int x = SlotCol(0), y = SlotCol(1);
-                    if (x < 0 || y < 0) return null;
-                    return ChartBuilders.Scatter(rows, x, Name0(x), y, Name0(y),
-                        new ChartBuilders.ScatterOptions(_regressionCheck.Checked));
+                    if (x < 0 || y < 0) return () => null;
+                    bool regression = _regressionCheck.Checked;
+                    return () => ChartBuilders.Scatter(rows, x, Name0(x), y, Name0(y),
+                        new ChartBuilders.ScatterOptions(regression));
                 }
                 case ChartKind.CorrelationHeatmap:
                 {
@@ -430,28 +463,30 @@ namespace NanumCsvViewer
                     foreach (var item in _heatmapColumns.CheckedItems)
                         if (item is ColItem it) { cols.Add(it.Index); names.Add(it.Name); }
                     _heatmapColIndexes = cols.ToArray();
-                    return ChartBuilders.CorrelationHeatmap(rows, cols, names);
+                    return () => ChartBuilders.CorrelationHeatmap(rows, cols, names);
                 }
                 case ChartKind.QqPlot:
                 {
                     int c = SlotCol(0);
-                    return c < 0 ? null : ChartBuilders.QqPlot(rows, c, Name0(c));
+                    return () => c < 0 ? null : ChartBuilders.QqPlot(rows, c, Name0(c));
                 }
                 case ChartKind.TimeSeries:
                 {
                     int d = SlotCol(0), v = SlotCol(1);
-                    if (d < 0) return null;
-                    return ChartBuilders.TimeSeries(rows, d, Name0(d), v >= 0 ? Name0(v) : null,
-                        new ChartBuilders.TimeSeriesOptions((DateBinPeriod)_periodCombo.SelectedIndex,
-                            (int)_maInput.Value, v >= 0 ? v : null));
+                    if (d < 0) return () => null;
+                    var period = (DateBinPeriod)_periodCombo.SelectedIndex;
+                    int movingAverage = (int)_maInput.Value;
+                    return () => ChartBuilders.TimeSeries(rows, d, Name0(d), v >= 0 ? Name0(v) : null,
+                        new ChartBuilders.TimeSeriesOptions(period,
+                            movingAverage, v >= 0 ? v : null));
                 }
                 case ChartKind.Pareto:
                 {
                     int c = SlotCol(0);
-                    return c < 0 ? null : ChartBuilders.Pareto(rows, c, Name0(c));
+                    return () => c < 0 ? null : ChartBuilders.Pareto(rows, c, Name0(c));
                 }
                 default:
-                    return null;
+                    return () => null;
             }
         }
 
@@ -460,7 +495,9 @@ namespace NanumCsvViewer
 
         private void RebuildBadges(PlotModel? model)
         {
+            var previous = _badgeStrip.Controls.Cast<Control>().ToArray();
             _badgeStrip.Controls.Clear();
+            foreach (var control in previous) control.Dispose();
             if (model is null) return;
             foreach (var badge in model.Badges)
             {
@@ -495,18 +532,28 @@ namespace NanumCsvViewer
             _ctx.OpenChart?.Invoke(ChartKind.Scatter, new[] { _heatmapColIndexes[col], _heatmapColIndexes[row] });
         }
 
-        private void RefreshFromView()
+        private bool _refreshingRows;
+
+        private async void RefreshFromView()
         {
-            if (_ctx.RefreshRows is null) return;
+            if (_ctx.RefreshRowsAsync is null || _refreshingRows || IsDisposed) return;
+            _refreshingRows = true;
             Cursor = Cursors.WaitCursor;
             try
             {
-                _ctx.Rows = _ctx.RefreshRows();
+                var snapshot = await _ctx.RefreshRowsAsync();
+                if (IsDisposed || snapshot is null) return;
+                _ctx.Rows = snapshot.Rows;
                 RebuildModel();
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed) MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally
             {
-                Cursor = Cursors.Default;
+                _refreshingRows = false;
+                if (!IsDisposed) Cursor = Cursors.Default;
             }
         }
 
