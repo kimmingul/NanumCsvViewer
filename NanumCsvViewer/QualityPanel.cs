@@ -31,6 +31,7 @@ namespace NanumCsvViewer
             QualityCheckKind.RaggedRows => LT("Field count mismatch", "필드 수 불일치"),
             QualityCheckKind.KeyUniqueness => LT("Key uniqueness", "키 유일성"),
             QualityCheckKind.Rule => LT("Rule", "규칙"),
+            QualityCheckKind.ForeignKeyOrphan => LT("Referential integrity", "참조 무결성"),
             _ => k.ToString(),
         };
 
@@ -93,6 +94,12 @@ namespace NanumCsvViewer
                     return f.ViolationCount == 0
                         ? LT("passed (0 violations)", "통과(위반 0건)")
                         : LT("e.g. ", "예: ") + string.Join("; ", f.Examples.Take(2).Select(e => e.Value));
+                case QualityCheckKind.ForeignKeyOrphan:
+                {
+                    // SkippedRows = 건너뛴 빈 키 건수. 필터는 고아 행만 매칭한다.
+                    string ex = string.Join(", ", f.Examples.Take(3).Select(e => $"{e.Value}@{e.SourceRow}"));
+                    return LT($"{f.SkippedRows:N0} blank key(s) skipped · e.g. ", $"빈 키 {f.SkippedRows:N0}건 제외 · 예: ") + ex;
+                }
                 default:
                     return "";
             }

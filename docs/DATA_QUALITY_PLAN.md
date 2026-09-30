@@ -33,6 +33,12 @@ Kahn 3차원은 UI에 노출하지 않고 발견 항목의 내부 태그로만 �
 품질 보고서 내보내기(HTML/MD/JSON=스냅샷). 엔진 `Csv/DataQuality/`(계산/렌더 분리, xUnit 36개).
 성능 실측: **1GB(14.7M행) 전수 스캔 4.7초** (수용 기준 5초 이내, 인덱싱 1.1초 별도).
 
+**후속 구현(v1.16.0):** ① **기준선·스냅샷 diff** — `QualitySnapshotDiff`(내보낸 JSON 스냅샷 ↔ 현재 프로파일,
+컬럼명 기준 매칭, 결측률 pp·고유값 변화율 임계, 부분 스캔 근사 표기, 사용자 실행 검사는 "재검사 안 됨"으로 구분),
+메뉴 "기준선 스냅샷과 비교…". ② **교차시트·교차파일 참조무결성(FK)** — `ReferentialIntegrityScanner`
+(부모 키 집합 메모리 예산, 자식 파티션 병렬 스캔, 빈 키 제외 기본, 고아 행 술어 → 필터 칩), 메뉴 "참조 무결성 검사…".
+남은 후속: OMOP/CDISC codelist·concept_id·domain 설정 스키마, OHDSI DQD JSON import, #27 연동 버튼.
+
 ## 1. 목표 (이슈 #26 요지)
 
 의료빅데이터(OMOP-CDM / CDISC SDTM·ADaM / EMR·CDW)를 **Kahn Framework 3차원**으로 체계적 품질 검토:

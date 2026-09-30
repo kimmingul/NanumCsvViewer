@@ -42,6 +42,8 @@ ArchitecturesAllowed={#ArchAllowed}
 ArchitecturesInstallIn64BitMode={#ArchAllowed}
 PrivilegesRequired=admin
 WizardStyle=modern
+; 파일 연결 등록/해제 후 탐색기에 변경을 알린다.
+ChangesAssociations=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -57,6 +59,59 @@ Source: "{#MyAppExe}"; DestDir: "{app}"; DestName: "NanumCsvViewer.exe"; Flags: 
 Name: "{group}\{#MyAppName}"; Filename: "{app}\NanumCsvViewer.exe"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\NanumCsvViewer.exe"; Tasks: desktopicon
+
+; 탐색기 "연결 프로그램" 등록. 명령은 반드시 "%1"을 따옴표로 감싸 공백 경로가 한 인수로 전달되게 한다.
+; Windows 10/11은 기본 앱을 프로그램이 직접 바꿀 수 없으므로(UserChoice), 연결 프로그램 목록과
+; 설정 ▸ 기본 앱(RegisteredApplications/Capabilities)에 나타나게만 한다.
+#define ProgId "NanumCsvViewer.DataFile"
+#define AppRegKey "Software\NanumCsvViewer"
+
+[Registry]
+; ProgID
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\NanumCsvViewer.exe,0"
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\NanumCsvViewer.exe"" ""%1"""
+; Applications\<exe> — "연결 프로그램 ▸ 다른 앱 선택"에서 exe를 고른 경우에도 같은 명령을 쓰게 한다.
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\NanumCsvViewer.exe"" ""%1"""
+; 설정 ▸ 기본 앱에 표시
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "{#MyAppName}"
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "NanumCsvViewer"; ValueData: "{#AppRegKey}\Capabilities"; Flags: uninsdeletevalue
+; 확장자별: 연결 프로그램 목록(OpenWithProgids) · Applications 지원 형식 · 기본 앱 연결 후보
+Root: HKA; Subkey: "Software\Classes\.csv\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".csv"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".csv"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.tsv\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".tsv"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tsv"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.txt\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".txt"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".txt"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.xlsx\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".xlsx"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xlsx"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.xlsm\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".xlsm"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xlsm"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.xls\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".xls"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xls"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.sas7bdat\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".sas7bdat"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".sas7bdat"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.sav\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".sav"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".sav"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.db\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".db"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".db"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.sqlite\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".sqlite"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".sqlite"; ValueData: "{#ProgId}"
+Root: HKA; Subkey: "Software\Classes\.sqlite3\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".sqlite3"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".sqlite3"; ValueData: "{#ProgId}"
 
 [Run]
 Filename: "{app}\NanumCsvViewer.exe"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent

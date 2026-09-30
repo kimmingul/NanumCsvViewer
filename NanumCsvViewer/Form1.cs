@@ -47,9 +47,13 @@ namespace NanumCsvViewer
         private int _lineHeight = 18;
         private const int MaxCellLines = 6;
 
-        public Form1(AppSettings settings)
+        // 명령줄(탐색기 연결 프로그램)로 전달된 시작 파일. OnShown에서 한 번 연다.
+        private string? _startupPath;
+
+        public Form1(AppSettings settings, string? startupPath = null)
         {
             _settings = settings;
+            _startupPath = startupPath;
             InitializeComponent();
             Text = ProgramName;
 
@@ -1340,6 +1344,13 @@ namespace NanumCsvViewer
 
             // 상세 패널을 기본으로 표시
             SetDetailPanelVisible(true);
+
+            // 탐색기에서 연 파일: 첫 화면·레이아웃이 확정된 뒤 일반 열기와 같은 경로로 연다(오류 안내 포함).
+            if (_startupPath is { } startup)
+            {
+                _startupPath = null;
+                BeginInvoke(new Action(async () => await OpenFileAsync(startup)));
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

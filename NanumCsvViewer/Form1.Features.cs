@@ -197,9 +197,12 @@ namespace NanumCsvViewer
             _qualityMenu.DropDownItems.Add(_qualityPanelMenu);
             _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
             _qualityMenu.DropDownItems.Add(MakeItem("Key Uniqueness…", "키 유일성 검사…", async (_, _) => await RunKeyUniquenessAsync()));
+            _qualityMenu.DropDownItems.Add(MakeItem("Referential Integrity Check…", "참조 무결성 검사…", async (_, _) => await RunReferentialIntegrityAsync()));
             _qualityMenu.DropDownItems.Add(MakeItem("Validation Rules…", "타당성 규칙…", async (_, _) => await ShowQualityRulesAsync()));
             _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
             _qualityMenu.DropDownItems.Add(MakeItem("Export Quality Report…", "품질 보고서 내보내기…", (_, _) => ExportQualityReport()));
+            _qualityMenu.DropDownItems.Add(MakeItem("Compare with Baseline Snapshot…", "기준선 스냅샷과 비교…",
+                async (_, _) => await CompareQualityBaselineAsync()));
             RegisterLabel(_qualityMenu, "Data Quality", "데이터 품질");
             menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _qualityMenu);
 
@@ -2610,7 +2613,7 @@ namespace NanumCsvViewer
                 ScanTimestamp = DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
                 AppVersion = AppInfo.Version,
             };
-            _qualityFindings.RemoveAll(f => f.Kind != QualityCheckKind.Rule && f.Kind != QualityCheckKind.KeyUniqueness);
+            _qualityFindings.RemoveAll(f => f.Kind != QualityCheckKind.Rule && f.Kind != QualityCheckKind.KeyUniqueness && f.Kind != QualityCheckKind.ForeignKeyOrphan);
             _qualityFindings.InsertRange(0, report.Findings);
             ShowQualityFindings();
             statusLabel.Text = QualitySummaryText();
@@ -2704,6 +2707,304 @@ namespace NanumCsvViewer
             ShowQualityFindings();
             statusLabel.Text = QualitySummaryText();
         }
+
+        // 다른 시트 또는 외부 파일의 (복합)키에 자식 키가 있는지 검사. 부모 문서는 검사 후 닫는다.
+        private async Task RunReferentialIntegrityAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
+
+            var sheetChoices = new List<(int Index, string Name)>();
+            if (_workbook is not null)
+            {
+                for (int i = 0; i < _workbook.SheetNames.Count; i++)
+                    if (i != _currentSheetIndex)
+                        sheetChoices.Add((i, _workbook.SheetNames[i]));
+            }
+
+            int picked = -1; // sheetChoices 인덱스. -1 = 파일 찾아보기
+            if (sheetChoices.Count > 0)
+            {
+                using var dlg = new ParamDialog(LT("Referential Integrity", "참조 무결성 검사"), _palette);
+                dlg.AddNote(LT(
+                    "Checks whether child key values exist in a parent table. Blank and null-token keys are skipped by default — a candidate check, not a declared constraint.",
+                    "자식 키 값이 부모 테이블에 있는지 검사합니다. 빈 값·널 토큰 키는 기본으로 건너뜁니다. 후보 검사이며 선언된 제약이 아닙니다."));
+                var items = sheetChoices.Select(s => LT($"Sheet: {s.Name}", $"시트: {s.Name}"))
+                    .Append(LT("Browse file…", "파일 찾아보기…")).ToArray();
+                var combo = dlg.AddCombo(LT("Parent table", "부모 테이블"), items, 0);
+                if (!dlg.ShowOk(this)) return;
+                if (combo.SelectedIndex >= 0 && combo.SelectedIndex < sheetChoices.Count)
+                    picked = combo.SelectedIndex;
+            }
+
+            ReferentialParentHold? hold = null;
+            try
+            {
+                if (picked >= 0)
+                {
+                    var choice = sheetChoices[picked];
+                    hold = await OpenReferentialParentAsync(_workbook!.CsvPath(choice.Index), choice.Name, owned: null);
+                }
+                else
+                {
+                    using var ofd = new OpenFileDialog { Filter = openFileDialog1.Filter, RestoreDirectory = true };
+                    if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                    hold = await OpenExternalReferentialParentAsync(ofd.FileName);
+                }
+                if (hold is null || !ReferenceEquals(_doc, doc) || _busy) return;
+
+                string[] parentHeaders = hold.Doc.Header;
+                if (parentHeaders.Length == 0)
+                {
+                    ShowResult(LT("Referential Integrity", "참조 무결성 검사"),
+                        LT("The parent table has no columns.", "부모 테이블에 컬럼이 없습니다."));
+                    return;
+                }
+
+                int[] childCols;
+                int[] parentCols;
+                ReferentialIntegrityOptions options;
+                using (var dlg = new ParamDialog(LT("Referential Integrity", "참조 무결성 검사"), _palette))
+                {
+                    dlg.AddNote(LT(
+                        $"Parent: {hold.DisplayName}. Pair columns in the order you check them (same count). External files are compared as stored text.",
+                        $"부모: {hold.DisplayName}. 체크한 순서대로 짝을 맞춥니다(개수 동일). 외부 파일은 저장된 텍스트 그대로 비교합니다."));
+                    var childList = dlg.AddCheckedList(LT("Child columns", "자식 컬럼"), ColumnLabels(), Math.Min(8, doc.ColumnCount));
+                    var parentLabels = new string[parentHeaders.Length];
+                    for (int i = 0; i < parentLabels.Length; i++)
+                    {
+                        string h = parentHeaders[i];
+                        parentLabels[i] = string.IsNullOrEmpty(h) ? $"Column{i + 1}" : h;
+                    }
+                    var parentList = dlg.AddCheckedList(LT("Parent columns", "부모 컬럼"), parentLabels, Math.Min(8, parentLabels.Length));
+                    var blank = dlg.AddCombo(LT("Blank child keys", "빈 자식 키"),
+                        new[] { LT("Skip (default)", "건너뜀(기본)"), LT("Treat as violations", "위반으로 셈") }, 0);
+                    var cmp = dlg.AddCombo(LT("Comparison", "비교"),
+                        new[] { LT("Case-sensitive", "대소문자 구분"), LT("Ignore case", "대소문자 무시") }, 0);
+                    var trim = dlg.AddCombo(LT("Whitespace", "공백"),
+                        new[] { LT("No trim", "트림 안 함"), LT("Trim", "트림") }, 0);
+                    var childOrder = TrackCheckOrder(childList);
+                    var parentOrder = TrackCheckOrder(parentList);
+                    if (!dlg.ShowOk(this)) return;
+
+                    childCols = childOrder.ToArray();
+                    parentCols = parentOrder.ToArray();
+                    if (childCols.Length == 0 || parentCols.Length == 0)
+                    {
+                        ShowResult(LT("Referential Integrity", "참조 무결성 검사"),
+                            LT("Select at least one column on each side.", "양쪽에서 컬럼을 하나 이상 선택하세요."));
+                        return;
+                    }
+                    if (childCols.Length != parentCols.Length)
+                    {
+                        ShowResult(LT("Referential Integrity", "참조 무결성 검사"),
+                            LT("Child and parent column counts must match.", "자식·부모 컬럼 개수가 같아야 합니다."));
+                        return;
+                    }
+                    options = new ReferentialIntegrityOptions
+                    {
+                        SkipBlankChildKeys = blank.SelectedIndex == 0,
+                        CaseSensitive = cmp.SelectedIndex == 0,
+                        Trim = trim.SelectedIndex == 1,
+                    };
+                }
+
+                if (!ReferenceEquals(_doc, doc) || _busy) return;
+
+                _qualityCts?.Cancel();
+                var cts = new CancellationTokenSource();
+                _qualityCts = cts;
+                var childSrc = BuildQualityScanSource(doc, withTypes: false);
+                var parentDoc = hold.Doc;
+                string parentName = hold.DisplayName;
+
+                SetBusy(true);
+                statusLabel.Text = LT("Indexing reference…", "참조 테이블 인덱싱 중…");
+                var indexProgress = new Progress<IndexProgress>(p =>
+                {
+                    if (!cts.IsCancellationRequested)
+                        statusLabel.Text = LT($"Indexing reference… {p.Percent}%", $"참조 테이블 인덱싱 중… {p.Percent}%");
+                });
+                var scanProgress = new Progress<int>(p =>
+                {
+                    if (!cts.IsCancellationRequested)
+                        statusLabel.Text = LT($"Referential check… {p}%", $"참조 검사 중… {p}%");
+                });
+
+                ReferentialIntegrityScanner.Result result;
+                var task = Task.Run(async () =>
+                {
+                    await parentDoc.RunIndexingAsync(indexProgress, cts.Token);
+                    var parentSrc = new ReferentialParentSource
+                    {
+                        RowAt = parentDoc.GetDataRowUncached,
+                        RowCount = parentDoc.DataRowsAvailable,
+                        Name = parentName,
+                    };
+                    return ReferentialIntegrityScanner.Scan(
+                        childSrc, childCols, parentSrc, parentCols, options, scanProgress, cts.Token);
+                }, cts.Token);
+                _qualityTask = task;
+                try { result = await task; }
+                catch (OperationCanceledException) { return; }
+                catch (ReferentialIntegrityBudgetException)
+                {
+                    statusLabel.Text = LT("Referential check stopped", "참조 검사 중단");
+                    MessageBox.Show(this,
+                        LT("The parent key set exceeds the memory budget. No partial result was kept. Narrow the parent table or key columns.",
+                           "부모 키 집합이 메모리 예산을 초과했습니다. 부분 결과는 남기지 않았습니다. 부모 테이블이나 키 컬럼을 줄여 주세요."),
+                        LT("Referential Integrity", "참조 무결성 검사"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    statusLabel.Text = LT("Referential check failed", "참조 검사 실패");
+                    MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                finally
+                {
+                    if (_qualityTask == task) _qualityTask = null;
+                    SetBusy(false);
+                }
+
+                if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return;
+
+                string childNames = string.Join(" + ", childCols.Select(ColumnLabel));
+                string parentColNames = string.Join(" + ", parentCols.Select(i =>
+                    i >= 0 && i < parentHeaders.Length && !string.IsNullOrEmpty(parentHeaders[i]) ? parentHeaders[i] : $"Column{i + 1}"));
+                string scope = childSrc.CoversAllRows ? "" : LT(" (partial)", " (일부)");
+                if (result.Finding is null)
+                {
+                    statusLabel.Text = LT(
+                        $"No orphan keys ({childNames} → {parentName}) — {childSrc.RowCount:N0} rows{scope}, {result.BlankSkipped:N0} blank skipped",
+                        $"고아 키 없음 ({childNames} → {parentName}) — {childSrc.RowCount:N0}행{scope}, 빈 키 {result.BlankSkipped:N0}건 제외");
+                    return;
+                }
+
+                var finding = result.Finding with { ColumnName = $"{childNames} → {parentName} ({parentColNames})" };
+                _qualityFindings.RemoveAll(f => f.Kind == QualityCheckKind.ForeignKeyOrphan && f.ColumnName == finding.ColumnName);
+                _qualityFindings.Add(finding);
+                ShowQualityFindings();
+                statusLabel.Text = QualitySummaryText();
+            }
+            finally
+            {
+                hold?.Dispose();
+            }
+        }
+
+        private async Task<ReferentialParentHold?> OpenExternalReferentialParentAsync(string path)
+        {
+            if (!Import.TabularImporter.IsImportable(path))
+                return await OpenReferentialParentAsync(path, Path.GetFileName(path), owned: null);
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            SetBusy(true);
+            statusLabel.Text = LT("Importing reference…", "참조 파일 변환 중…");
+            var task = Task.Run(() => Import.WorkbookSession.Create(path, showLabels: false), cts.Token);
+            _qualityTask = task;
+            Import.WorkbookSession owned;
+            try { owned = await task; }
+            catch (OperationCanceledException) { return null; }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("Could not open the reference", "참조 테이블을 열지 못했습니다");
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return null;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            int sheet = 0;
+            if (owned.SheetNames.Count > 1)
+            {
+                using var dlg = new ParamDialog(LT("Referential Integrity", "참조 무결성 검사"), _palette);
+                dlg.AddNote(LT("Choose the parent sheet.", "부모 시트를 선택하세요."));
+                var combo = dlg.AddCombo(LT("Parent sheet", "부모 시트"), owned.SheetNames, 0);
+                if (!dlg.ShowOk(this)) { owned.Dispose(); return null; }
+                sheet = Math.Clamp(combo.SelectedIndex, 0, owned.SheetNames.Count - 1);
+            }
+            string name = $"{Path.GetFileName(path)} [{owned.SheetNames[sheet]}]";
+            return await OpenReferentialParentAsync(owned.CsvPath(sheet), name, owned);
+        }
+
+        // Open은 헤더만 읽는다. 전수 인덱싱은 검사 태스크에서 UI 밖에서 한다.
+        private async Task<ReferentialParentHold?> OpenReferentialParentAsync(
+            string csvPath, string displayName, Import.WorkbookSession? owned)
+        {
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            SetBusy(true);
+            statusLabel.Text = LT("Opening reference…", "참조 테이블 여는 중…");
+            var task = Task.Run(() =>
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                return VirtualCsvDocument.Open(csvPath);
+            }, cts.Token);
+            _qualityTask = task;
+            try
+            {
+                var parentDoc = await task;
+                return new ReferentialParentHold { Doc = parentDoc, Owned = owned, DisplayName = displayName };
+            }
+            catch (OperationCanceledException)
+            {
+                owned?.Dispose();
+                return null;
+            }
+            catch (Exception ex)
+            {
+                owned?.Dispose();
+                statusLabel.Text = LT("Could not open the reference", "참조 테이블을 열지 못했습니다");
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return null;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+        }
+
+        // 체크한 순서 = 복합키 파트 순서. CheckedIndices는 인덱스 순이라 짝이 어긋난다.
+        private static List<int> TrackCheckOrder(CheckedListBox list)
+        {
+            var order = new List<int>();
+            list.ItemCheck += (_, e) =>
+            {
+                if (e.NewValue == CheckState.Checked)
+                {
+                    if (!order.Contains(e.Index)) order.Add(e.Index);
+                }
+                else order.Remove(e.Index);
+            };
+            return order;
+        }
+
+        private sealed class ReferentialParentHold : IDisposable
+        {
+            public required VirtualCsvDocument Doc { get; init; }
+            public Import.WorkbookSession? Owned { get; init; }
+            public required string DisplayName { get; init; }
+
+            public void Dispose()
+            {
+                try { Doc.Dispose(); } catch { /* 참조 문서는 검사 후 항상 닫는다 */ }
+                try { Owned?.Dispose(); } catch { /* 임시 변환 폴더 정리 실패는 무시 */ }
+            }
+        }
+
 
         private async Task ShowQualityRulesAsync()
         {
@@ -2816,6 +3117,229 @@ namespace NanumCsvViewer
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
+
+        // 기준선 JSON(품질 보고서 내보내기)과 현재 프로파일을 비교한다.
+        // 차이는 행 술어가 없으므로 발견 패널에 넣지 않고 결과 창으로만 보여 준다.
+        private async Task CompareQualityBaselineAsync()
+        {
+            if (_doc is null || _busy) return;
+            if (_qualityReport is null)
+            {
+                var answer = MessageBox.Show(this,
+                    LT("Run a quality profile first, then compare.\n\nRun the profile now?",
+                       "먼저 품질 프로파일을 실행한 뒤 비교할 수 있습니다.\n\n지금 프로파일을 실행할까요?"),
+                    LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (answer != DialogResult.Yes) return;
+                await RunQualityProfileAsync();
+                if (_qualityReport is null || _busy) return;
+            }
+
+            using var open = new OpenFileDialog
+            {
+                Title = LT("Baseline Snapshot", "기준선 스냅샷"),
+                Filter = "JSON (*.json)|*.json",
+            };
+            if (open.ShowDialog(this) != DialogResult.OK) return;
+
+            QualitySnapshotDiffResult diff;
+            try
+            {
+                string json = File.ReadAllText(open.FileName);
+                var baseline = QualityReportJson.Deserialize(json);
+                // 내보내기와 같이 키·규칙 발견까지 현재 쪽으로 포함한다.
+                var current = _qualityReport with { Findings = _qualityFindings.ToArray() };
+                diff = QualitySnapshotDiff.Compare(baseline, current);
+            }
+            catch (QualitySnapshotSchemaException ex)
+            {
+                MessageBox.Show(this,
+                    LT($"This snapshot uses schema version {ex.SchemaVersion}, which this version cannot compare (supported: {ex.SupportedVersion}).",
+                       $"이 스냅샷의 스키마 버전({ex.SchemaVersion})은 이 버전이 비교할 수 없습니다(지원: {ex.SupportedVersion})."),
+                    LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                MessageBox.Show(this,
+                    LT("The file is not a quality snapshot JSON from Export Quality Report.",
+                       "품질 보고서 내보내기(JSON)로 만든 스냅샷이 아닙니다."),
+                    LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string body = BuildQualityDiffMarkdown(diff);
+            statusLabel.Text = diff.Comparable
+                ? LT($"Baseline comparison: {diff.Items.Count:N0} item(s)", $"기준선 비교: {diff.Items.Count:N0}건")
+                : LT("Baseline comparison (not comparable — partial scan)", "기준선 비교(비교 불가 — 일부 스캔)");
+
+            bool export;
+            using (var form = new ResultForm(LT("Baseline Comparison", "기준선 비교"), body, _palette,
+                       LT("Export…", "내보내기…")))
+            {
+                form.ShowDialog(this);
+                export = form.ActionRequested;
+            }
+            if (export) ExportQualityDiff(diff, body);
+        }
+
+        private void ExportQualityDiff(QualitySnapshotDiffResult diff, string markdown)
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Filter = "Markdown (*.md)|*.md|JSON (*.json)|*.json",
+                FileName = "quality-diff.md",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                string ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+                string content = ext == ".json" ? QualitySnapshotDiff.Serialize(diff) : markdown;
+                File.WriteAllText(dlg.FileName, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                statusLabel.Text = LT("Baseline comparison saved", "기준선 비교 저장됨");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, LT("Export failed", "내보내기 실패"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private string BuildQualityDiffMarkdown(QualitySnapshotDiffResult d)
+        {
+            static string Md(string s) => s.Replace("|", "\\|").Replace("\n", " ");
+            string scopeOf(bool full) => full ? LT("full scan", "전수") : LT("partial scan", "일부");
+            var sb = new StringBuilder();
+            sb.AppendLine(LT("# Baseline comparison", "# 기준선 비교"));
+            sb.AppendLine();
+            sb.AppendLine($"- {LT("Baseline", "기준선")}: {Md(d.BaselineSourceName)} · {d.BaselineRows:N0} " +
+                LT("rows", "행") + $" ({scopeOf(d.BaselineScannedFully)}) · {d.BaselineTimestamp}");
+            sb.AppendLine($"- {LT("Current", "현재")}: {Md(d.CurrentSourceName)} · {d.CurrentRows:N0} " +
+                LT("rows", "행") + $" ({scopeOf(d.CurrentScannedFully)}) · {d.CurrentTimestamp}");
+            if (d.Comparable)
+                sb.AppendLine($"- {LT("Scope: comparable (both full scans).", "범위: 비교 가능(양쪽 전수).")}");
+            else
+            {
+                string which = !d.BaselineScannedFully && !d.CurrentScannedFully
+                    ? LT("baseline and current are partial scans", "기준선과 현재 모두 일부 스캔")
+                    : !d.BaselineScannedFully
+                        ? LT("the baseline is a partial scan", "기준선이 일부 스캔")
+                        : LT("the current profile is a partial scan", "현재 프로파일이 일부 스캔");
+                sb.AppendLine($"- {LT($"Scope: NOT COMPARABLE — {which}. Differences below are approximate, not assertions.",
+                    $"범위: 비교 불가 — {which}. 아래 차이는 근사이며 단정이 아닙니다.")}");
+            }
+            if (d.DistinctCountsCapped)
+                sb.AppendLine($"- {LT("Unique counts are lower bounds on at least one side (tracking cap).",
+                    "고유값 개수는 한쪽 이상이 하한입니다(추적 상한).")}");
+            if (d.BaselineDuplicateCheckSkipped || d.CurrentDuplicateCheckSkipped)
+                sb.AppendLine($"- {LT("Duplicate-row check was skipped on at least one side, so that finding is not classified as new or resolved.",
+                    "중복 행 검사는 한쪽 이상에서 생략되어, 그 발견은 신규/해소로 분류하지 않습니다.")}");
+            sb.AppendLine();
+            sb.AppendLine(LT("## Differences", "## 차이"));
+            if (d.Items.Count == 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LT("No differences beyond the thresholds.", "임계를 넘는 차이가 없습니다."));
+                return sb.ToString();
+            }
+            sb.AppendLine();
+            sb.AppendLine($"| {LT("Severity", "심각도")} | {LT("Change", "변화")} | {LT("Column", "컬럼")} | {LT("Detail", "세부")} |");
+            sb.AppendLine("|---|---|---|---|");
+            foreach (var item in d.Items)
+            {
+                string approx = item.Approximate ? "≈ " : "";
+                string column = item.ColumnName.Length > 0 ? item.ColumnName : "—";
+                sb.AppendLine($"| {approx}{QualityText.SeverityName(item.Severity)} | {DiffKindName(item.Kind)} | {Md(column)} | {Md(DiffDetail(item))} |");
+            }
+            return sb.ToString();
+        }
+
+        private static string DiffKindName(QualitySnapshotDiffKind kind) => kind switch
+        {
+            QualitySnapshotDiffKind.RowCountChanged => LT("Row count", "행 수"),
+            QualitySnapshotDiffKind.ColumnAdded => LT("Column added", "컬럼 추가"),
+            QualitySnapshotDiffKind.ColumnRemoved => LT("Column removed", "컬럼 삭제"),
+            QualitySnapshotDiffKind.TypeChanged => LT("Type changed", "타입 변경"),
+            QualitySnapshotDiffKind.MissingRateChanged => LT("Missing rate", "결측률"),
+            QualitySnapshotDiffKind.UniqueCountChanged => LT("Unique count", "고유값 수"),
+            QualitySnapshotDiffKind.NumericMinChanged => LT("Numeric min", "수치 최소"),
+            QualitySnapshotDiffKind.NumericMaxChanged => LT("Numeric max", "수치 최대"),
+            QualitySnapshotDiffKind.NumericMeanChanged => LT("Numeric mean", "수치 평균"),
+            QualitySnapshotDiffKind.SentinelAppeared => LT("Sentinel candidate appeared", "위장결측 후보 출현"),
+            QualitySnapshotDiffKind.SentinelDisappeared => LT("Sentinel candidate disappeared", "위장결측 후보 소멸"),
+            QualitySnapshotDiffKind.FindingNew => LT("Finding new", "발견 신규"),
+            QualitySnapshotDiffKind.FindingResolved => LT("Finding resolved", "발견 해소"),
+            QualitySnapshotDiffKind.FindingPersisting => LT("Finding persists", "발견 지속"),
+            QualitySnapshotDiffKind.CheckNotComparable => LT("Check not comparable", "검사 비교 불가"),
+            QualitySnapshotDiffKind.FindingNotRechecked => LT("Not rechecked", "재검사 안 됨"),
+            _ => kind.ToString(),
+        };
+
+        private static string DiffDetail(QualitySnapshotDiffItem item)
+        {
+            static string N(double? v) => v is { } d ? d.ToString("0.##", CultureInfo.InvariantCulture) : "—";
+            static string I(double? v) => v is { } d ? d.ToString("N0", CultureInfo.InvariantCulture) : "—";
+            switch (item.Kind)
+            {
+                case QualitySnapshotDiffKind.RowCountChanged:
+                    return $"{I(item.BaselineNumber)} → {I(item.CurrentNumber)} (Δ {N(item.Delta)})";
+                case QualitySnapshotDiffKind.ColumnAdded:
+                    return item.CurrentText ?? "";
+                case QualitySnapshotDiffKind.ColumnRemoved:
+                    return item.BaselineText ?? "";
+                case QualitySnapshotDiffKind.TypeChanged:
+                    return $"{item.BaselineText} → {item.CurrentText}";
+                case QualitySnapshotDiffKind.MissingRateChanged:
+                    return $"{N((item.BaselineNumber ?? 0) * 100)}% → {N((item.CurrentNumber ?? 0) * 100)}% (Δ {N(item.Delta)} pp)";
+                case QualitySnapshotDiffKind.UniqueCountChanged:
+                {
+                    string ratio = item.Delta is { } r
+                        ? r.ToString("+0.##%;-0.##%;0%", CultureInfo.InvariantCulture)
+                        : LT("baseline unique count was 0", "기준 고유값이 0");
+                    return $"{I(item.BaselineNumber)} → {I(item.CurrentNumber)} ({ratio})";
+                }
+                case QualitySnapshotDiffKind.NumericMinChanged:
+                case QualitySnapshotDiffKind.NumericMaxChanged:
+                case QualitySnapshotDiffKind.NumericMeanChanged:
+                    return $"{N(item.BaselineNumber)} → {N(item.CurrentNumber)} (Δ {N(item.Delta)})";
+                case QualitySnapshotDiffKind.SentinelAppeared:
+                case QualitySnapshotDiffKind.SentinelDisappeared:
+                    return LT($"candidate \"{item.CurrentText ?? item.BaselineText}\" — confirm, not an assertion",
+                              $"후보 \"{item.CurrentText ?? item.BaselineText}\" — 확인 필요, 단정 아님");
+                case QualitySnapshotDiffKind.FindingNew:
+                case QualitySnapshotDiffKind.FindingResolved:
+                case QualitySnapshotDiffKind.FindingPersisting:
+                {
+                    string check = item.CheckKind is { } k ? QualityText.KindName(k) : "";
+                    string rule = item.RuleName.Length > 0 ? $" ({item.RuleName})" : "";
+                    string counts = item.Kind == QualitySnapshotDiffKind.FindingPersisting
+                        ? $"{I(item.BaselineNumber)} → {I(item.CurrentNumber)}"
+                        : I(item.CurrentNumber ?? item.BaselineNumber);
+                    return $"{check}{rule} · {counts}";
+                }
+                case QualitySnapshotDiffKind.CheckNotComparable:
+                    return LT("duplicate-row check skipped on one side — not new or resolved",
+                              "중복 행 검사를 한쪽에서 생략 — 신규/해소로 보지 않음");
+                case QualitySnapshotDiffKind.FindingNotRechecked:
+                {
+                    string check = item.CheckKind is { } k ? QualityText.KindName(k) : "";
+                    string rule = item.RuleName.Length > 0 ? $" ({item.RuleName})" : "";
+                    return LT($"{check}{rule} · {I(item.BaselineNumber)} in baseline — run it again in this session to compare",
+                              $"{check}{rule} · 기준선 {I(item.BaselineNumber)}건 — 이 세션에서 다시 실행해야 비교 가능");
+                }
+                default:
+                    return "";
+            }
+        }
+
 
         private string QualityCheckDisplay(QualityFinding f)
             => f.Kind == QualityCheckKind.Rule && f.Label is { Length: > 0 }

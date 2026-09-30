@@ -27,6 +27,7 @@ namespace NanumCsvViewer.Csv.DataQuality
         RaggedRows,           // 헤더와 필드 수가 다른 행(구조 위반)
         KeyUniqueness,        // 사용자 지정 (복합)키 중복
         Rule,                 // 사용자 정의 규칙 위반(위반 조건식)
+        ForeignKeyOrphan,     // 자식 키 값이 부모 키 집합에 없음(참조 무결성 후보)
     }
 
     /// <summary>위반 예시 1건: 원본 행번호(1-based) + 문제 값.</summary>
@@ -49,6 +50,8 @@ namespace NanumCsvViewer.Csv.DataQuality
         public string ColumnName { get; init; } = "";
         public long ViolationCount { get; init; }
         public long EvaluatedRows { get; init; }
+        /// <summary>검사 대상에서 제외한 행 수(예: 참조 무결성의 빈 자식 키). 제외 사유는 검사 종류가 정한다.</summary>
+        public long SkippedRows { get; init; }
         /// <summary>표본 기반 추정치인지(이상치 등). true면 UI가 "≈"를 표기해 정직하게 알린다.</summary>
         public bool Approximate { get; init; }
         public IReadOnlyList<QualityExample> Examples { get; init; } = Array.Empty<QualityExample>();
@@ -160,13 +163,55 @@ namespace NanumCsvViewer.Csv.DataQuality
     /// <summary>스냅샷 JSON 직렬화(안정 스키마). 같은 파일 → 같은 내용(타임스탬프 필드 제외).</summary>
     public static class QualityReportJson
     {
+        /// <summary>이 빌드가 비교할 수 있는 스냅샷 스키마. 필드 의미 변경 시 올린다.</summary>
+        public const int SupportedSchemaVersion = 1;
+
         private static readonly JsonSerializerOptions Options = new()
         {
             WriteIndented = true,
             Converters = { new JsonStringEnumConverter() },
+            PropertyNameCaseInsensitive = true,
+            // 이후 버전이 필드를 추가해도 이 빌드는 아는 필드만 읽는다.
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+            ReadCommentHandling = JsonCommentHandling.Skip,
         };
 
         public static string Serialize(QualityReport report)
             => JsonSerializer.Serialize(report, Options);
+
+        /// <summary>
+        /// 스냅샷 JSON을 읽는다. 알 수 없는 필드는 무시한다.
+        /// 스키마 버전이 <see cref="SupportedSchemaVersion"/>이 아니면
+        /// <see cref="QualitySnapshotSchemaException"/>. 빈 문서·필수 필드 누락·깨진 JSON은
+        /// <see cref="JsonException"/>.
+        /// </summary>
+        public static QualityReport Deserialize(string json)
+        {
+            ArgumentNullException.ThrowIfNull(json);
+            if (string.IsNullOrWhiteSpace(json))
+                throw new JsonException("품질 스냅샷 JSON이 비어 있습니다.");
+
+            QualityReport? report;
+            try
+            {
+                report = JsonSerializer.Deserialize<QualityReport>(json, Options);
+            }
+            catch (JsonException)
+            {
+                throw;
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new JsonException("품질 스냅샷 JSON 형식이 올바르지 않습니다.", ex);
+            }
+
+            if (report is null)
+                throw new JsonException("품질 스냅샷 JSON이 비어 있습니다.");
+            if (report.Columns is null || report.Findings is null)
+                throw new JsonException("품질 스냅샷에 컬럼 또는 발견 목록이 없습니다.");
+            if (report.SchemaVersion != SupportedSchemaVersion)
+                throw new QualitySnapshotSchemaException(report.SchemaVersion, SupportedSchemaVersion);
+            return report;
+        }
     }
 }

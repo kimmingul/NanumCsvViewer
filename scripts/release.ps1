@@ -106,8 +106,10 @@ function Sign($file) {
 }
 
 function Resolve-ISCC() {
+    # winget 기본(사용자 범위) 설치 경로도 확인한다.
     $i = Get-ChildItem 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
-                       'C:\Program Files\Inno Setup 6\ISCC.exe' -ErrorAction SilentlyContinue |
+                       'C:\Program Files\Inno Setup 6\ISCC.exe',
+                       (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe') -ErrorAction SilentlyContinue |
          Select-Object -First 1 -ExpandProperty FullName
     if (-not $i) { $c = Get-Command ISCC.exe -ErrorAction SilentlyContinue; if ($c) { $i = $c.Source } }
     if (-not $i) { throw 'ISCC.exe(Inno Setup)를 찾을 수 없습니다. 설치: winget install JRSoftware.InnoSetup' }
