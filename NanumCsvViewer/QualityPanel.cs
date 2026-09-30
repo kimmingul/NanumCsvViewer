@@ -127,7 +127,7 @@ namespace NanumCsvViewer
 
         private readonly ListView _list;
         private readonly Label _title, _summary;
-        private readonly Button _btnFilter, _btnJump, _btnExport;
+        private readonly Button _btnFilter, _btnJump, _btnExport, _btnAdvanced;
         private readonly ColumnHeader _colSeverity, _colCheck, _colColumn, _colCount, _colDetails;
         private ThemePalette _palette;
         private IReadOnlyList<QualityFinding> _findings = Array.Empty<QualityFinding>();
@@ -136,6 +136,8 @@ namespace NanumCsvViewer
         public event Action<QualityFinding>? ApplyFilterRequested;
         public event Action<long>? JumpRequested;
         public event Action? ExportRequested;
+        /// <summary>"품질 확인 → 고급 통계" 연동(이슈 #27). 버튼 위치를 넘겨 메뉴를 그 아래에 띄운다.</summary>
+        public event Action<Control>? AdvancedStatsRequested;
         public event Action? CloseRequested;
 
         private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
@@ -162,7 +164,7 @@ namespace NanumCsvViewer
             {
                 FlowDirection = FlowDirection.RightToLeft,
                 Dock = DockStyle.Right,
-                Width = 430,
+                Width = 560,
                 WrapContents = false,
                 Padding = new Padding(0),
                 Margin = new Padding(0),
@@ -196,10 +198,12 @@ namespace NanumCsvViewer
             }
             var close = Make("✕", () => CloseRequested?.Invoke(), 28);
             _btnExport = Make(LT("Report…", "보고서…"), () => ExportRequested?.Invoke());
+            _btnAdvanced = Make(LT("Advanced Stats ▾", "고급 통계 ▾"), () => AdvancedStatsRequested?.Invoke(_btnAdvanced!), 110);
             _btnJump = Make(LT("Go to Row", "행 이동"), JumpToSelected);
             _btnFilter = Make(LT("Filter Rows", "위반 행만 보기"), ApplySelected);
             buttons.Controls.Add(close);
             buttons.Controls.Add(_btnExport);
+            buttons.Controls.Add(_btnAdvanced);
             buttons.Controls.Add(_btnJump);
             buttons.Controls.Add(_btnFilter);
 
@@ -303,6 +307,7 @@ namespace NanumCsvViewer
         {
             _title.Text = LT("Data Quality Findings", "데이터 품질 검사 결과");
             _btnExport.Text = LT("Report…", "보고서…");
+            _btnAdvanced.Text = LT("Advanced Stats ▾", "고급 통계 ▾");
             _btnJump.Text = LT("Go to Row", "행 이동");
             _btnFilter.Text = LT("Filter Rows", "위반 행만 보기");
             _colSeverity.Text = LT("Severity", "심각도");

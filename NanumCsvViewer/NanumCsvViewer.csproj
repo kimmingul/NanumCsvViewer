@@ -15,9 +15,9 @@
     <Product>Nanum CSV Viewer</Product>
     <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
     <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
-    <Version>1.16.0</Version>
-    <FileVersion>1.16.0.0</FileVersion>
-    <AssemblyVersion>1.16.0.0</AssemblyVersion>
+    <Version>1.17.0</Version>
+    <FileVersion>1.17.0.0</FileVersion>
+    <AssemblyVersion>1.17.0.0</AssemblyVersion>
     <!-- 릴리즈 날짜: release.ps1이 publish 시 -p:ReleaseDate로 주입. 미지정(dev 빌드)이면 빌드일. -->
     <ReleaseDate Condition="'$(ReleaseDate)' == ''">$([System.DateTime]::Now.ToString("yyyy-MM-dd"))</ReleaseDate>
   </PropertyGroup>
@@ -28,6 +28,11 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
     <PackageReference Include="SasReader" Version="1.0.6" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ALGLIB Commercial(순수 C#, 이슈 #27). 소스는 로컬 전용 ExternalLibs/ALGLIB — 단일 exe에 번들된다. -->
+    <ProjectReference Include="..\NanumCsvViewer.Alglib\NanumCsvViewer.Alglib.csproj" />
   </ItemGroup>
 
   <ItemGroup>

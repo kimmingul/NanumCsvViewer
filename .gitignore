@@ -368,3 +368,6 @@ samples/
 .serena/
 # 릴리즈 산출물(서명된 exe) — GitHub 릴리즈로 배포, 저장소에는 커밋하지 않음
 /dist/
+# ALGLIB Commercial 배포본 — 라이선스(Appendix A, H: 소스 비공개 배포)상 공개 저장소에 커밋 금지.
+# 로컬 빌드 전용: NanumCsvViewer.Alglib 프로젝트가 이 경로의 C# 소스를 컴파일한다.
+/ExternalLibs/ALGLIB/

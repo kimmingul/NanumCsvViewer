@@ -37,7 +37,7 @@ Kahn 3차원은 UI에 노출하지 않고 발견 항목의 내부 태그로만 �
 컬럼명 기준 매칭, 결측률 pp·고유값 변화율 임계, 부분 스캔 근사 표기, 사용자 실행 검사는 "재검사 안 됨"으로 구분),
 메뉴 "기준선 스냅샷과 비교…". ② **교차시트·교차파일 참조무결성(FK)** — `ReferentialIntegrityScanner`
 (부모 키 집합 메모리 예산, 자식 파티션 병렬 스캔, 빈 키 제외 기본, 고아 행 술어 → 필터 칩), 메뉴 "참조 무결성 검사…".
-남은 후속: OMOP/CDISC codelist·concept_id·domain 설정 스키마, OHDSI DQD JSON import, #27 연동 버튼.
+남은 후속: OMOP/CDISC codelist·concept_id·domain 설정 스키마, OHDSI DQD JSON import. (#27 연동 버튼은 v1.17.0에서 검사 결과 패널의 "고급 통계 ▾"로 구현.)
 
 ## 1. 목표 (이슈 #26 요지)
 

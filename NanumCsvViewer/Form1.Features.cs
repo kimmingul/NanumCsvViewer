@@ -206,6 +206,10 @@ namespace NanumCsvViewer
             RegisterLabel(_qualityMenu, "Data Quality", "데이터 품질");
             menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _qualityMenu);
 
+            // 새 최상위 메뉴: 고급 통계(이슈 #27, ALGLIB) — 데이터 품질 바로 뒤.
+            BuildAdvancedStatsMenu();
+            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_qualityMenu) + 1, _advMenu!);
+
             // 타입 배지 토글 툴바 버튼 — 우측 정렬로 추가하면 테마 토글 버튼 왼쪽에 놓인다.
             _badgeToggleButton = new ToolStripButton
             {
@@ -322,6 +326,7 @@ namespace NanumCsvViewer
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
             if (_vizMenu is not null) _vizMenu.Enabled = ready;
             if (_qualityMenu is not null) _qualityMenu.Enabled = ready;
+            if (_advMenu is not null) _advMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
             // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
             bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
@@ -2500,6 +2505,7 @@ namespace NanumCsvViewer
             _qualityPanel.ApplyFilterRequested += async f => await ApplyQualityFindingFilterAsync(f);
             _qualityPanel.JumpRequested += async row => await JumpToSourceRowAsync(row);
             _qualityPanel.ExportRequested += ExportQualityReport;
+            _qualityPanel.AdvancedStatsRequested += ShowAdvancedStatsFromQuality;
             _qualityPanel.CloseRequested += () => SetQualityPanelVisible(false);
             // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
             Controls.Add(_qualityPanel);

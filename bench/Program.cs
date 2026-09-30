@@ -9,9 +9,10 @@ using NanumCsvViewer.Csv;
 //   gen   <path> [gb]   : 약 gb GB 크기의 테스트 CSV 생성(기본 1GB)
 //   index <path>        : Open + 인덱싱 시간 측정(2회: cold/warm)
 //   icon  <path.ico>    : 앱 아이콘(.ico, 멀티 해상도) 생성
+//   advstats <new-path> [rows] : 고급 통계(이슈 #27) 엔진 실측용 CSV 생성 후 각 분석 시간 측정(기본 500만 행)
 if (args.Length < 2)
 {
-    Console.WriteLine("usage: gen <path> [gb] | index <path> | icon <path.ico> | cardinality <new-path> [rows] [padding-chars]");
+    Console.WriteLine("usage: gen <path> [gb] | index <path> | icon <path.ico> | cardinality <new-path> [rows] [padding-chars] | advstats <new-path> [rows]");
     return;
 }
 
@@ -89,6 +90,79 @@ else if (mode == "cardinality")
     }
     catch (OperationCanceledException) { Console.WriteLine($"pivot cancellation: {watch.ElapsedMilliseconds}ms"); }
     Console.WriteLine($"peak working set: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024 / 1024} MiB");
+}
+else if (mode == "advstats")
+{
+    // 고급 통계(이슈 #27) 수용 기준 실측: 약 500MB CSV에서 각 엔진을 UI와 같은 입력 경로(뷰 지연 목록)로 실행.
+    int rowCount = args.Length > 2 ? int.Parse(args[2]) : 5_000_000;
+    var rng = new Random(20260930);
+    string[] levels = { "A", "B", "C", "D", "E" };
+    using (var writer = new StreamWriter(new FileStream(path, FileMode.CreateNew), new UTF8Encoding(false)))
+    {
+        writer.WriteLine("id,x1,x2,x3,x4,g,y,b,cls,t1,t2,t3,note");
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        for (int i = 0; i < rowCount; i++)
+        {
+            double x1 = rng.NextDouble() * 10, x2 = rng.NextDouble() * 5, x3 = rng.NextDouble(), x4 = rng.NextDouble() * 100;
+            int g = rng.Next(5);
+            double y = 2 + 0.5 * x1 - 0.3 * x2 + 1.5 * x3 + 0.01 * x4 + g * 0.4 + Normal(rng);
+            int b = rng.NextDouble() < 1 / (1 + Math.Exp(-(-2 + 0.3 * x1 + 0.2 * g))) ? 1 : 0;
+            int cls = x1 + Normal(rng) < 3.3 ? 0 : x1 + Normal(rng) < 6.6 ? 1 : 2;
+            double t1 = 50 + Normal(rng) * 5, t2 = t1 + 1 + Normal(rng), t3 = t1 + 2 + Normal(rng) * 1.5;
+            writer.WriteLine(string.Create(ci, $"{i},{x1:F4},{x2:F4},{x3:F4},{x4:F3},{levels[g]},{y:F4},{b},{cls},{t1:F3},{t2:F3},{t3:F3},visit-{i % 997}"));
+        }
+    }
+    var watch = Stopwatch.StartNew();
+    using var doc = VirtualCsvDocument.Open(path);
+    await doc.RunIndexingAsync(new Progress<IndexProgress>(), default);
+    Console.WriteLine($"index: bytes={new FileInfo(path).Length:N0} rows={doc.DataRowsAvailable:N0} {watch.ElapsedMilliseconds}ms mode={(doc.InMemory ? "RAM" : "Disk")}");
+    var rows = doc.SnapshotViewRows();
+    var headers = doc.Header;
+    NanumCsvViewer.Stats.VariableKind KindOf(int c) => c is 5 or 12 ? NanumCsvViewer.Stats.VariableKind.Categorical : NanumCsvViewer.Stats.VariableKind.Numeric;
+    var numericFeatures = new[] { 1, 2, 3, 4 };
+
+    void Time(string name, Func<string> run)
+    {
+        GC.Collect();
+        var sw = Stopwatch.StartNew();
+        try { string info = run(); Console.WriteLine($"{name,-22} {sw.Elapsed.TotalSeconds,7:F1}s  {info}"); }
+        catch (Exception ex) { Console.WriteLine($"{name,-22} {sw.Elapsed.TotalSeconds,7:F1}s  FAILED {ex.GetType().Name}: {ex.Message}"); }
+    }
+
+    Time("GLM (OLS + Type II)", () =>
+    {
+        var dm = NanumCsvViewer.Stats.DesignMatrixBuilder.Build(rows, headers, NanumCsvViewer.Stats.ModelFormula.Parse("y ~ x1 + x2 + x3 + x4 + C(g)"), KindOf);
+        var fit = NanumCsvViewer.Stats.LinearModel.Fit(dm);
+        var anova = NanumCsvViewer.Stats.LinearModel.TypeII(dm, fit);
+        return $"n={fit.N:N0} R²={fit.RSquared:F4} terms={anova.Count}";
+    });
+    Time("Logistic (IRLS)", () =>
+    {
+        var dm = NanumCsvViewer.Stats.DesignMatrixBuilder.Build(rows, headers, NanumCsvViewer.Stats.ModelFormula.Parse("b ~ x1 + C(g)"), KindOf,
+            new NanumCsvViewer.Stats.DesignMatrixOptions { Response = NanumCsvViewer.Stats.ResponseKind.Binary });
+        var fit = NanumCsvViewer.Stats.GeneralizedLinearModel.Fit(dm, NanumCsvViewer.Stats.GlmFamily.Binomial, NanumCsvViewer.Stats.GlmLink.Logit, logisticExtras: true);
+        return $"iterations={fit.Iterations} converged={fit.Converged}";
+    });
+    Time("Mann-Whitney U", () => $"p={NanumCsvViewer.Stats.NonparametricTests.MannWhitney(rows, 6, 7, null, null).PAsymptotic:G4}");
+    Time("Kruskal-Wallis", () => $"p={NanumCsvViewer.Stats.NonparametricTests.KruskalWallis(rows, 6, 5).P:G4}");
+    Time("Friedman", () => $"p={NanumCsvViewer.Stats.NonparametricTests.Friedman(rows, new[] { 9, 10, 11 }, new[] { "t1", "t2", "t3" }).P:G4}");
+    Time("RM-ANOVA", () => $"F={NanumCsvViewer.Stats.RepeatedMeasuresAnova.Fit(rows, new[] { 9, 10, 11 }, new[] { "t1", "t2", "t3" }).F:G6}");
+    Time("Feature ranking", () =>
+        $"features={NanumCsvViewer.Stats.FeatureRanking.Rank(rows, headers, new[] { 1, 2, 3, 4, 5 }, KindOf, 8, NanumCsvViewer.Stats.TargetKind.Categorical).Ranked.Count}");
+    NanumCsvViewer.Stats.FeatureMatrix? fm = null;
+    Time("Feature matrix", () =>
+    {
+        fm = NanumCsvViewer.Stats.FeatureMatrixBuilder.Build(rows, headers, numericFeatures, KindOf, 8, NanumCsvViewer.Stats.TargetKind.Categorical);
+        return $"n={fm.RowCount:N0}";
+    });
+    Time("PCA", () => $"λ1={NanumCsvViewer.Stats.PrincipalComponents.Fit(fm!.X, fm.FeatureNames, NanumCsvViewer.Stats.PcaScale.Correlation, 4).Eigenvalues[0]:G4}");
+    Time("LDA (holdout)", () => $"acc={NanumCsvViewer.Stats.LinearDiscriminant.Evaluate(fm!.X, fm.ClassLabels!, 3, fm.ClassNames!, NanumCsvViewer.Stats.LdaSplitKind.Holdout, 5, 0.3, 1, true).Metrics.Accuracy:F4}");
+    Time("Naive Bayes (holdout)", () => $"acc={NanumCsvViewer.Stats.NaiveBayesClassifier.Evaluate(fm!.X, fm.ClassLabels!, 3, NanumCsvViewer.Stats.FeatureGroups.FromMatrix(fm.SourceColumns, fm.FeatureNames)).Evaluation.Metrics.Accuracy:F4}");
+    Time("K-means (k=5)", () => $"BSS/TSS={NanumCsvViewer.Stats.KMeansClustering.Fit(fm!.X, new NanumCsvViewer.Stats.KMeansOptions { K = 5, Restarts = 3 }).BetweenTotalRatio:F4}");
+    Time("KNN (holdout)", () => $"acc={NanumCsvViewer.Stats.KnnClassifier.Evaluate(fm!.X, fm.ClassLabels!, 3).Metrics.Accuracy:F4}");
+    Console.WriteLine($"peak working set: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024 / 1024} MiB");
+
+    static double Normal(Random r) => Math.Sqrt(-2 * Math.Log(1 - r.NextDouble())) * Math.Cos(2 * Math.PI * r.NextDouble());
 }
 
 static void Generate(string path, long targetBytes)

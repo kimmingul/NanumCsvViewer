@@ -5,6 +5,16 @@
 
 > .NET 10 · Windows Forms · 단일 실행 파일(.exe) 배포 지원
 
+### v1.17.0 — 고급 통계·머신러닝 (Phase 1, ALGLIB)
+
+- **'고급 통계' 메뉴 신설**(데이터 품질 옆) — 16개 분석: **일반선형모형(GLM)**·**공분산분석(ANCOVA)**·**반복측정 분산분석**(Mauchly·GG/HF 보정)·**일반화선형모형**(가우시안·이항·포아송·감마)·**로지스틱 회귀**(오즈비·AUC·Hosmer–Lemeshow), 비모수 검정 5종(**Mann-Whitney U·Wilcoxon 부호순위·부호·Kruskal-Wallis+Dunn·Friedman**), **K-means·KNN·나이브 베이즈**, **PCA·LDA·특성 순위**(Benjamini–Hochberg q).
+- **모형식 편집기** — `y ~ x1 + C(group) + x1:group`, `a*b`, `- 1` 문법. 컬럼 더블클릭으로 삽입하고 입력마다 식과 컬럼을 검증합니다.
+- **대용량 전체 분석** — 필요한 컬럼만 수치로 압축해 현재 뷰 전체를 한 번에 읽습니다. 500 MB(620만 행) CSV에서 GLM 5초·로지스틱 7초·K-means 9초·KNN 23초 등 전 항목 30초 이내(실측, [기록](docs/ADVANCED_STATS_PLAN.md)).
+- **정직한 결과** — 사용·제외 행 수, 비수렴·완전 분리·별칭(선형 종속) 항, 표본 근사, 가정 경고를 결과에 표시합니다. 분류기는 학습 분할로만 스케일링하고 최다 클래스 기준선과 함께 보고합니다.
+- **검증** — statsmodels·scipy·sklearn 참조값과 대조하는 단위 테스트, 코드 리뷰로 찾은 결함 8건 수정·회귀 테스트.
+- **품질 → 분석 연동** — 검사 결과 패널의 **고급 통계 ▾** 버튼. 심각한 품질 발견이 남아 있으면 먼저 알립니다.
+- ALGLIB Commercial(순수 C#)을 단일 exe에 포함합니다. 소스는 라이선스상 저장소에 없으며 빌드 방법은 아래 "빌드 & 실행"을 참고하세요.
+
 ### v1.16.0 — 탐색기 파일 열기 수정 · 품질 기준선 비교 · 참조 무결성 검사
 
 - **탐색기에서 연 파일이 열리지 않던 문제 수정** — 연결 프로그램/더블클릭으로 실행하면 전달된 파일(CSV·엑셀·SAS·SPSS·SQLite)을 창이 뜬 직후 바로 엽니다. 연결 명령이 `%1`을 따옴표로 감싸지 않아 공백 포함 경로가 쪼개진 경우도 복구합니다.
@@ -143,7 +153,9 @@
 
 ## 🚀 빌드 & 실행
 
-요구 사항: [.NET 10 SDK](https://dotnet.microsoft.com/download)
+요구 사항: [.NET 10 SDK](https://dotnet.microsoft.com/download), **ALGLIB Commercial for C#** 배포본(라이선스 보유자 전용)
+
+- ALGLIB 배포본을 `ExternalLibs/ALGLIB/`에 풀어 둡니다(`ExternalLibs/ALGLIB/alglib-csharp/lib-csharp-core/src/*.cs`를 `NanumCsvViewer.Alglib` 프로젝트가 컴파일). 라이선스상 소스를 공개 배포할 수 없어 이 폴더는 `.gitignore` 대상이며, 없으면 빌드가 안내 메시지와 함께 실패합니다. 게시(단일 exe)에는 컴파일된 ALGLIB가 포함되어 추가 파일이 없습니다.
 
 ```bash
 # 빌드
