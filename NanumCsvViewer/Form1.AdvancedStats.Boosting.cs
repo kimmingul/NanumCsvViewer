@@ -14,13 +14,22 @@ namespace NanumCsvViewer
             {
                 var matrix = FeatureMatrixBuilder.Build(input.Rows, input.Headers, features, input.KindOf,
                     target, numericTarget ? TargetKind.Numeric : TargetKind.Categorical, cancellation: input.Cancellation);
+                string note = AdvSavedNote(matrix.RowCount);
+                if (options.EarlyStopping)
+                    note += " " + LT("Early stopping holds out a validation fraction inside that fit.", "조기 종료는 그 적합 안에서 검증 비율을 떼어 둡니다.");
                 if (numericTarget)
                 {
                     var report = GradientBoosting.Evaluate(matrix.X, matrix.NumericTarget!, options, input.Cancellation);
-                    return FormatBoosting(matrix, report, null);
+                    var saved = GradientBoosting.Fit(matrix.X, matrix.NumericTarget!, options, input.Cancellation);
+                    var bundle = ModelBundle.FromFeatures(ModelTypes.GradientBoosting, ModelTask.Regression, matrix, input.Headers, input.KindOf,
+                        input.Headers[target], saved, null, matrix.RowCount, note);
+                    return new AdvancedOutput(FormatBoosting(matrix, report, null) + "\n" + note, bundle);
                 }
                 var cls = GradientBoosting.Evaluate(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, options, input.Cancellation);
-                return FormatBoosting(matrix, cls, matrix.ClassNames);
+                var model = GradientBoosting.Fit(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, options, input.Cancellation);
+                var classified = ModelBundle.FromFeatures(ModelTypes.GradientBoosting, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], model, null, matrix.RowCount, note);
+                return new AdvancedOutput(FormatBoosting(matrix, cls, matrix.ClassNames) + "\n" + note, classified);
             });
         }
 

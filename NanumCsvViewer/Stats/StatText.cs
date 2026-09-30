@@ -54,7 +54,9 @@ namespace NanumCsvViewer.Stats
             AppendRow(sb, _headers, width);
             sb.AppendLine(new string('─', width.Sum() + 2 * (c - 1)));
             foreach (var r in _rows) AppendRow(sb, r, width);
-            return sb.ToString();
+            string rendered = sb.ToString();
+            ReportCapture.Record(new CapturedTable(rendered, _headers.ToArray(), _rows.Select(r => (IReadOnlyList<string>)r.ToArray()).ToArray()));
+            return rendered;
         }
 
         private static void AppendRow(StringBuilder sb, string[] cells, int[] width)

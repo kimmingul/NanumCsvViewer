@@ -18,12 +18,18 @@ namespace NanumCsvViewer
                     target, kind, cancellation: input.Cancellation);
                 if (regression)
                 {
-                    var run = DecisionTree.EvaluateRegression(matrix.X, matrix.NumericTarget!, eval,
-                        tree with { Criterion = TreeCriterion.Mse }, input.Cancellation);
-                    return FormatTreeRegression(matrix, run, tree);
+                    var opt = tree with { Criterion = TreeCriterion.Mse };
+                    var run = DecisionTree.EvaluateRegression(matrix.X, matrix.NumericTarget!, eval, opt, input.Cancellation);
+                    var saved = run.DisplayUsesAllRows ? run.Display : DecisionTree.FitRegression(matrix.X, matrix.NumericTarget!, opt, input.Cancellation);
+                    var bundle = ModelBundle.FromFeatures(ModelTypes.DecisionTree, ModelTask.Regression, matrix, input.Headers, input.KindOf,
+                        input.Headers[target], saved, null, matrix.RowCount, AdvSavedNote(matrix.RowCount));
+                    return new AdvancedOutput(FormatTreeRegression(matrix, run, tree) + "\n" + AdvSavedNote(matrix.RowCount), bundle);
                 }
                 var cls = DecisionTree.EvaluateClassification(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, eval, tree, input.Cancellation);
-                return FormatTreeClassification(matrix, cls, tree);
+                var model = cls.DisplayUsesAllRows ? cls.Display : DecisionTree.FitClassification(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, tree, input.Cancellation);
+                var classified = ModelBundle.FromFeatures(ModelTypes.DecisionTree, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], model, null, matrix.RowCount, AdvSavedNote(matrix.RowCount));
+                return new AdvancedOutput(FormatTreeClassification(matrix, cls, tree) + "\n" + AdvSavedNote(matrix.RowCount), classified);
             });
         }
 
@@ -40,10 +46,16 @@ namespace NanumCsvViewer
                 if (regression)
                 {
                     var run = RandomForest.EvaluateRegression(matrix.X, matrix.NumericTarget!, eval, forest, input.Cancellation);
-                    return FormatForestRegression(matrix, run, forest!);
+                    var saved = run.ModelUsesAllRows ? run.Model : RandomForest.FitRegression(matrix.X, matrix.NumericTarget!, forest, input.Cancellation);
+                    var bundle = ModelBundle.FromFeatures(ModelTypes.RandomForest, ModelTask.Regression, matrix, input.Headers, input.KindOf,
+                        input.Headers[target], saved, null, matrix.RowCount, AdvSavedNote(matrix.RowCount));
+                    return new AdvancedOutput(FormatForestRegression(matrix, run, forest!) + "\n" + AdvSavedNote(matrix.RowCount), bundle);
                 }
                 var cls = RandomForest.EvaluateClassification(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, eval, forest, input.Cancellation);
-                return FormatForestClassification(matrix, cls, forest!);
+                var model = cls.ModelUsesAllRows ? cls.Model : RandomForest.FitClassification(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, forest, input.Cancellation);
+                var classified = ModelBundle.FromFeatures(ModelTypes.RandomForest, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], model, null, matrix.RowCount, AdvSavedNote(matrix.RowCount));
+                return new AdvancedOutput(FormatForestClassification(matrix, cls, forest!) + "\n" + AdvSavedNote(matrix.RowCount), classified);
             });
         }
 
@@ -58,7 +70,14 @@ namespace NanumCsvViewer
                 var matrix = FeatureMatrixBuilder.Build(input.Rows, input.Headers, features, input.KindOf,
                     target, TargetKind.Categorical, cancellation: input.Cancellation);
                 var run = SupportVectorMachine.Evaluate(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, eval, svm, input.Cancellation);
-                return FormatSvm(matrix, run, svm);
+                var scaler = eval.Scaling == ScalingMethod.None ? null : FeatureScaler.Fit(matrix.X, eval.Scaling);
+                var saved = run.DisplayUsesAllRows
+                    ? run.Display
+                    : SupportVectorMachine.Fit(scaler is null ? matrix.X : scaler.Transform(matrix.X), matrix.ClassLabels!, matrix.ClassNames!.Count, svm, input.Cancellation);
+                var bundle = ModelBundle.FromFeatures(ModelTypes.Svm, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], saved, scaler, matrix.RowCount, AdvSavedNote(matrix.RowCount),
+                    new Dictionary<string, string> { ["kernel"] = svm.Kernel.ToString(), ["C"] = svm.C.ToString(CultureInfo.InvariantCulture) });
+                return new AdvancedOutput(FormatSvm(matrix, run, svm) + "\n" + AdvSavedNote(matrix.RowCount), bundle);
             });
         }
 

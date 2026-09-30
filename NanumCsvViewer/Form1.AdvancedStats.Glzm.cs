@@ -40,7 +40,12 @@ namespace NanumCsvViewer
                     }, input.Cancellation);
                 bool logistic = family == GlmFamily.Binomial && link == GlmLink.Logit;
                 var fit = GeneralizedLinearModel.Fit(design, family, link, logistic, input.Cancellation);
-                return RenderGlm(design, fit, logistic);
+                string note = AdvSavedNote(design.RowCount);
+                var bundle = ModelBundle.FromFormula(ModelTypes.Glzm,
+                    family == GlmFamily.Binomial ? ModelTask.Classification : ModelTask.Regression,
+                    design, fit, note,
+                    new Dictionary<string, string> { ["family"] = family.ToString(), ["link"] = link.ToString(), ["converged"] = fit.Converged.ToString() });
+                return new AdvancedOutput(RenderGlm(design, fit, logistic) + "\n" + note, bundle);
             });
         }
 
@@ -67,7 +72,10 @@ namespace NanumCsvViewer
                         BinaryEventLevel = eventLevel.Length > 0 ? eventLevel : null,
                     }, input.Cancellation);
                 var fit = GeneralizedLinearModel.Fit(design, GlmFamily.Binomial, GlmLink.Logit, logisticExtras: true, input.Cancellation);
-                return RenderGlm(design, fit, logistic: true);
+                string note = AdvSavedNote(design.RowCount);
+                var bundle = ModelBundle.FromFormula(ModelTypes.Logistic, ModelTask.Classification, design, fit, note,
+                    new Dictionary<string, string> { ["link"] = "Logit", ["converged"] = fit.Converged.ToString() });
+                return new AdvancedOutput(RenderGlm(design, fit, logistic: true) + "\n" + note, bundle);
             });
         }
 

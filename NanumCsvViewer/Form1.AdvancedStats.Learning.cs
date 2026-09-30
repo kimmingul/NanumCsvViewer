@@ -63,7 +63,24 @@ namespace NanumCsvViewer
                 var matrix = FeatureMatrixBuilder.Build(input.Rows, input.Headers, features, input.KindOf,
                     target, TargetKind.Categorical, cancellation: input.Cancellation);
                 var eval = KnnClassifier.Evaluate(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, options, input.Cancellation);
-                return FormatClassification(matrix, eval, options, knn: true, model: null, allRows: false, scaler: null);
+                var scaler = options.Scaling == ScalingMethod.None ? null : FeatureScaler.Fit(matrix.X, options.Scaling);
+                var knn = new KnnModel
+                {
+                    TrainX = scaler is null ? matrix.X : scaler.Transform(matrix.X),
+                    Labels = matrix.ClassLabels!,
+                    ClassCount = matrix.ClassNames!.Count,
+                    Neighbors = options.Neighbors,
+                };
+                var bundle = ModelBundle.FromFeatures(ModelTypes.Knn, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], knn, scaler, matrix.RowCount, AdvSavedNote(matrix.RowCount),
+                    new Dictionary<string, string>
+                    {
+                        ["neighbors"] = options.Neighbors.ToString(CultureInfo.InvariantCulture),
+                        ["scaling"] = options.Scaling.ToString(),
+                        ["seed"] = options.Seed.ToString(CultureInfo.InvariantCulture),
+                    });
+                return new AdvancedOutput(FormatClassification(matrix, eval, options, knn: true, model: null, allRows: false, scaler: null)
+                    + "\n" + AdvSavedNote(matrix.RowCount), bundle);
             });
         }
 
@@ -78,7 +95,24 @@ namespace NanumCsvViewer
                     target, TargetKind.Categorical, cancellation: input.Cancellation);
                 var groups = FeatureGroups.FromMatrix(matrix.SourceColumns, matrix.FeatureNames);
                 var fit = NaiveBayesClassifier.Evaluate(matrix.X, matrix.ClassLabels!, matrix.ClassNames!.Count, groups, options, input.Cancellation);
-                return FormatClassification(matrix, fit.Evaluation, options, knn: false, fit.Parameters, fit.ParametersUseAllRows, fit.ParameterScaler);
+                FeatureScaler? scaler;
+                NaiveBayesModel saved;
+                if (fit.ParametersUseAllRows)
+                {
+                    saved = fit.Parameters;
+                    scaler = fit.ParameterScaler;
+                }
+                else
+                {
+                    scaler = options.Scaling == ScalingMethod.None ? null : FeatureScaler.Fit(matrix.X, options.Scaling);
+                    saved = NaiveBayesModel.Fit(scaler is null ? matrix.X : scaler.Transform(matrix.X),
+                        matrix.ClassLabels!, matrix.ClassNames!.Count, groups, cancellation: input.Cancellation);
+                }
+                var bundle = ModelBundle.FromFeatures(ModelTypes.NaiveBayes, ModelTask.Classification, matrix, input.Headers, input.KindOf,
+                    input.Headers[target], saved, scaler, matrix.RowCount, AdvSavedNote(matrix.RowCount),
+                    new Dictionary<string, string> { ["scaling"] = options.Scaling.ToString(), ["seed"] = options.Seed.ToString(CultureInfo.InvariantCulture) });
+                return new AdvancedOutput(FormatClassification(matrix, fit.Evaluation, options, knn: false, fit.Parameters, fit.ParametersUseAllRows, fit.ParameterScaler)
+                    + "\n" + AdvSavedNote(matrix.RowCount), bundle);
             });
         }
 

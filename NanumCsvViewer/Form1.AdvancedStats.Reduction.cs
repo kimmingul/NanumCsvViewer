@@ -107,7 +107,10 @@ namespace NanumCsvViewer
                     fm.X, fm.ClassLabels!, fm.ClassNames.Count, fm.ClassNames,
                     holdout ? LdaSplitKind.Holdout : LdaSplitKind.KFold,
                     k, pct / 100.0, seedValue, stratified, cancellation: input.Cancellation);
-                return FormatLda(fm, model, eval, holdout, stratified, k, pct, seedValue);
+                string note = AdvSavedNote(fm.RowCount);
+                var bundle = ModelBundle.FromFeatures(ModelTypes.Lda, ModelTask.Classification, fm, input.Headers, input.KindOf,
+                    input.Headers[targetCol], model, null, fm.RowCount, note);
+                return new AdvancedOutput(FormatLda(fm, model, eval, holdout, stratified, k, pct, seedValue) + "\n" + note, bundle);
             });
         }
 

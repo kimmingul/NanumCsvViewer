@@ -62,6 +62,9 @@ namespace NanumCsvViewer
             learn.DropDownItems.Add(MakeItem("Random Forest…", "랜덤 포레스트…", (_, _) => AdvRandomForest()));
             learn.DropDownItems.Add(MakeItem("Support Vector Machine (SVM)…", "서포트 벡터 머신(SVM)…", (_, _) => AdvSvm()));
             learn.DropDownItems.Add(MakeItem("Gradient Boosting…", "그래디언트 부스팅…", (_, _) => AdvGradientBoosting()));
+            learn.DropDownItems.Add(MakeItem("AdaBoost…", "AdaBoost…", (_, _) => AdvAdaBoost()));
+            learn.DropDownItems.Add(new ToolStripSeparator());
+            learn.DropDownItems.Add(MakeItem("AutoML (Model Search)…", "AutoML(모형 자동 탐색)…", (_, _) => AdvAutoMl()));
             _advMenu.DropDownItems.Add(learn);
 
             var reduce = new ToolStripMenuItem();
@@ -70,6 +73,10 @@ namespace NanumCsvViewer
             reduce.DropDownItems.Add(MakeItem("Linear Discriminant Analysis (LDA)…", "선형판별분석(LDA)…", (_, _) => AdvLda()));
             reduce.DropDownItems.Add(MakeItem("Feature Ranking…", "특성 순위(선택)…", (_, _) => AdvFeatureRanking()));
             _advMenu.DropDownItems.Add(reduce);
+
+            _advMenu.DropDownItems.Add(new ToolStripSeparator());
+            _advMenu.DropDownItems.Add(MakeItem("Apply Saved Model…", "저장된 모형 적용…", (_, _) => AdvApplyModel()));
+            _advMenu.DropDownItems.Add(MakeItem("Variable Mapping Suggestions (OMOP/CDISC)…", "변수 매핑 추천(OMOP/CDISC)…", (_, _) => AdvVariableMapping()));
 
             RegisterLabel(_advMenu, "Advanced Stats", "고급 통계");
         }
@@ -81,23 +88,31 @@ namespace NanumCsvViewer
         /// 취소·드레인·busy 수명(RunAnalysisOperationAsync)을 쓰며, 사용자 입력 오류(DesignMatrixException,
         /// FormulaParseException, 예산 초과)는 경고 상자로 안내하고 부분 결과를 만들지 않는다.
         /// </summary>
-        private async Task RunAdvancedAsync(string title, Func<AdvancedInput, string> compute)
+        private Task RunAdvancedAsync(string title, Func<AdvancedInput, string> compute)
+            => RunAdvancedAsync(title, input => new AdvancedOutput(compute(input)));
+
+        /// <summary>
+        /// 결과 텍스트와 함께 적합 모형(저장·ONNX 내보내기 대상)을 돌려주는 분석용. compute 동안 렌더된
+        /// TextTable은 ReportCapture로 구조화 수집되어 보고서 내보내기(HTML/Excel/PDF)에 쓰인다.
+        /// </summary>
+        private async Task RunAdvancedAsync(string title, Func<AdvancedInput, AdvancedOutput> compute)
         {
             if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             var doc = _doc;
             var headers = AdvHeaders();
             var kindOf = AdvKindOf();
-            var body = await RunAnalysisOperationAsync(doc, (source, cancellation) =>
-                compute(new AdvancedInput(source, headers, kindOf, cancellation)));
-            if (body is null || _closing || IsDisposed || !ReferenceEquals(doc, _doc)) return;
-            ShowAdvancedResult(title, body);
+            var report = await RunAnalysisOperationAsync(doc, (source, cancellation) =>
+            {
+                using var capture = ReportCapture.Begin();
+                var output = compute(new AdvancedInput(source, headers, kindOf, cancellation));
+                return new AdvancedReport(title, output.Text, capture.Tables, output.Model, DateTime.Now);
+            });
+            if (report is null || _closing || IsDisposed || !ReferenceEquals(doc, _doc)) return;
+            ShowAdvancedResult(report);
         }
 
         private void ShowAdvancedResult(string title, string body)
-        {
-            using var form = new ResultForm(title, body, _palette) { Size = new Size(900, 640) };
-            form.ShowDialog(this);
-        }
+            => ShowAdvancedResult(new AdvancedReport(title, body, Array.Empty<CapturedTable>(), null, DateTime.Now));
 
         /// <summary>식·결과에 쓰는 순수 컬럼 이름(타입 배지 없음). 빈 헤더는 ColumnN.</summary>
         private string[] AdvHeaders()

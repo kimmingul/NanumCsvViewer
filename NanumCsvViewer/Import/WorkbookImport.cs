@@ -14,7 +14,9 @@ namespace NanumCsvViewer.Import
     /// AllowedCodes = 컬럼별 허용 코드 집합(SPSS 값라벨·SAS 카탈로그, 원값 모드에서만) — 데이터 품질
     /// 코드북 대조(이슈 #26)의 입력. 라벨 표시 모드에서는 셀이 라벨로 치환되므로 null.</summary>
     public sealed record ImportedSheet(string Name, string CsvPath, IReadOnlyList<ColumnTypeHint?>? Hints = null,
-        IReadOnlyList<IReadOnlySet<string>?>? AllowedCodes = null);
+        IReadOnlyList<IReadOnlySet<string>?>? AllowedCodes = null,
+        IReadOnlyList<string?>? VariableNames = null,
+        IReadOnlyList<string?>? VariableLabels = null);
 
     /// <summary>
     /// 엑셀(xlsx/xls)·SAS(sas7bdat)·SPSS(sav)·SQLite(db/sqlite) 파일을 시트별 UTF-8 CSV로 변환한다.
@@ -62,6 +64,9 @@ namespace NanumCsvViewer.Import
         // 필드 라벨 표시 모드면 라벨(있을 때)을, 아니면 원래 이름을 헤더로 쓴다. SPSS·SAS 공통.
         private static string ResolveHeader(string name, string? label, bool showLabels)
             => showLabels && !string.IsNullOrWhiteSpace(label) ? label! : name;
+
+        private static string? BlankToNull(string? text)
+            => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
         private static List<ImportedSheet> ImportExcel(string path, string tempDir)
         {
@@ -137,7 +142,9 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes) };
+            var variableNames = columns.Select(col => (string?)col.getName()).ToArray();
+            var variableLabels = columns.Select(col => BlankToNull(col.getLabel())).ToArray();
+            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes, variableNames, variableLabels) };
         }
 
         // 동반 카탈로그 탐색: <파일명>.sas7bcat → formats.sas7bcat 순. 읽기 실패는 null(라벨 없이 진행).
@@ -180,7 +187,9 @@ namespace NanumCsvViewer.Import
                     writer.WriteLine(string.Join(",", cells));
                 }
             }
-            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes) };
+            var variableNames = vars.Select(v => (string?)SpssHeaderName(v.Name)).ToArray();
+            var variableLabels = vars.Select(v => BlankToNull(v.Label)).ToArray();
+            return new List<ImportedSheet> { new(name, csv, hints, allowedCodes, variableNames, variableLabels) };
         }
 
         // SPSS 변수의 값 라벨 키 집합(숫자 코드 → CSV 셀 텍스트 형식). 라벨이 없으면 null.
@@ -290,6 +299,8 @@ namespace NanumCsvViewer.Import
         private readonly string[] _csvPaths;
         private readonly IReadOnlyList<ColumnTypeHint?>?[] _hints;
         private readonly IReadOnlyList<IReadOnlySet<string>?>?[] _allowedCodes;
+        private readonly IReadOnlyList<string?>?[] _variableNames;
+        private readonly IReadOnlyList<string?>?[] _variableLabels;
         private readonly string _tempDir;
 
         private WorkbookSession(string sourcePath, string tempDir, IReadOnlyList<ImportedSheet> sheets, bool showLabels)
@@ -301,6 +312,8 @@ namespace NanumCsvViewer.Import
             _csvPaths = sheets.Select(s => s.CsvPath).ToArray();
             _hints = sheets.Select(s => s.Hints).ToArray();
             _allowedCodes = sheets.Select(s => s.AllowedCodes).ToArray();
+            _variableNames = sheets.Select(s => s.VariableNames).ToArray();
+            _variableLabels = sheets.Select(s => s.VariableLabels).ToArray();
         }
 
         /// <summary>해당 시트의 컬럼별 선언 타입 힌트(SAS/SPSS만, 없으면 null).</summary>
@@ -310,6 +323,14 @@ namespace NanumCsvViewer.Import
         /// <summary>해당 시트의 컬럼별 허용 코드 집합(코드북 대조용 — 원값 모드 SPSS/SAS만, 없으면 null).</summary>
         public IReadOnlyList<IReadOnlySet<string>?>? AllowedCodes(int sheetIndex)
             => sheetIndex >= 0 && sheetIndex < _allowedCodes.Length ? _allowedCodes[sheetIndex] : null;
+
+        /// <summary>SPSS·SAS 변수명(표시 헤더와 별개). 다른 포맷은 null.</summary>
+        public IReadOnlyList<string?>? VariableNames(int sheetIndex)
+            => sheetIndex >= 0 && sheetIndex < _variableNames.Length ? _variableNames[sheetIndex] : null;
+
+        /// <summary>SPSS·SAS 변수 라벨. 없거나 다른 포맷이면 null. 라벨 표시 모드여도 원 라벨을 유지한다.</summary>
+        public IReadOnlyList<string?>? VariableLabels(int sheetIndex)
+            => sheetIndex >= 0 && sheetIndex < _variableLabels.Length ? _variableLabels[sheetIndex] : null;
 
         public static WorkbookSession Create(string path, bool showLabels = false)
         {

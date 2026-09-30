@@ -27,7 +27,9 @@ namespace NanumCsvViewer
                 var dm = DesignMatrixBuilder.Build(input.Rows, input.Headers, formula, input.KindOf, cancellation: input.Cancellation);
                 var fit = LinearModel.Fit(dm, input.Cancellation);
                 var anova = LinearModel.TypeII(dm, fit, input.Cancellation);
-                return FormatGlmResult(dm, fit, anova);
+                string note = AdvSavedNote(dm.RowCount);
+                var bundle = ModelBundle.FromFormula(ModelTypes.LinearModel, ModelTask.Regression, dm, fit, note);
+                return new AdvancedOutput(FormatGlmResult(dm, fit, anova) + "\n" + note, bundle);
             });
         }
 
