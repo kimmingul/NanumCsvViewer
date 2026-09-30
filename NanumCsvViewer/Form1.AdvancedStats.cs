@@ -32,6 +32,9 @@ namespace NanumCsvViewer
             models.DropDownItems.Add(new ToolStripSeparator());
             models.DropDownItems.Add(MakeItem("Generalized Linear Model (GLzM)…", "일반화선형모형(GLzM)…", (_, _) => AdvGlzm()));
             models.DropDownItems.Add(MakeItem("Logistic Regression…", "로지스틱 회귀…", (_, _) => AdvLogistic()));
+            models.DropDownItems.Add(new ToolStripSeparator());
+            models.DropDownItems.Add(MakeItem("Linear Mixed Model (LMM)…", "선형 혼합모형(LMM)…", (_, _) => AdvLmm()));
+            models.DropDownItems.Add(MakeItem("Nonlinear Mixed Model (NLMM)…", "비선형 혼합모형(NLMM)…", (_, _) => AdvNlmm()));
             _advMenu.DropDownItems.Add(models);
 
             var nonpar = new ToolStripMenuItem();
@@ -43,11 +46,22 @@ namespace NanumCsvViewer
             nonpar.DropDownItems.Add(MakeItem("Friedman…", "Friedman…", (_, _) => AdvFriedman()));
             _advMenu.DropDownItems.Add(nonpar);
 
+            var surv = new ToolStripMenuItem();
+            RegisterLabel(surv, "Survival Analysis", "생존분석");
+            surv.DropDownItems.Add(MakeItem("Kaplan-Meier · Log-rank…", "Kaplan-Meier · 로그순위 검정…", (_, _) => AdvKaplanMeier()));
+            surv.DropDownItems.Add(MakeItem("Cox Proportional Hazards…", "Cox 비례위험 회귀…", (_, _) => AdvCox()));
+            _advMenu.DropDownItems.Add(surv);
+
             var learn = new ToolStripMenuItem();
             RegisterLabel(learn, "Classification · Clustering", "분류·군집");
             learn.DropDownItems.Add(MakeItem("K-means Clustering…", "K-means 군집…", (_, _) => AdvKMeans()));
             learn.DropDownItems.Add(MakeItem("K-Nearest Neighbors (KNN)…", "K-최근접 이웃(KNN)…", (_, _) => AdvKnn()));
             learn.DropDownItems.Add(MakeItem("Naive Bayes…", "나이브 베이즈…", (_, _) => AdvNaiveBayes()));
+            learn.DropDownItems.Add(new ToolStripSeparator());
+            learn.DropDownItems.Add(MakeItem("Decision Tree…", "결정트리…", (_, _) => AdvDecisionTree()));
+            learn.DropDownItems.Add(MakeItem("Random Forest…", "랜덤 포레스트…", (_, _) => AdvRandomForest()));
+            learn.DropDownItems.Add(MakeItem("Support Vector Machine (SVM)…", "서포트 벡터 머신(SVM)…", (_, _) => AdvSvm()));
+            learn.DropDownItems.Add(MakeItem("Gradient Boosting…", "그래디언트 부스팅…", (_, _) => AdvGradientBoosting()));
             _advMenu.DropDownItems.Add(learn);
 
             var reduce = new ToolStripMenuItem();

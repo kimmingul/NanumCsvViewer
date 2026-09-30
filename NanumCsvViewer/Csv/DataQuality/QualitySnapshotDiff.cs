@@ -441,10 +441,10 @@ namespace NanumCsvViewer.Csv.DataQuality
 
         private readonly record struct FindingKey(QualityCheckKind Kind, string Column, string RuleName);
 
-        /// <summary>검사 종류 + 컬럼명 + 규칙명. 규칙이 아니면 규칙명은 비운다(상수값·건수·예시는 정체성이 아님).</summary>
+        /// <summary>검사 종류 + 컬럼명 + 규칙명. 규칙·적합성·DQD가 아니면 라벨은 비운다(상수값·건수·예시는 정체성이 아님).</summary>
         private static FindingKey KeyOf(QualityFinding f)
             => new(f.Kind, f.ColumnName ?? "",
-                f.Kind == QualityCheckKind.Rule ? f.Label ?? "" : "");
+                QualitySessionChecks.UsesLabel(f.Kind) ? f.Label ?? "" : "");
 
         private static void CompareFindings(QualityReport baseline, QualityReport current, bool partial,
             List<QualitySnapshotDiffItem> items)
@@ -501,8 +501,7 @@ namespace NanumCsvViewer.Csv.DataQuality
             }
         }
 
-        private static bool IsSessionCheck(QualityCheckKind kind)
-            => kind is QualityCheckKind.Rule or QualityCheckKind.KeyUniqueness or QualityCheckKind.ForeignKeyOrphan;
+        private static bool IsSessionCheck(QualityCheckKind kind) => QualitySessionChecks.IsUserRun(kind);
 
         private static Dictionary<FindingKey, List<QualityFinding>> GroupFindings(
             IReadOnlyList<QualityFinding>? findings, bool skipDuplicateRows)

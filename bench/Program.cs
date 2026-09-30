@@ -160,6 +160,19 @@ else if (mode == "advstats")
     Time("Naive Bayes (holdout)", () => $"acc={NanumCsvViewer.Stats.NaiveBayesClassifier.Evaluate(fm!.X, fm.ClassLabels!, 3, NanumCsvViewer.Stats.FeatureGroups.FromMatrix(fm.SourceColumns, fm.FeatureNames)).Evaluation.Metrics.Accuracy:F4}");
     Time("K-means (k=5)", () => $"BSS/TSS={NanumCsvViewer.Stats.KMeansClustering.Fit(fm!.X, new NanumCsvViewer.Stats.KMeansOptions { K = 5, Restarts = 3 }).BetweenTotalRatio:F4}");
     Time("KNN (holdout)", () => $"acc={NanumCsvViewer.Stats.KnnClassifier.Evaluate(fm!.X, fm.ClassLabels!, 3).Metrics.Accuracy:F4}");
+    // Phase 2 (이슈 #27)
+    var eval = new NanumCsvViewer.Stats.ClassifierOptions();
+    Time("LMM (997 groups)", () =>
+    {
+        var r = NanumCsvViewer.Stats.MixedModel.Fit(rows, headers, NanumCsvViewer.Stats.ModelFormula.Parse("y ~ x1 + x2"), KindOf, 12, Array.Empty<int>());
+        return $"converged={r.Converged}";
+    });
+    Time("Kaplan-Meier+logrank", () => $"done={NanumCsvViewer.Stats.KaplanMeierAnalysis.FromRows(rows, 9, 7, null, 5) is not null}");
+    Time("Cox (Efron)", () => $"converged={NanumCsvViewer.Stats.CoxRegression.FromFormula(rows, headers, NanumCsvViewer.Stats.ModelFormula.Parse("t1 ~ x1 + x2 + C(g)"), 7, null, KindOf).Converged}");
+    Time("Decision tree", () => $"done={NanumCsvViewer.Stats.DecisionTree.EvaluateClassification(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
+    Time("Random forest", () => $"done={NanumCsvViewer.Stats.RandomForest.EvaluateClassification(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
+    Time("SVM (RBF, capped)", () => $"done={NanumCsvViewer.Stats.SupportVectorMachine.Evaluate(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
+    Time("Gradient boosting", () => $"done={NanumCsvViewer.Stats.GradientBoosting.Evaluate(fm!.X, fm.ClassLabels!, 3) is not null}");
     Console.WriteLine($"peak working set: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024 / 1024} MiB");
 
     static double Normal(Random r) => Math.Sqrt(-2 * Math.Log(1 - r.NextDouble())) * Math.Cos(2 * Math.PI * r.NextDouble());

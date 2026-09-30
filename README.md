@@ -5,6 +5,15 @@
 
 > .NET 10 · Windows Forms · 단일 실행 파일(.exe) 배포 지원
 
+### v1.18.0 — 고급 통계 Phase 2 · 데이터 품질 적합성 프로파일
+
+- **혼합모형** — 선형 혼합모형(LMM: 임의 절편·기울기, REML/ML, ICC)과 비선형 혼합모형(NLMM: 지수 감쇠·로지스틱 성장·Michaelis–Menten·Emax).
+- **생존분석** — Kaplan–Meier(신뢰구간·중앙값·곡선 창)·로그순위 검정, Cox 비례위험 회귀(위험비·Harrell C).
+- **트리·SVM·부스팅** — 결정트리, 랜덤 포레스트, SVM(선형/RBF), 히스토그램 그래디언트 부스팅(LightGBM/XGBoost 계열, 순수 관리형).
+- **적합성 프로파일**(데이터 품질) — 사용자 JSON으로 필수값·타입·길이(CDISC)·코드 목록(파일 가능)·패턴·범위·**개념 참조**(예: OMOP CONCEPT의 concept_id + domain) 검사. 위반 행은 필터 칩·행 이동으로 이어집니다.
+- **OHDSI DQD 결과 가져오기** — DataQualityDashboard 결과 JSON을 검사 결과 패널에 표시합니다.
+- statsmodels·scipy·sklearn 대조 테스트, 코드 리뷰 결함 8건 수정. 500 MB(620만 행)에서 대부분 30초 이내([기록](docs/ADVANCED_STATS_PLAN.md)).
+
 ### v1.17.0 — 고급 통계·머신러닝 (Phase 1, ALGLIB)
 
 - **'고급 통계' 메뉴 신설**(데이터 품질 옆) — 16개 분석: **일반선형모형(GLM)**·**공분산분석(ANCOVA)**·**반복측정 분산분석**(Mauchly·GG/HF 보정)·**일반화선형모형**(가우시안·이항·포아송·감마)·**로지스틱 회귀**(오즈비·AUC·Hosmer–Lemeshow), 비모수 검정 5종(**Mann-Whitney U·Wilcoxon 부호순위·부호·Kruskal-Wallis+Dunn·Friedman**), **K-means·KNN·나이브 베이즈**, **PCA·LDA·특성 순위**(Benjamini–Hochberg q).

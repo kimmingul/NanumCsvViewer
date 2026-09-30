@@ -32,6 +32,14 @@ namespace NanumCsvViewer
             QualityCheckKind.KeyUniqueness => LT("Key uniqueness", "키 유일성"),
             QualityCheckKind.Rule => LT("Rule", "규칙"),
             QualityCheckKind.ForeignKeyOrphan => LT("Referential integrity", "참조 무결성"),
+            QualityCheckKind.ConformanceRequired => LT("Required", "필수"),
+            QualityCheckKind.ConformanceType => LT("Declared type", "선언 타입"),
+            QualityCheckKind.ConformanceMaxLength => LT("Max length", "최대 길이"),
+            QualityCheckKind.ConformanceCodelist => LT("Codelist", "코드리스트"),
+            QualityCheckKind.ConformancePattern => LT("Pattern", "정규식"),
+            QualityCheckKind.ConformanceRange => LT("Numeric range", "수치 범위"),
+            QualityCheckKind.ConformanceConcept => LT("Concept reference", "개념 참조"),
+            QualityCheckKind.DqdImported => LT("Imported from DQD", "DQD에서 가져옴"),
             _ => k.ToString(),
         };
 
@@ -100,6 +108,25 @@ namespace NanumCsvViewer
                     string ex = string.Join(", ", f.Examples.Take(3).Select(e => $"{e.Value}@{e.SourceRow}"));
                     return LT($"{f.SkippedRows:N0} blank key(s) skipped · e.g. ", $"빈 키 {f.SkippedRows:N0}건 제외 · 예: ") + ex;
                 }
+                case QualityCheckKind.ConformanceRequired:
+                case QualityCheckKind.ConformanceType:
+                case QualityCheckKind.ConformanceMaxLength:
+                case QualityCheckKind.ConformanceCodelist:
+                case QualityCheckKind.ConformancePattern:
+                case QualityCheckKind.ConformanceRange:
+                case QualityCheckKind.ConformanceConcept:
+                    return ConformanceDetail(f);
+                case QualityCheckKind.DqdImported:
+                {
+                    string pct = f.Approximate
+                        ? LT("count not in source", "소스에 건수 없음")
+                        : f.EvaluatedRows > 0
+                            ? $"{100.0 * f.ViolationCount / f.EvaluatedRows:0.##}% of {f.EvaluatedRows:N0}"
+                            : LT("denominator not reported", "분모 없음");
+                    string note = f.Breakdown.Count > 0 ? f.Breakdown[0].Value : "";
+                    return LT("imported from DQD", "DQD에서 가져옴") + " · " + pct
+                        + (note.Length > 0 ? " · " + note : "");
+                }
                 default:
                     return "";
             }
@@ -112,6 +139,33 @@ namespace NanumCsvViewer
                 ? f.Label is { Length: > 0 } l && f.Kind == QualityCheckKind.Rule ? l : KindName(f.Kind)
                 : f.ColumnName.Length > 0 ? $"{KindName(f.Kind)}: {f.ColumnName}" : KindName(f.Kind);
             return LT("QC ", "품질 ") + subject;
+        }
+
+        /// <summary>검사 열·보고서 제목. 규칙·적합성·DQD는 라벨(규칙명·검사명)을 붙인다.</summary>
+        public static string CheckTitle(QualityFinding f)
+            => QualitySessionChecks.UsesLabel(f.Kind) && f.Label is { Length: > 0 }
+                ? $"{KindName(f.Kind)}: {f.Label}"
+                : KindName(f.Kind);
+
+        private static string ConformanceDetail(QualityFinding f)
+        {
+            if (f.Column < 0 && f.ViolationCount == 0)
+                return LT("column not in this table — checks not run", "이 테이블에 없는 컬럼 — 검사하지 않음");
+            if (f.Column < 0)
+                return LT("required column is not in this table", "이 테이블에 없는 필수 컬럼");
+            string extra = f.Breakdown.Count > 0 ? string.Join(" · ", f.Breakdown.Select(b => b.Value)) : "";
+            if (f.ViolationCount == 0)
+            {
+                string passed = LT("passed (0 violations)", "통과(위반 0건)");
+                return extra.Length == 0 ? passed : passed + " · " + extra;
+            }
+            string ex = f.Examples.Count == 0
+                ? ""
+                : LT("e.g. ", "예: ") + string.Join(", ", f.Examples.Take(3).Select(e => e.Value));
+            string skip = f.SkippedRows > 0
+                ? LT($"{f.SkippedRows:N0} blank skipped", $"빈 값 {f.SkippedRows:N0}건 제외")
+                : "";
+            return string.Join(" · ", new[] { ex, skip, extra }.Where(s => s.Length > 0));
         }
     }
 
@@ -259,9 +313,7 @@ namespace NanumCsvViewer
                     UseItemStyleForSubItems = false,
                 };
                 item.SubItems[0].ForeColor = SeverityColor(f.Severity);
-                string check = f.Kind == QualityCheckKind.Rule && f.Label is { Length: > 0 }
-                    ? $"{QualityText.KindName(f.Kind)}: {f.Label}"
-                    : QualityText.KindName(f.Kind);
+                string check = QualityText.CheckTitle(f);
                 item.SubItems.Add(MakeSub(check));
                 item.SubItems.Add(MakeSub(f.Column >= 0 ? f.ColumnName : f.ColumnName.Length > 0 ? f.ColumnName : "—"));
                 item.SubItems.Add(MakeSub((f.Approximate ? "≈" : "") + f.ViolationCount.ToString("N0")));
@@ -324,14 +376,16 @@ namespace NanumCsvViewer
         private void UpdateButtons()
         {
             var f = Selected;
-            _btnFilter.Enabled = f?.ViolationPredicate is not null;
-            _btnJump.Enabled = f is { Examples.Count: > 0 };
+            bool imported = f?.Kind == QualityCheckKind.DqdImported;
+            _btnFilter.Enabled = f?.ViolationPredicate is not null && !imported;
+            _btnJump.Enabled = f is { Examples.Count: > 0 } && !imported;
             _btnExport.Enabled = _findings.Count > 0;
         }
 
         private void ApplySelected()
         {
-            if (Selected is { ViolationPredicate: not null } f) ApplyFilterRequested?.Invoke(f);
+            if (Selected is { ViolationPredicate: not null } f && f.Kind != QualityCheckKind.DqdImported)
+                ApplyFilterRequested?.Invoke(f);
         }
 
         private void JumpToSelected()
@@ -552,6 +606,199 @@ namespace NanumCsvViewer
                 MessageBox.Show(this, ex.Message, LT("Failed to save rule set", "규칙 세트 저장 실패"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+    }
+    /// <summary>
+    /// 적합성 프로파일 불러오기·예제 저장·실행. 편집은 JSON 파일에서 한다.
+    /// 내장 의료 규칙 팩은 없다.
+    /// </summary>
+    internal sealed class ConformanceProfileDialog : Form
+    {
+        private readonly ListView _list;
+        private readonly Label _summary;
+        private readonly ThemePalette _palette;
+
+        public ConformanceProfile? Profile { get; private set; }
+        public string? ProfilePath { get; private set; }
+        public bool RunRequested { get; private set; }
+
+        private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
+
+        public ConformanceProfileDialog(ConformanceProfile? profile, string? path, ThemePalette palette)
+        {
+            _palette = palette;
+            Profile = profile;
+            ProfilePath = path;
+
+            Text = LT("Conformance Profile", "적합성 프로파일");
+            StartPosition = FormStartPosition.CenterParent;
+            Size = new Size(760, 460);
+            MinimizeBox = false;
+            MaximizeBox = false;
+            ShowIcon = false;
+            BackColor = palette.Window;
+            ForeColor = palette.Text;
+
+            var note = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 72,
+                Padding = new Padding(8, 6, 8, 0),
+                ForeColor = palette.Text,
+                Text = LT(
+                    "User-owned JSON. No built-in medical rule pack. Paths are relative to the profile file (UTF-8/CP949 CSV or text). Blank concept keys are skipped. If a reference key set exceeds the memory budget, the run stops with no partial result. The example template's ref_id check needs reference.csv beside the profile — remove it if you are not using a reference file.",
+                    "사용자 소유 JSON입니다. 내장 의료 규칙 팩은 없습니다. 경로는 프로파일 파일 기준(UTF-8/CP949 CSV·텍스트)입니다. 개념 참조의 빈 키는 건너뜁니다. 참조 키 집합이 메모리 예산을 넘으면 부분 결과 없이 중단합니다. 예제 템플릿의 ref_id 검사는 프로파일 옆의 reference.csv가 필요합니다. 쓰지 않으면 빼세요."),
+            };
+
+            _summary = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 22,
+                Padding = new Padding(8, 2, 8, 0),
+                ForeColor = palette.Text,
+            };
+
+            _list = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                MultiSelect = false,
+                Dock = DockStyle.Fill,
+                BackColor = palette.GridBg,
+                ForeColor = palette.Text,
+                BorderStyle = BorderStyle.FixedSingle,
+            };
+            _list.Columns.Add(LT("Column", "컬럼"), 140);
+            _list.Columns.Add(LT("Checks", "검사"), 360);
+            _list.Columns.Add(LT("Severity", "심각도"), 80);
+
+            var bottom = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Bottom,
+                AutoSize = true,
+                Padding = new Padding(6),
+            };
+            Button Make(string text, Action onClick, int minW = 96)
+            {
+                var b = new Button { Text = text, AutoSize = true, MinimumSize = new Size(minW, 26) };
+                b.Click += (_, _) => onClick();
+                return b;
+            }
+            var closeBtn = new Button
+            {
+                Text = LT("Close", "닫기"),
+                AutoSize = true,
+                MinimumSize = new Size(84, 26),
+                DialogResult = DialogResult.OK,
+            };
+            bottom.Controls.Add(closeBtn);
+            bottom.Controls.Add(Make(LT("Run", "실행"), Run));
+            bottom.Controls.Add(Make(LT("Save Template…", "예제 저장…"), SaveTemplate, 120));
+            bottom.Controls.Add(Make(LT("Load…", "불러오기…"), LoadProfile));
+
+            Controls.Add(_list);
+            Controls.Add(bottom);
+            Controls.Add(_summary);
+            Controls.Add(note);
+            AcceptButton = closeBtn;
+            RefreshList();
+        }
+
+        private void RefreshList()
+        {
+            _list.Items.Clear();
+            if (Profile is null)
+            {
+                _summary.Text = LT("No profile loaded.", "불러온 프로파일이 없습니다.");
+                return;
+            }
+            string where = string.IsNullOrEmpty(ProfilePath) ? "" : " · " + ProfilePath;
+            _summary.Text = (Profile.Name.Length > 0 ? Profile.Name : LT("(unnamed)", "(이름 없음)"))
+                + LT($" · {Profile.Columns.Count} column spec(s)", $" · 컬럼 스펙 {Profile.Columns.Count}개")
+                + where;
+            foreach (var spec in Profile.Columns)
+            {
+                var item = new ListViewItem(spec.Column);
+                item.SubItems.Add(Summarize(spec));
+                item.SubItems.Add(QualityText.SeverityName(spec.Severity));
+                _list.Items.Add(item);
+            }
+            foreach (string name in Profile.RequiredColumns)
+            {
+                if (Profile.Columns.Any(c => string.Equals(c.Column?.Trim(), name?.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                var item = new ListViewItem(name);
+                item.SubItems.Add(LT("required column (presence)", "필수 컬럼(존재)"));
+                item.SubItems.Add(QualityText.SeverityName(QualitySeverity.Critical));
+                _list.Items.Add(item);
+            }
+        }
+
+        private static string Summarize(ConformanceColumnSpec spec)
+        {
+            var parts = new List<string>();
+            if (spec.Required) parts.Add(LT("required", "필수 값"));
+            if (!string.IsNullOrWhiteSpace(spec.DeclaredType)) parts.Add(spec.DeclaredType.Trim());
+            if (spec.MaxLength is int n) parts.Add(LT($"len≤{n}", $"길이≤{n}"));
+            if (spec.Codelist is not null) parts.Add(LT("codelist", "코드리스트"));
+            if (!string.IsNullOrWhiteSpace(spec.Pattern)) parts.Add(LT("pattern", "정규식"));
+            if (spec.Min is not null || spec.Max is not null) parts.Add(LT("range", "범위"));
+            if (spec.ConceptRef is not null) parts.Add(LT("concept ref", "개념 참조"));
+            return parts.Count == 0 ? "—" : string.Join(", ", parts);
+        }
+
+        private void LoadProfile()
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Filter = LT("Conformance profile (*.json)|*.json", "적합성 프로파일 (*.json)|*.json"),
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                Profile = ConformanceProfileJson.Deserialize(System.IO.File.ReadAllText(dlg.FileName));
+                ProfilePath = dlg.FileName;
+                RefreshList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, LT("Failed to load profile", "프로파일 불러오기 실패"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void SaveTemplate()
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Filter = LT("Conformance profile (*.json)|*.json", "적합성 프로파일 (*.json)|*.json"),
+                FileName = "conformance-profile.json",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                System.IO.File.WriteAllText(dlg.FileName, ConformanceProfileJson.ExampleJson());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, LT("Failed to save template", "예제 저장 실패"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void Run()
+        {
+            if (Profile is null)
+            {
+                MessageBox.Show(this,
+                    LT("Load a conformance profile first.", "먼저 적합성 프로파일을 불러오세요."),
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            RunRequested = true;
+            DialogResult = DialogResult.OK;
+            Close();
         }
     }
 }

@@ -37,7 +37,16 @@ Kahn 3차원은 UI에 노출하지 않고 발견 항목의 내부 태그로만 �
 컬럼명 기준 매칭, 결측률 pp·고유값 변화율 임계, 부분 스캔 근사 표기, 사용자 실행 검사는 "재검사 안 됨"으로 구분),
 메뉴 "기준선 스냅샷과 비교…". ② **교차시트·교차파일 참조무결성(FK)** — `ReferentialIntegrityScanner`
 (부모 키 집합 메모리 예산, 자식 파티션 병렬 스캔, 빈 키 제외 기본, 고아 행 술어 → 필터 칩), 메뉴 "참조 무결성 검사…".
-남은 후속: OMOP/CDISC codelist·concept_id·domain 설정 스키마, OHDSI DQD JSON import. (#27 연동 버튼은 v1.17.0에서 검사 결과 패널의 "고급 통계 ▾"로 구현.)
+
+**후속 구현(이슈 #26 잔여, 완료):** ③ **사용자 소유 적합성 프로파일** — `ConformanceProfile` / `ConformanceProfileRunner`
+(스키마 v1, 알 수 없는 필드 무시, 컬럼명 대소문자 옵션, 필수 컬럼·필수 값, 선언 타입, 최대 길이, 코드리스트(인라인 또는
+프로파일 기준 상대 경로 CSV·텍스트, 대소문자/트림 옵션), 정규식, 수치 범위, 개념 참조 = 다른 파일의 키 + 선택적 domain 제한).
+참조 키 집합은 `ReferentialIntegrityScanner`와 같은 메모리 예산(기본 256 MiB)이고, 초과 시 부분 결과 없이 중단한다.
+내장 의료 규칙 팩은 없다. 메뉴 "적합성 프로파일…"(JSON 불러오기·실행·예제 템플릿 저장).
+④ **OHDSI DQD 결과 JSON 가져오기** — `DqdResultsImport`가 `CheckResults`를 발견으로 표시한다(행 술어 없음,
+필터 버튼 비활성, 'imported from DQD' 표기, 현재 테이블명 필터 선택, 없는 필드는 건너뜀). 메뉴 "DQD 결과 가져오기…".
+가져온 발견과 프로파일 발견은 품질 보고서 내보내기(HTML/MD/JSON)에 포함된다.
+(#27 연동 버튼은 v1.17.0에서 검사 결과 패널의 "고급 통계 ▾"로 구현.)
 
 ## 1. 목표 (이슈 #26 요지)
 
@@ -89,7 +98,7 @@ Tests/QualityEngineTests.cs — 규칙 평가·점수·집계 검증(합성 데�
 
 - **Phase A (계산·테스트 가능)**: QualityRule/RuleSet/Engine/Report + 내장 규칙 10+개(결측률·상수·완전중복·타입불일치·범위(age)·성별 코드셋·날짜순서·이상치·형식) + scipy 무관 합성 데이터 테스트.
 - **Phase B (UI)**: 품질 탭/창 — 게이지·실패 테이블·문제행 점프·Export placeholder.
-- **후속**: OMOP/CDISC codelist·concept_id·domain·FK 검증(설정 스키마부터), OHDSI DQD JSON import, #27 "품질 OK → Advanced Stats" 워크플로 연동 버튼.
+- **후속(완료):** OMOP/CDISC 스타일 적합성 프로파일(codelist·concept 참조·domain·필수 컬럼·길이·정규식·범위, 사용자 JSON, 의료 팩 없음), OHDSI DQD JSON import. #27 "품질 OK → Advanced Stats" 워크플로 연동은 검사 결과 패널의 "고급 통계 ▾".
 
 ## 6. 열린 결정 (새 세션에서 먼저 확정)
 

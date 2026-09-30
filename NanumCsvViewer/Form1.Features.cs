@@ -199,6 +199,8 @@ namespace NanumCsvViewer
             _qualityMenu.DropDownItems.Add(MakeItem("Key Uniqueness…", "키 유일성 검사…", async (_, _) => await RunKeyUniquenessAsync()));
             _qualityMenu.DropDownItems.Add(MakeItem("Referential Integrity Check…", "참조 무결성 검사…", async (_, _) => await RunReferentialIntegrityAsync()));
             _qualityMenu.DropDownItems.Add(MakeItem("Validation Rules…", "타당성 규칙…", async (_, _) => await ShowQualityRulesAsync()));
+            _qualityMenu.DropDownItems.Add(MakeItem("Conformance Profile…", "적합성 프로파일…", async (_, _) => await ShowConformanceProfileAsync()));
+            _qualityMenu.DropDownItems.Add(MakeItem("Import DQD Results…", "DQD 결과 가져오기…", async (_, _) => await ImportDqdResultsAsync()));
             _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
             _qualityMenu.DropDownItems.Add(MakeItem("Export Quality Report…", "품질 보고서 내보내기…", (_, _) => ExportQualityReport()));
             _qualityMenu.DropDownItems.Add(MakeItem("Compare with Baseline Snapshot…", "기준선 스냅샷과 비교…",
@@ -2479,6 +2481,8 @@ namespace NanumCsvViewer
         private readonly List<QualityFinding> _qualityFindings = new(); // 표시 대상: 프로파일 + 키 + 규칙
         private VirtualCsvDocument? _qualityFindingsDoc;             // 발견이 캡처한 문서(프로버넌스 가드)
         private List<QualityRule> _qualityRules = new();             // 세션 규칙(문서 전환에도 유지)
+        private ConformanceProfile? _conformanceProfile;             // 마지막으로 불러온 적합성 프로파일
+        private string? _conformanceProfilePath;
         private CancellationTokenSource? _qualityCts;
         private Task? _qualityTask;                                  // CancelAndDrainAsync가 함께 대기
 
@@ -2619,7 +2623,7 @@ namespace NanumCsvViewer
                 ScanTimestamp = DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
                 AppVersion = AppInfo.Version,
             };
-            _qualityFindings.RemoveAll(f => f.Kind != QualityCheckKind.Rule && f.Kind != QualityCheckKind.KeyUniqueness && f.Kind != QualityCheckKind.ForeignKeyOrphan);
+            _qualityFindings.RemoveAll(f => !QualitySessionChecks.IsUserRun(f.Kind));
             _qualityFindings.InsertRange(0, report.Findings);
             ShowQualityFindings();
             statusLabel.Text = QualitySummaryText();
@@ -3073,6 +3077,169 @@ namespace NanumCsvViewer
             statusLabel.Text = QualitySummaryText();
         }
 
+        private async Task ShowConformanceProfileAsync()
+        {
+            if (_doc is null || !_doc.IndexingComplete || _busy) return;
+            var doc = _doc;
+
+            bool run;
+            using (var dlg = new ConformanceProfileDialog(_conformanceProfile, _conformanceProfilePath, _palette))
+            {
+                dlg.ShowDialog(this);
+                _conformanceProfile = dlg.Profile;
+                _conformanceProfilePath = dlg.ProfilePath;
+                run = dlg.RunRequested;
+            }
+            if (!run || _conformanceProfile is null || !ReferenceEquals(_doc, doc) || _busy) return;
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            var src = BuildQualityScanSource(doc, withTypes: false);
+            var options = new ConformanceRunOptions
+            {
+                ProfileDirectory = string.IsNullOrEmpty(_conformanceProfilePath)
+                    ? null : Path.GetDirectoryName(_conformanceProfilePath),
+            };
+
+            SetBusy(true);
+            statusLabel.Text = LT("Conformance profile…", "적합성 프로파일…");
+            var progress = new Progress<int>(p =>
+            {
+                if (!cts.IsCancellationRequested)
+                    statusLabel.Text = LT($"Conformance profile… {p}%", $"적합성 프로파일… {p}%");
+            });
+
+            ConformanceProfileRunner.Result result;
+            var task = Task.Run(() => ConformanceProfileRunner.Run(_conformanceProfile, src, options, progress, cts.Token), cts.Token);
+            _qualityTask = task;
+            try { result = await task; }
+            catch (OperationCanceledException) { return; }
+            catch (ConformanceBudgetException)
+            {
+                statusLabel.Text = LT("Conformance profile stopped", "적합성 프로파일 중단");
+                MessageBox.Show(this,
+                    LT("A reference key set exceeded the memory budget. No partial result was kept. Narrow the domain or the reference file.",
+                       "참조 키 집합이 메모리 예산을 초과했습니다. 부분 결과는 남기지 않았습니다. 도메인이나 참조 파일을 줄여 주세요."),
+                    LT("Conformance Profile", "적합성 프로파일"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch (ConformanceSchemaException ex)
+            {
+                statusLabel.Text = LT("Conformance profile stopped", "적합성 프로파일 중단");
+                MessageBox.Show(this,
+                    LT($"This profile uses schema version {ex.SchemaVersion}, which this version cannot run (supported: {ex.SupportedVersion}).",
+                       $"이 프로파일의 스키마 버전({ex.SchemaVersion})은 이 버전이 실행할 수 없습니다(지원: {ex.SupportedVersion})."),
+                    LT("Conformance Profile", "적합성 프로파일"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("Conformance profile failed", "적합성 프로파일 실패");
+                MessageBox.Show(this, ex.Message, LT("Conformance Profile", "적합성 프로파일"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return;
+
+            _qualityFindings.RemoveAll(f => QualitySessionChecks.IsConformance(f.Kind));
+            _qualityFindings.AddRange(result.Findings);
+            ShowQualityFindings();
+            string scope = result.ScannedFully ? LT("full", "전수") : LT("partial", "일부");
+            int failing = result.Findings.Count(f => f.ViolationCount > 0 && f.Severity != QualitySeverity.Info);
+            statusLabel.Text = LT(
+                $"Conformance profile: {result.RowsScanned:N0} rows ({scope}) · {failing} failing check(s) · {result.ChecksNotRun} not run",
+                $"적합성 프로파일: {result.RowsScanned:N0}행 ({scope}) · 실패 검사 {failing}건 · 미실행 {result.ChecksNotRun}건");
+        }
+
+        private async Task ImportDqdResultsAsync()
+        {
+            if (_doc is null || _busy) return;
+            var doc = _doc;
+
+            using var ofd = new OpenFileDialog
+            {
+                Title = LT("Import DQD Results", "DQD 결과 가져오기"),
+                Filter = "JSON (*.json)|*.json",
+            };
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+
+            string? table = CurrentQualityTableName();
+            string? filter = null;
+            using (var dlg = new ParamDialog(LT("Import DQD Results", "DQD 결과 가져오기"), _palette))
+            {
+                dlg.AddNote(LT(
+                    "Imported checks are labelled imported from DQD. They are not a scan of this file, so Filter Rows stays disabled.",
+                    "가져온 검사는 'DQD에서 가져옴'으로 표시됩니다. 이 파일의 스캔이 아니므로 '위반 행만 보기'는 꺼집니다."));
+                var choices = new List<string> { LT("All tables in the file", "파일의 모든 테이블") };
+                if (!string.IsNullOrEmpty(table))
+                    choices.Add(LT($"Current table only ({table})", $"현재 테이블만 ({table})"));
+                var combo = dlg.AddCombo(LT("Tables", "테이블"), choices, 0);
+                if (!dlg.ShowOk(this)) return;
+                if (combo.SelectedIndex == 1) filter = table;
+            }
+
+            _qualityCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _qualityCts = cts;
+            SetBusy(true);
+            statusLabel.Text = LT("Importing DQD results…", "DQD 결과 가져오는 중…");
+            DqdResultsImport.Result imported;
+            var task = Task.Run(() =>
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                string json = File.ReadAllText(ofd.FileName);
+                return DqdResultsImport.Import(json, new DqdResultsImport.Options { TableName = filter }, doc.Header);
+            }, cts.Token);
+            _qualityTask = task;
+            try { imported = await task; }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                statusLabel.Text = LT("DQD import failed", "DQD 가져오기 실패");
+                MessageBox.Show(this, ex.Message, LT("Import DQD Results", "DQD 결과 가져오기"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            finally
+            {
+                if (_qualityTask == task) _qualityTask = null;
+                SetBusy(false);
+            }
+
+            if (cts.IsCancellationRequested || !ReferenceEquals(_doc, doc)) return;
+
+            _qualityFindings.RemoveAll(f => f.Kind == QualityCheckKind.DqdImported);
+            _qualityFindings.AddRange(imported.Findings);
+            ShowQualityFindings();
+            string tableNote = filter is null
+                ? LT("all tables", "모든 테이블")
+                : LT($"table {filter}", $"테이블 {filter}");
+            statusLabel.Text = LT(
+                $"Imported {imported.ChecksImported:N0} DQD check(s) ({tableNote}) — not a scan of this file",
+                $"DQD 검사 {imported.ChecksImported:N0}건 가져옴 ({tableNote}) — 이 파일의 스캔이 아님");
+        }
+
+        private string? CurrentQualityTableName()
+        {
+            if (_workbook is not null && _currentSheetIndex >= 0 && _currentSheetIndex < _workbook.SheetNames.Count)
+            {
+                string sheet = _workbook.SheetNames[_currentSheetIndex];
+                if (!string.IsNullOrWhiteSpace(sheet)) return sheet;
+            }
+            string? path = _workbook?.SourcePath ?? _currentPath;
+            return string.IsNullOrEmpty(path) ? null : Path.GetFileNameWithoutExtension(path);
+        }
+
+
         // ---------------------------------------------------------------- 품질 보고서 내보내기
 
         private void ExportQualityReport()
@@ -3347,10 +3514,7 @@ namespace NanumCsvViewer
         }
 
 
-        private string QualityCheckDisplay(QualityFinding f)
-            => f.Kind == QualityCheckKind.Rule && f.Label is { Length: > 0 }
-                ? $"{QualityText.KindName(f.Kind)}: {f.Label}"
-                : QualityText.KindName(f.Kind);
+        private string QualityCheckDisplay(QualityFinding f) => QualityText.CheckTitle(f);
 
         private static string QualityExampleRows(QualityFinding f)
             => string.Join(", ", f.Examples.Take(5).Select(e => e.SourceRow));

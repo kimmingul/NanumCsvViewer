@@ -1,6 +1,6 @@
-# 고급 통계·머신러닝 모듈 — Phase 1 (이슈 #27)
+# 고급 통계·머신러닝 모듈 (이슈 #27)
 
-> 구현: v1.17.0. ALGLIB Commercial 4.04(순수 C#) + 자체 엔진. Phase 2(LMM/NLMM, 생존분석, 트리·SVM·부스팅)와 Phase 3(AutoML, ONNX)는 미착수.
+> Phase 1: v1.17.0. Phase 2: v1.18.0 (§5). ALGLIB Commercial 4.04(순수 C#) + 자체 엔진. Phase 3(AutoML, ONNX, 보고서 템플릿)은 미착수.
 
 ## 1. 범위 (Phase 1)
 
@@ -52,4 +52,23 @@
 - 엔진 오류 메시지(식 파싱·입력 검증)는 영어로 표시된다.
 - 이항 GLzM은 0/1 응답만(시행 수·오프셋·가중치 없음). ANCOVA는 요인 1개·주효과만.
 - ALGLIB k-means·PCA SVD는 호출 중간 취소가 되지 않는다(호출 전후에만 확인).
-- Phase 2: 선형·비선형 혼합모형, 생존분석(Kaplan–Meier, log-rank), 결정트리·랜덤포레스트·SVM, 부스팅. Phase 3: AutoML, 모델 저장(ONNX), 보고서 템플릿.
+- Phase 3: AutoML, 모델 저장(ONNX), 보고서 템플릿, HTML/PDF/Excel 내보내기, OMOP/CDISC 변수 자동 매핑 추천.
+
+## 5. Phase 2 (v1.18.0)
+
+| 메뉴 | 분석 | 엔진 | 기준 |
+|---|---|---|---|
+| 모형 | 선형 혼합모형(LMM) — 그룹 1개, 임의 절편 + 임의 기울기(비구조 공분산), REML/ML, ICC | `Stats/MixedModels.cs` (그룹별 충분통계·Woodbury, ALGLIB L-BFGS) | statsmodels `mixedlm` |
+| | 비선형 혼합모형(NLMM) — 지수 감쇠·로지스틱 성장·Michaelis–Menten·Emax, 모수별 임의효과 | `Stats/NonlinearMixedModel.cs` (Lindstrom–Bates) | 시뮬레이션 회복 + 임의효과 0일 때 ALGLIB NLS(로컬 Python 기준 없음) |
+| 생존분석 | Kaplan–Meier(Greenwood, log-log CI, 중앙값, 제한 평균) · 로그순위/Gehan–Breslow · 곡선 창 | `Stats/Survival.cs` | statsmodels `SurvfuncRight`, `survdiff` |
+| | Cox 비례위험(Efron/Breslow, HR, Wald/score/LR, Harrell C) | 〃 | statsmodels `PHReg` |
+| 분류·군집 | 결정트리(CART, 분류·회귀) · 랜덤 포레스트(OOB, MDI 중요도) · SVM(선형/RBF, SMO) | `Stats/DecisionTrees.cs`, `Stats/SupportVectorMachine.cs` | sklearn |
+| | 그래디언트 부스팅(히스토그램, LightGBM/XGBoost 계열) | `Stats/GradientBoosting.cs` | sklearn `HistGradientBoosting` |
+
+부스팅은 순수 관리형 자체 구현이다(ML.NET LightGBM은 네이티브 DLL이 필요해 단일 exe 원칙과 충돌). AdaBoost·CatBoost·NGBoost는 제공하지 않는다.
+
+정직한 상한(결과에 표기): RBF SVM 학습 20,000행, 평가 100,000행(시드 고정 층화 표본). 랜덤 포레스트 학습 80,000행. 트리는 80,000행(포레스트 12,000행) 초과 시 분위 구간 분할(근사). Cox 최대 64열, 생존 그룹 최대 50.
+
+리뷰 수정 8건: 로그순위 분산 Int32 오버플로, 그룹별 제한 평균 τ, 회귀 트리 분할 O(n²)·취소 불가, 지수 감쇠 언더플로 처리, SVM gamma 분산 소거 오차, SVM 표시 모형 스케일링 불일치, 적합성 참조 캐시 키 공백, NLMM 식 표기. 성능 수정: SVM 병렬 예측·평가 표본 상한(256초 → 4.9초), 부스팅 병렬 히스토그램(71초 → 14.6초 단독 실측).
+
+실측(같은 bench, 620만 행, 연속 실행): LMM(997그룹) 5.2 s · Kaplan–Meier 4.9 s · Cox 22.4 s · 결정트리 3.2 s · 랜덤 포레스트 20.5 s · SVM 4.9 s · 그래디언트 부스팅 37.8 s(연속 실행 중 메모리 압박 상태; 단독 14.6 s).

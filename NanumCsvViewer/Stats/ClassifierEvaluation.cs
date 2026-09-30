@@ -1,5 +1,31 @@
 namespace NanumCsvViewer.Stats
 {
+    /// <summary>회귀 예측 성능(평가 행 기준). R²는 평가 행 평균 기준(sklearn r2_score).</summary>
+    public sealed record RegressionMetrics(double Rmse, double Mae, double RSquared, long Total)
+    {
+        public static RegressionMetrics From(IReadOnlyList<double> actual, IReadOnlyList<double> predicted)
+        {
+            if (actual.Count != predicted.Count) throw new ArgumentException("Length mismatch.", nameof(predicted));
+            int n = actual.Count;
+            if (n == 0) return new RegressionMetrics(double.NaN, double.NaN, double.NaN, 0);
+            double mean = 0;
+            for (int i = 0; i < n; i++) mean += actual[i];
+            mean /= n;
+            double sse = 0, sae = 0, sst = 0;
+            for (int i = 0; i < n; i++)
+            {
+                double e = actual[i] - predicted[i];
+                sse += e * e;
+                sae += Math.Abs(e);
+                sst += (actual[i] - mean) * (actual[i] - mean);
+            }
+            return new RegressionMetrics(Math.Sqrt(sse / n), sae / n, sst == 0 ? double.NaN : 1 - sse / sst, n);
+        }
+    }
+}
+
+namespace NanumCsvViewer.Stats
+{
     /// <summary>학습/평가 행 인덱스 분할.</summary>
     public sealed record DataSplit(int[] Train, int[] Test);
 

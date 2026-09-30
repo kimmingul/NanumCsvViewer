@@ -28,7 +28,38 @@ namespace NanumCsvViewer.Csv.DataQuality
         KeyUniqueness,        // 사용자 지정 (복합)키 중복
         Rule,                 // 사용자 정의 규칙 위반(위반 조건식)
         ForeignKeyOrphan,     // 자식 키 값이 부모 키 집합에 없음(참조 무결성 후보)
+        ConformanceRequired,  // 적합성 프로파일: 필수 컬럼 부재(테이블) 또는 필수 값 결측
+        ConformanceType,      // 적합성 프로파일: 선언 타입 불일치
+        ConformanceMaxLength, // 적합성 프로파일: 최대 길이(CDISC 변수 길이) 초과
+        ConformanceCodelist,  // 적합성 프로파일: 허용 코드 밖
+        ConformancePattern,   // 적합성 프로파일: 정규식 불일치
+        ConformanceRange,     // 적합성 프로파일: 수치 범위 이탈
+        ConformanceConcept,   // 적합성 프로파일: 개념 참조(다른 파일 키+선택 도메인) 불일치
+        DqdImported,          // OHDSI DQD 결과 JSON에서 가져온 발견(행 술어 없음)
     }
+
+    /// <summary>
+    /// 사용자가 세션마다 실행하는 검사. 품질 프로파일 재실행이 지우면 안 되고,
+    /// 스냅샷 diff는 현재에 없다고 "해소"로 단정하지 않는다(재검사 안 됨).
+    /// </summary>
+    public static class QualitySessionChecks
+    {
+        public static bool IsConformance(QualityCheckKind kind) => kind is
+            QualityCheckKind.ConformanceRequired or QualityCheckKind.ConformanceType
+            or QualityCheckKind.ConformanceMaxLength or QualityCheckKind.ConformanceCodelist
+            or QualityCheckKind.ConformancePattern or QualityCheckKind.ConformanceRange
+            or QualityCheckKind.ConformanceConcept;
+
+        public static bool IsUserRun(QualityCheckKind kind) =>
+            kind is QualityCheckKind.Rule or QualityCheckKind.KeyUniqueness
+                or QualityCheckKind.ForeignKeyOrphan or QualityCheckKind.DqdImported
+            || IsConformance(kind);
+
+        /// <summary>같은 종류·컬럼에 검사가 여럿일 수 있어 라벨(규칙명·검사명)이 정체성에 포함된다.</summary>
+        public static bool UsesLabel(QualityCheckKind kind) =>
+            kind is QualityCheckKind.Rule or QualityCheckKind.DqdImported || IsConformance(kind);
+    }
+
 
     /// <summary>위반 예시 1건: 원본 행번호(1-based) + 문제 값.</summary>
     public readonly record struct QualityExample(long SourceRow, string Value);
