@@ -3,16 +3,22 @@ using System.Globalization;
 
 namespace NanumCsvViewer.Csv
 {
-    /// <summary>표현식 필터 컴파일 결과: 원본 식 + 행 술어.</summary>
+    /// <summary>
+    /// 표현식 필터 컴파일 결과: 원본 식 + 행 술어 + 정규식 시간 초과 카운터.
+    /// <see cref="Timeouts"/>는 이 필터의 술어가 평가하는 동안 250ms 제한을 넘긴(= 불일치로 처리된) 셀 수를 센다.
+    /// 술어만 들고 있는 호출부는 <see cref="AdvancedFilterExpression.TimeoutsOf"/>로 같은 카운터를 얻는다.
+    /// </summary>
     public sealed class CompiledAdvancedFilter
     {
         public string Expression { get; }
         public Func<string[], bool> Predicate { get; }
+        public RegexTimeoutCounter Timeouts { get; }
 
-        public CompiledAdvancedFilter(string expression, Func<string[], bool> predicate)
+        public CompiledAdvancedFilter(string expression, Func<string[], bool> predicate, RegexTimeoutCounter? timeouts = null)
         {
             Expression = expression;
             Predicate = predicate;
+            Timeouts = timeouts ?? new RegexTimeoutCounter();
         }
     }
 
@@ -22,9 +28,20 @@ namespace NanumCsvViewer.Csv
     }
 
     /// <summary>
-    /// 표현식 필터: <c>AND</c>/<c>OR</c>/괄호, 비교 <c>== = != &lt; &lt;= &gt; &gt;= contains</c>.
+    /// 표현식 필터: <c>NOT</c>/<c>AND</c>/<c>OR</c>/괄호(우선순위 NOT &gt; AND &gt; OR),
+    /// 비교 <c>== = != &lt; &lt;= &gt; &gt;= contains startswith endswith matches matches_cs</c>.
     /// 컬럼은 헤더명(대소문자 무시) 또는 <c>Column&lt;N&gt;</c>(1-based)으로 참조.
     /// 비교는 양쪽이 숫자면 수치, 아니면 문화권 무시 문자열 비교. macOS AdvancedFilterExpression 이식.
+    ///
+    /// 정규식(2.0.1): <c>matches</c>는 대소문자 무시, <c>matches_cs</c>는 대소문자 구분. 텍스트 연산자 앞에 <c>!</c>를 붙이면
+    /// 부정(<c>!matches</c> <c>!matches_cs</c> <c>!contains</c> <c>!startswith</c> <c>!endswith</c>). 정규식은 <see cref="RegexSafety"/>로
+    /// 컴파일(잘못된 패턴 = 컴파일 오류)하고, 셀 하나가 시간 제한을 넘기면 그 셀은 정규식 불일치로 처리하되
+    /// <see cref="CompiledAdvancedFilter.Timeouts"/>에 센다.
+    ///
+    /// 컬럼 <c>*</c>(또는 <c>[*]</c>)은 "어느 컬럼이든": <c>* matches "x"</c>는 한 셀이라도 일치하면 참.
+    /// 사용 가능 연산자: 텍스트 연산자(contains/startswith/endswith/matches/matches_cs)와 <c>== = !=</c>.
+    /// 부정형(<c>!=</c>, <c>!matches</c> …)은 긍정형의 논리 부정이라 "어느 셀도 일치하지 않음"이 된다.
+    /// 헤더가 실제로 <c>*</c>이면 그 컬럼이 우선한다.
     ///
     /// 확장(이슈 #26): <c>[컬럼명]</c> 대괄호 참조를 양변에 쓸 수 있고, 우변이 컬럼 참조면
     /// 교차 컬럼 비교가 된다(예: <c>[end_date] &gt;= [start_date]</c>). 교차 컬럼 비교는
@@ -44,12 +61,27 @@ namespace NanumCsvViewer.Csv
             var tokens = Tokenize(expression);
             if (tokens.Count == 0)
                 throw new AdvancedFilterExpressionException("필터 식이 비어 있습니다.");
-            var parser = new Parser(tokens, headers, blankNeverMatchesOrdering);
+            var timeouts = new RegexTimeoutCounter();
+            var parser = new Parser(tokens, headers, blankNeverMatchesOrdering, timeouts);
             var predicate = parser.ParseExpression();
             if (!parser.IsAtEnd)
-                throw new AdvancedFilterExpressionException($"예상치 못한 토큰 '{parser.CurrentToken}'");
-            return new CompiledAdvancedFilter(expression, predicate);
+            {
+                string hint = parser.PreviousToken.StartsWith('[')
+                    ? " — 값·정규식에 '['가 있으면 큰따옴표로 감싸세요(예: name matches \"[A-Z]+\")"
+                    : "";
+                throw new AdvancedFilterExpressionException($"예상치 못한 토큰 '{parser.CurrentToken}'{hint}");
+            }
+            PredicateTimeouts.AddOrUpdate(predicate, timeouts);
+            return new CompiledAdvancedFilter(expression, predicate, timeouts);
         }
+
+        // 술어 → 카운터. 술어 델리게이트만 보관하는 호출부(Form1 조건 목록)가 시간 초과를 조회할 수 있게 한다.
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Func<string[], bool>, RegexTimeoutCounter>
+            PredicateTimeouts = new();
+
+        /// <summary><see cref="Compile"/>이 만든 술어의 정규식 시간 초과 카운터(그 외 술어는 null).</summary>
+        public static RegexTimeoutCounter? TimeoutsOf(Func<string[], bool> predicate)
+            => PredicateTimeouts.TryGetValue(predicate, out var counter) ? counter : null;
 
         /// <summary>
         /// 대괄호 없는 우변이 헤더명과 정확히 일치하면서 비교 연산자를 쓰는지 감지(규칙 입력 실수 경고용).
@@ -156,17 +188,21 @@ namespace NanumCsvViewer.Csv
             private readonly List<string> _tokens;
             private readonly IReadOnlyList<string> _headers;
             private readonly bool _blankNeverMatchesOrdering;
+            private readonly RegexTimeoutCounter _timeouts;
             private int _position;
 
-            public Parser(List<string> tokens, IReadOnlyList<string> headers, bool blankNeverMatchesOrdering)
+            public Parser(List<string> tokens, IReadOnlyList<string> headers, bool blankNeverMatchesOrdering,
+                RegexTimeoutCounter timeouts)
             {
                 _tokens = tokens;
                 _headers = headers;
                 _blankNeverMatchesOrdering = blankNeverMatchesOrdering;
+                _timeouts = timeouts;
             }
 
             public bool IsAtEnd => _position >= _tokens.Count;
             public string CurrentToken => IsAtEnd ? "" : _tokens[_position];
+            public string PreviousToken => _position > 0 && _position <= _tokens.Count ? _tokens[_position - 1] : "";
 
             public Func<string[], bool> ParseExpression() => ParseOr();
 
@@ -184,14 +220,37 @@ namespace NanumCsvViewer.Csv
 
             private Func<string[], bool> ParseAnd()
             {
-                var lhs = ParsePrimary();
+                var lhs = ParseNot();
                 while (MatchKeyword("AND"))
                 {
-                    var rhs = ParsePrimary();
+                    var rhs = ParseNot();
                     var prev = lhs;
                     lhs = row => prev(row) && rhs(row);
                 }
                 return lhs;
+            }
+
+            // NOT은 AND보다 강하게 결합하는 단항 연산자(NOT NOT x, NOT (a OR b) 가능).
+            // 'not'이라는 이름의 헤더가 실제로 있고 바로 뒤에 연산자가 오면 키워드가 아니라 컬럼으로 읽는다(하위 호환).
+            private Func<string[], bool> ParseNot()
+            {
+                if (!IsAtEnd && string.Equals(_tokens[_position], "NOT", StringComparison.OrdinalIgnoreCase)
+                    && !NotIsColumnName())
+                {
+                    _position++;
+                    if (IsAtEnd) throw new AdvancedFilterExpressionException("NOT 뒤에 조건이 필요합니다.");
+                    var inner = ParseNot();
+                    return row => !inner(row);
+                }
+                return ParsePrimary();
+            }
+
+            private bool NotIsColumnName()
+            {
+                if (!TryColumnIndex("not", out _)) return false;
+                if (_position + 1 >= _tokens.Count) return false;
+                string next = _tokens[_position + 1].ToLowerInvariant();
+                return next is "=" or "==" or "!=" or "<" or "<=" or ">" or ">=" or "!" || IsTextOperator(next);
             }
 
             private Func<string[], bool> ParsePrimary()
@@ -206,75 +265,111 @@ namespace NanumCsvViewer.Csv
                 return ParseComparison();
             }
 
+            private static bool IsTextOperator(string lowerOp)
+                => lowerOp is "contains" or "startswith" or "endswith" or "matches" or "matches_cs";
+
+            private const string OperatorHelp =
+                "== = != < <= > >= contains startswith endswith matches matches_cs (부정: NOT 또는 !matches 처럼 ! 접두)";
+
+            private static bool IsAnyColumn(string token) => token == "*" || token == "[*]";
+
             private Func<string[], bool> ParseComparison()
             {
                 string columnName = Consume("컬럼명이 필요합니다.");
-                int column = ColumnIndex(Unbracket(columnName));
+                // '*'(또는 [*])는 어느 컬럼이든. 헤더가 실제로 '*'이면 그 컬럼이 우선.
+                bool anyColumn = IsAnyColumn(columnName) && !TryColumnIndex(Unbracket(columnName), out _);
+                int column = anyColumn ? -1 : ColumnIndex(Unbracket(columnName));
+
                 string op = Consume("연산자가 필요합니다.");
+                bool negate = false;
+                if (op == "!")
+                {
+                    // '!matches' 같은 부정 텍스트 연산자('!='는 토크나이저가 한 토큰으로 만든다).
+                    string textOp = Consume("'!' 뒤에 연산자(matches, matches_cs, contains, startswith, endswith)가 필요합니다.");
+                    if (!IsTextOperator(textOp.ToLowerInvariant()))
+                        throw new AdvancedFilterExpressionException(
+                            $"'!' 뒤에는 matches, matches_cs, contains, startswith, endswith 중 하나가 와야 합니다('{textOp}'). 같지 않음은 !=, 조건 전체의 부정은 NOT을 쓰세요.");
+                    op = textOp;
+                    negate = true;
+                }
                 string valueToken = Consume("비교 값이 필요합니다.");
 
                 // 우변이 [컬럼] 참조이고 그 이름이 실제 헤더면 교차 컬럼 비교. 이름이 컬럼이 아니면(예: 'code = [A12]')
                 // 리터럴 경로로 폴백해 기존 문법 하위 호환을 유지한다(값 = "[A12]").
                 if (IsColumnRef(valueToken) && TryColumnIndex(Unbracket(valueToken), out int rightCol))
-                    return BuildColumnComparison(column, rightCol, op);
+                {
+                    if (anyColumn)
+                        throw new AdvancedFilterExpressionException("'*'(모든 컬럼)는 다른 컬럼과 비교할 수 없습니다. 값(큰따옴표)과 비교하세요.");
+                    var cross = BuildColumnComparison(column, rightCol, op);
+                    return negate ? row => !cross(row) : cross;
+                }
 
                 string value = Unquote(valueToken);
-                bool guardBlank = _blankNeverMatchesOrdering;
+                string lowerOp = op.ToLowerInvariant();
+                if (lowerOp == "!=") { lowerOp = "=="; negate = true; }
 
-                switch (op.ToLowerInvariant())
+                var test = BuildCellTest(lowerOp, op, value, anyColumn);
+                Func<string[], bool> positive;
+                if (anyColumn)
+                {
+                    positive = row =>
+                    {
+                        for (int i = 0; i < row.Length; i++)
+                            if (test(row[i])) return true;
+                        return false;
+                    };
+                }
+                else
+                {
+                    positive = row => column < row.Length && test(row[column]);
+                }
+                return negate ? row => !positive(row) : positive;
+            }
+
+            /// <summary>셀 하나에 대한 긍정형 검사. 컬럼 선택·부정은 호출부가 합성한다.</summary>
+            private Func<string, bool> BuildCellTest(string lowerOp, string rawOp, string value, bool anyColumn)
+            {
+                bool guardBlank = _blankNeverMatchesOrdering;
+                switch (lowerOp)
                 {
                     case "contains":
-                        return row =>
-                        {
-                            if (column >= row.Length) return false;
-                            return CultureInfo.InvariantCulture.CompareInfo.IndexOf(
-                                row[column], value,
-                                CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
-                        };
+                        return cell => CultureInfo.InvariantCulture.CompareInfo.IndexOf(
+                            cell, value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
                     case "startswith":
-                        return row => column < row.Length && CultureInfo.InvariantCulture.CompareInfo.IsPrefix(
-                            row[column].TrimStart(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
+                        return cell => CultureInfo.InvariantCulture.CompareInfo.IsPrefix(
+                            cell.TrimStart(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
                     case "endswith":
-                        return row => column < row.Length && CultureInfo.InvariantCulture.CompareInfo.IsSuffix(
-                            row[column].TrimEnd(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
+                        return cell => CultureInfo.InvariantCulture.CompareInfo.IsSuffix(
+                            cell.TrimEnd(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
                     case "matches":
+                    case "matches_cs":
                     {
-                        // 정규식(대소문자 무시). 잘못된 패턴은 컴파일 오류, 셀 하나가 250ms를 넘기면(파국적 역추적) 그 셀은 불일치로 둔다.
+                        // 정규식은 RegexSafety 규칙(공용 옵션·250ms 제한). 잘못된 패턴은 컴파일 오류,
+                        // 시간 초과 셀은 불일치로 처리하되 _timeouts에 센다.
                         Regex regex;
-                        try
-                        {
-                            regex = new Regex(value, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled,
-                                TimeSpan.FromMilliseconds(250));
-                        }
-                        catch (ArgumentException ex)
-                        {
-                            throw new AdvancedFilterExpressionException($"잘못된 정규식: {value} ({ex.Message})");
-                        }
-                        return row =>
-                        {
-                            if (column >= row.Length) return false;
-                            try { return regex.IsMatch(row[column]); }
-                            catch (RegexMatchTimeoutException) { return false; }
-                        };
+                        try { regex = RegexSafety.Compile(value, caseSensitive: lowerOp == "matches_cs"); }
+                        catch (RegexPatternException ex) { throw new AdvancedFilterExpressionException(ex.Message); }
+                        var counter = _timeouts;
+                        return cell => RegexSafety.IsMatch(regex, cell, counter);
                     }
                     case "==":
                     case "=":
-                        return row => column < row.Length && row[column] == value;
-                    case "!=":
-                        return row => column >= row.Length || row[column] != value;
+                        return cell => cell == value;
                     case ">":
                     case ">=":
                     case "<":
                     case "<=":
-                        return row =>
+                        if (anyColumn)
+                            throw new AdvancedFilterExpressionException(
+                                $"'*'(모든 컬럼)에는 '{rawOp}'를 쓸 수 없습니다. contains/startswith/endswith/matches/matches_cs/==/!= 를 쓰세요.");
+                        return cell =>
                         {
-                            if (column >= row.Length) return false;
                             // 규칙 실행 시 결측 셀은 순서 비교 대상 제외(문자열 폴백으로 인한 위반 오계산 방지).
-                            if (guardBlank && IsMissingCell(row[column])) return false;
-                            return CompareValues(row[column], value, op);
+                            if (guardBlank && IsMissingCell(cell)) return false;
+                            return CompareValues(cell, value, rawOp);
                         };
                     default:
-                        throw new AdvancedFilterExpressionException($"지원하지 않는 연산자 '{op}'");
+                        throw new AdvancedFilterExpressionException($"지원하지 않는 연산자 '{rawOp}'. 사용 가능: {OperatorHelp}");
                 }
             }
 
@@ -308,7 +403,15 @@ namespace NanumCsvViewer.Csv
             private int ColumnIndex(string name)
                 => TryColumnIndex(name, out int idx)
                     ? idx
-                    : throw new AdvancedFilterExpressionException($"알 수 없는 컬럼: {name}");
+                    : throw new AdvancedFilterExpressionException(
+                        $"알 수 없는 컬럼: {name} (사용 가능: {AvailableColumns()}, 모든 컬럼은 *)");
+
+            private string AvailableColumns()
+            {
+                const int Max = 8;
+                string list = string.Join(", ", _headers.Take(Max).Select(h => h.Length == 0 ? "(빈 이름)" : h));
+                return _headers.Count > Max ? list + $" … 외 {_headers.Count - Max}개" : list;
+            }
 
             private bool TryColumnIndex(string name, out int index)
             {

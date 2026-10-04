@@ -48,6 +48,8 @@ namespace NanumCsvViewer.Csv
                 Headers = snapshot.Headers.Select(h => new HeaderDto { Col = h.Col, Name = h.Name }).ToList(),
                 Deleted = snapshot.Deleted.ToList(),
                 Added = snapshot.Added.Select(a => new AddedDto { Anchor = a.Anchor, Values = a.Values }).ToList(),
+                AppendBase = snapshot.AppendBase,
+                AppendedColumns = snapshot.AppendedColumns?.ToList(),
             };
             string path = FilePath(directory, key);
             string tmp = path + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -87,7 +89,10 @@ namespace NanumCsvViewer.Csv
                 dto.Cells.Select(c => (c.Row, c.Col, c.Value ?? throw new InvalidDataException("Null cell value."))).ToArray(),
                 dto.Headers.Select(h => (h.Col, h.Name ?? throw new InvalidDataException("Null column name."))).ToArray(),
                 dto.Deleted.ToArray(),
-                dto.Added.Select(a => new AddedRow(a.Anchor, a.Values ?? throw new InvalidDataException("Null added row"))).ToArray());
+                dto.Added.Select(a => new AddedRow(a.Anchor, a.Values ?? throw new InvalidDataException("Null added row"))).ToArray(),
+                dto.AppendedColumns is { Count: > 0 } appended
+                    ? appended.Select(n => n ?? throw new InvalidDataException("Null appended column name.")).ToArray() : null,
+                dto.AppendedColumns is { Count: > 0 } ? dto.AppendBase : -1);
         }
 
         public static void Delete(string directory, string key)
@@ -124,6 +129,8 @@ namespace NanumCsvViewer.Csv
             public List<HeaderDto>? Headers { get; set; }
             public List<int>? Deleted { get; set; }
             public List<AddedDto>? Added { get; set; }
+            public int AppendBase { get; set; } = -1;
+            public List<string>? AppendedColumns { get; set; }
         }
 
         private sealed class CellDto { public int Row { get; set; } public int Col { get; set; } public string? Value { get; set; } }

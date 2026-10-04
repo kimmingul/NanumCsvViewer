@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using NanumCsvViewer.Csv;
 using NanumCsvViewer.Csv.DataQuality;
 
@@ -58,8 +59,8 @@ namespace NanumCsvViewer.Agent.Tools
         string? Directory,
         IReadOnlyList<string> ProtectedPaths);
 
-    /// <summary>필터·정렬 뒤의 뷰 크기.</summary>
-    public sealed record AgentViewChange(long ViewRows, long TotalRows);
+    /// <summary>필터·정렬 뒤의 뷰 크기. RegexTimedOut은 식 필터의 정규식이 셀당 시간 제한을 넘겨 "불일치"로 처리된 셀 수.</summary>
+    public sealed record AgentViewChange(long ViewRows, long TotalRows, long RegexTimedOut = 0);
 
     /// <summary>현재 뷰의 행 조각. Rows[i].Values는 요청한 컬럼 순서.</summary>
     public sealed record AgentRowsPage(long FirstViewRow, IReadOnlyList<AgentRow> Rows, long ViewRows);
@@ -85,6 +86,17 @@ namespace NanumCsvViewer.Agent.Tools
     public sealed record AgentUndoResult(string Description, AgentEditState State);
 
     public sealed record AgentSaveResult(string FullPath, string Summary);
+
+    /// <summary>정규식 일치 셀 예시. SourceRow는 1-based 현재 행 번호(행 머리글·get_rows의 row).</summary>
+    public sealed record AgentRegexSample(long SourceRow, int Column, string Value);
+
+    /// <summary>현재 뷰 정규식 집계. CellsTimedOut은 셀당 시간 제한을 넘겨 평가하지 못한 셀(일치 수는 그만큼 하한).</summary>
+    public sealed record AgentRegexScan(long RowsScanned, long CellsMatched, long RowsMatched, long CellsTimedOut, IReadOnlyList<AgentRegexSample> Samples);
+
+    public sealed record AgentRegexChange(long SourceRow, int Column, string Old, string New);
+
+    /// <summary>정규식 바꾸기 계획(아직 적용 전). Truncated면 상한을 넘는 변경이 더 있다.</summary>
+    public sealed record AgentRegexPlan(IReadOnlyList<AgentRegexChange> Changes, long RowsScanned, long CellsMatched, long CellsTimedOut, bool Truncated);
 
     public interface ICsvAgentHost
     {
@@ -114,6 +126,12 @@ namespace NanumCsvViewer.Agent.Tools
 
         /// <summary>품질 프로파일을 실행하고 품질 패널에도 반영한다.</summary>
         Task<QualityReport> RunQualityScanAsync(CancellationToken cancellation);
+
+        /// <summary>현재 뷰(필터·정렬, 편집 덮개 적용)의 지정 컬럼을 정규식으로 센다. 시간 초과 셀은 세어 알린다.</summary>
+        Task<AgentRegexScan> RegexCountAsync(Regex regex, IReadOnlyList<int> columns, int maxSamples, CancellationToken cancellation);
+
+        /// <summary>현재 뷰의 바꾸기 계획을 만든다(편집 덮개는 건드리지 않음). 적용은 ApplyEdits로 한 단계에.</summary>
+        Task<AgentRegexPlan> PlanRegexReplaceAsync(Regex regex, string replacement, IReadOnlyList<int> columns, int maxChanges, CancellationToken cancellation);
 
         /// <summary>편집 전 값 조회(승인 카드용). 입력 순서대로.</summary>
         IReadOnlyList<AgentCellState> GetCellStates(IReadOnlyList<(long SourceRow, int Column)> cells);

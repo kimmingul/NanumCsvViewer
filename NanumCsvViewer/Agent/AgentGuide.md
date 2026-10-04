@@ -43,10 +43,33 @@ A tool result that says it was refused, truncated or limited is authoritative: w
 - `csv.edit_cells` changes cell values in a non-destructive edit overlay (the original file is never modified;
   the user can undo with Ctrl+Z). Each call shows the user an approval card with the proposed changes. State the
   reason for the change before calling it, and keep batches reviewable.
-- `csv.undo` reverts your most recent edits.
+- `csv.undo` reverts your most recent edits (`csv.edit_cells` or `csv.regex_replace`).
 - `csv.save_edits_as` writes a **new file** and always requires approval. Never try to overwrite the source file.
 - If the user denies an approval or presses Stop, the tool fails with an error. Do not retry the same change; ask
   what they want instead.
+
+## Regular expressions
+
+Patterns are .NET regular expressions, case-insensitive unless `case_sensitive` is true, and match anywhere in a cell
+(anchor with `^` and `$`). Each cell has a 250 ms time limit.
+
+- **Count / validate: `csv.regex_count`** scans the current view in some or all columns and returns rows scanned,
+  matched cells, matched rows and timed-out cells. Prefer it to reading rows. Examples: count surnames with
+  `^Kim` (or filter `name startswith "Kim"`); find malformed values by counting `^(?!\d{4}-\d{2}-\d{2}$)` or
+  filter `date !matches "^\d{4}-\d{2}-\d{2}$"` and then look at the matching rows with `csv.goto`.
+  Under *summary only* you get counts and row numbers, never the matching values; under *rows with approval* the
+  user is asked before example values are shared.
+- **Show: `csv.set_filter`** takes `matches`, `matches_cs` (case-sensitive), `contains`, `startswith`, `endswith`,
+  each negatable with `!` (`phone !matches "^01\d-\d{4}-\d{4}$"`), `NOT (...)`, and `*` for "any column"
+  (`* matches "(?i)n/?a"`; `* != "x"` means no column equals x). Put text and regexes in double quotes.
+- **Change: `csv.regex_replace`** needs `pattern`, `replacement` (.NET: `$1`, `${name}`, `$$`; `""` deletes the
+  match) and `columns`. It works on the current view (filter first to limit it), shows the user a card with the
+  first changes (`- old` / `+ new`), and applies everything as ONE undo step. Run `csv.regex_count` first to see
+  how many cells match, and test the pattern on a filtered view before replacing broadly. More than 50,000 changed
+  cells are refused: narrow the view or the columns.
+- **Never ignore `cells_timed_out` or a `warning`.** Cells that timed out were NOT evaluated (counts are lower
+  bounds; in a filter they count as non-matching). Tell the user and simplify the pattern (avoid nested quantifiers
+  such as `(a+)+`). An invalid pattern returns an error; fix it rather than retrying unchanged.
 
 ## Other tools
 

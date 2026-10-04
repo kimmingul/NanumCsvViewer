@@ -24,6 +24,10 @@ namespace NanumCsvViewer.Csv
         public CsvSearchMode Mode { get; }
         public int? Column { get; }
 
+        // 정규식 모드에서 한 번만 컴파일한 결과(검증 겸용). 매처가 그대로 재사용한다.
+        internal Regex? CompiledRegex { get; }
+
+        /// <exception cref="CsvSearchException">정규식 모드에서 패턴이 비었거나 잘못됨.</exception>
         public CsvSearchQuery(string text, CsvSearchMode mode, int? column)
         {
             Text = text;
@@ -31,8 +35,8 @@ namespace NanumCsvViewer.Csv
             Column = column;
             if (mode == CsvSearchMode.Regex)
             {
-                try { _ = new Regex(text, RegexOptions.IgnoreCase); }
-                catch (ArgumentException) { throw new CsvSearchException($"잘못된 정규식: {text}"); }
+                try { CompiledRegex = RegexSafety.Compile(text); }
+                catch (RegexPatternException ex) { throw new CsvSearchException(ex.Message); }
             }
         }
 
@@ -56,32 +60,43 @@ namespace NanumCsvViewer.Csv
         }
     }
 
-    /// <summary>컴파일된 검색기. 정규식은 한 번만 컴파일하여 셀마다 재사용.</summary>
+    /// <summary>
+    /// 컴파일된 검색기. 정규식은 한 번만 컴파일하여 셀마다 재사용.
+    /// 셀 하나가 정규식 시간 제한(<see cref="RegexSafety.MatchTimeout"/>)을 넘기면 그 셀은 불일치로 처리하되
+    /// <see cref="Timeouts"/>에 센다 — 호출부가 검색이 끝난 뒤 사용자에게 알린다.
+    /// </summary>
     public sealed class CsvSearchMatcher
     {
         private readonly CsvSearchQuery _query;
         private readonly Regex? _regex;
 
+        /// <summary>정규식 시간 초과 셀 수(정규식 모드에서만 증가).</summary>
+        public RegexTimeoutCounter Timeouts { get; } = new();
+
         public CsvSearchMatcher(CsvSearchQuery query)
         {
             _query = query;
             if (query.Mode == CsvSearchMode.Regex)
-            {
-                try { _regex = new Regex(query.Text, RegexOptions.IgnoreCase | RegexOptions.Compiled); }
-                catch (ArgumentException) { throw new CsvSearchException($"잘못된 정규식: {query.Text}"); }
-            }
+                _regex = query.CompiledRegex ?? RegexSafety.Compile(query.Text);
         }
 
-        /// <summary>행에서 첫 일치 컬럼·값을 반환(없으면 null). 컬럼 스코프가 있으면 그 컬럼만.</summary>
-        public (int Column, string Value)? FirstMatch(string[] row)
+        /// <summary>
+        /// 행에서 첫 일치 컬럼·값을 반환(없으면 null). 컬럼 스코프가 있으면 그 컬럼만.
+        /// ct는 셀 사이에서 확인한다(정규식이 셀마다 시간 제한까지 걸려도 취소가 한 셀 안에 반응).
+        /// </summary>
+        public (int Column, string Value)? FirstMatch(string[] row, CancellationToken ct = default)
         {
             if (_query.Column is int scoped)
             {
                 if (scoped < 0 || scoped >= row.Length) return null;
+                if (_regex is not null) ct.ThrowIfCancellationRequested();
                 return Matches(row[scoped]) ? (scoped, row[scoped]) : null;
             }
             for (int c = 0; c < row.Length; c++)
+            {
+                if (_regex is not null) ct.ThrowIfCancellationRequested();
                 if (Matches(row[c])) return (c, row[c]);
+            }
             return null;
         }
 
@@ -94,7 +109,7 @@ namespace NanumCsvViewer.Csv
                         value, _query.Text,
                         CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
                 case CsvSearchMode.Regex:
-                    return _regex is not null && _regex.IsMatch(value);
+                    return _regex is not null && RegexSafety.IsMatch(_regex, value, Timeouts);
                 case CsvSearchMode.Fuzzy:
                     return FuzzyContains(value, _query.Text);
                 default:

@@ -235,5 +235,173 @@ namespace NanumCsvViewer.Tests
         {
             Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("   ", Headers));
         }
+
+        // ---------------------------------------------------------------- NOT / !matches / matches_cs / * (정규식 강화)
+
+        [Theory]
+        // NOT은 AND보다 강하게 결합: NOT a AND b == (NOT a) AND b
+        [InlineData("NOT age > 30 AND city = \"서울\"", "x", "20", "서울", true)]
+        [InlineData("NOT age > 30 AND city = \"서울\"", "x", "40", "서울", false)]
+        [InlineData("NOT age > 30 AND city = \"서울\"", "x", "20", "부산", false)]
+        // 괄호로 묶으면 전체 부정
+        [InlineData("NOT (age > 30 AND city = \"서울\")", "x", "40", "서울", false)]
+        [InlineData("NOT (age > 30 AND city = \"서울\")", "x", "20", "서울", true)]
+        [InlineData("NOT (age > 30 AND city = \"서울\")", "x", "40", "부산", true)]
+        // NOT은 OR보다도 강함: NOT a OR b == (NOT a) OR b
+        [InlineData("NOT age > 30 OR city = \"서울\"", "x", "40", "서울", true)]
+        [InlineData("NOT age > 30 OR city = \"서울\"", "x", "40", "부산", false)]
+        [InlineData("not not age > 30", "x", "40", "부산", true)]
+        public void Not_binds_tighter_than_and_or(string expr, string name, string age, string city, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, age, city));
+        }
+
+        [Fact]
+        public void Not_without_condition_is_an_error()
+        {
+            Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("NOT", Headers));
+        }
+
+        [Fact]
+        public void Header_named_not_still_works_as_a_column()
+        {
+            var headers = new[] { "not", "age" };
+            var p = AdvancedFilterExpression.Compile("not = \"x\" AND NOT age > 5", headers).Predicate;
+            Assert.True(p(new[] { "x", "3" }));
+            Assert.False(p(new[] { "x", "9" }));
+            Assert.False(p(new[] { "y", "3" }));
+        }
+
+        [Theory]
+        [InlineData("name !matches \"^test\"", "test-1", false)]
+        [InlineData("name !matches \"^test\"", "TEST-1", false)]   // 대소문자 무시
+        [InlineData("name !matches \"^test\"", "prod-1", true)]
+        [InlineData("name !matches_cs \"^test\"", "TEST-1", true)] // 대소문자 구분
+        [InlineData("name !matches_cs \"^test\"", "test-1", false)]
+        [InlineData("name !contains \"kim\"", "KIMCHI", false)]
+        [InlineData("name !startswith \"a\"", "bob", true)]
+        [InlineData("name !endswith \"b\"", "bob", false)]
+        public void Negated_text_operators(string expr, string name, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, "1", "x"));
+        }
+
+        [Theory]
+        [InlineData("name matches \"^kim\"", "KIM Lee", true)]
+        [InlineData("name matches_cs \"^kim\"", "KIM Lee", false)]
+        [InlineData("name matches_cs \"^kim\"", "kim Lee", true)]
+        [InlineData("name MATCHES_CS \"^KIM\"", "KIM Lee", true)]
+        public void Matches_cs_is_case_sensitive(string expr, string name, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, "1", "x"));
+        }
+
+        [Fact]
+        public void Negation_with_bang_needs_a_text_operator()
+        {
+            var ex = Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("name ! \"x\"", Headers));
+            Assert.Contains("matches", ex.Message);
+        }
+
+        [Theory]
+        [InlineData("* matches \"^seoul$\"", "x", "1", "Seoul", true)]
+        [InlineData("* matches \"^seoul$\"", "x", "1", "busan", false)]
+        [InlineData("* matches_cs \"^seoul$\"", "x", "1", "Seoul", false)]
+        [InlineData("* contains \"EOU\"", "x", "1", "Seoul", true)]
+        [InlineData("* startswith \"se\"", "x", "1", "Seoul", true)]
+        [InlineData("* endswith \"ul\"", "x", "1", "Seoul", true)]
+        [InlineData("* == \"1\"", "x", "1", "z", true)]
+        [InlineData("[*] matches \"^x$\"", "x", "1", "z", true)]
+        // 부정형 = 긍정형의 논리 부정(어느 셀도 일치하지 않음)
+        [InlineData("* !matches \"^x$\"", "x", "1", "z", false)]
+        [InlineData("* !matches \"^q$\"", "x", "1", "z", true)]
+        [InlineData("* != \"x\"", "x", "1", "z", false)]
+        [InlineData("NOT * contains \"zz\" AND age = 1", "x", "1", "z", true)]
+        public void Any_column_star(string expr, string name, string age, string city, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, age, city));
+        }
+
+        [Fact]
+        public void Star_rejects_ordering_and_cross_column_comparison()
+        {
+            Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("* > 3", Headers));
+            Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("* == [age]", Headers));
+        }
+
+        [Fact]
+        public void Header_literally_named_star_wins_over_any_column()
+        {
+            var p = AdvancedFilterExpression.Compile("* == \"a\"", new[] { "*", "other" }).Predicate;
+            Assert.True(p(new[] { "a", "b" }));
+            Assert.False(p(new[] { "b", "a" }));
+        }
+
+        [Fact]
+        public void Error_messages_help_the_user()
+        {
+            var unknownColumn = Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("zzz = 1", Headers));
+            Assert.Contains("name", unknownColumn.Message);   // 사용 가능한 컬럼 안내
+            var unknownOp = Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("name like \"x\"", Headers));
+            Assert.Contains("matches_cs", unknownOp.Message); // 사용 가능한 연산자 안내
+            var bracket = Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("name matches [A-Z]+", Headers));
+            Assert.Contains("큰따옴표", bracket.Message);
+            Assert.True(AdvancedFilterExpression.Compile("name matches \"[A-Z]+\"", Headers).Predicate(new[] { "ab1", "1", "x" }));
+        }
+
+        [Fact]
+        public void Invalid_or_empty_regex_is_a_compile_error_for_every_regex_operator()
+        {
+            foreach (string op in new[] { "matches", "matches_cs", "!matches", "!matches_cs" })
+            {
+                var ex = Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile($"name {op} \"(\"", Headers));
+                Assert.Contains("(", ex.Message);
+            }
+            Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("name matches \"\"", Headers));
+        }
+
+        // 파국적 역추적: (a+)+$ 를 'aaa…a!'에 적용하면 2^n 시간 → 250ms 제한에 걸린다(결정적).
+        private static readonly string CatastrophicInput = new string('a', 40) + "!";
+
+        [Theory]
+        [InlineData("name matches \"^(a+)+$\"")]
+        [InlineData("name matches_cs \"^(a+)+$\"")]
+        [InlineData("* matches \"^(a+)+$\"")]
+        public void Regex_timeout_is_counted_and_treated_as_non_match(string expr)
+        {
+            var filter = AdvancedFilterExpression.Compile(expr, Headers);
+            Assert.Equal(0, filter.Timeouts.Count);
+
+            // 시간 초과한 셀은 불일치(false)이지 예외가 아니다.
+            Assert.False(filter.Predicate(new[] { CatastrophicInput, "1", "x" }));
+            Assert.True(filter.Timeouts.Count >= 1);
+
+            // 정상 셀은 영향 없고 카운터도 늘지 않는다.
+            long before = filter.Timeouts.Count;
+            Assert.True(filter.Predicate(new[] { "aaaa", "1", "x" }));
+            Assert.Equal(before, filter.Timeouts.Count);
+        }
+
+        [Fact]
+        public void Timed_out_cell_passes_negated_regex_and_is_still_reported()
+        {
+            var filter = AdvancedFilterExpression.Compile("name !matches \"^(a+)+$\"", Headers);
+            Assert.True(filter.Predicate(new[] { CatastrophicInput, "1", "x" })); // 정규식 불일치로 처리 → 부정은 참
+            Assert.Equal(1, filter.Timeouts.Count);                               // 하지만 조용히 넘기지 않는다
+        }
+
+        [Fact]
+        public void Timeouts_are_per_compiled_filter_and_reachable_from_the_predicate()
+        {
+            var a = AdvancedFilterExpression.Compile("name matches \"^(a+)+$\"", Headers);
+            var b = AdvancedFilterExpression.Compile("name matches \"^(a+)+$\"", Headers);
+            a.Predicate(new[] { CatastrophicInput, "1", "x" });
+            Assert.Equal(1, a.Timeouts.Count);
+            Assert.Equal(0, b.Timeouts.Count);
+            Assert.Same(a.Timeouts, AdvancedFilterExpression.TimeoutsOf(a.Predicate));
+            Assert.Null(AdvancedFilterExpression.TimeoutsOf(row => true));
+            a.Timeouts.Reset();
+            Assert.Equal(0, a.Timeouts.Count);
+        }
     }
 }

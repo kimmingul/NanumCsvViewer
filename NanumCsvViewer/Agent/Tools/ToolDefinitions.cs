@@ -18,6 +18,8 @@ namespace NanumCsvViewer.Agent.Tools
         public const string EditCells = "csv.edit_cells";
         public const string Undo = "csv.undo";
         public const string SaveEditsAs = "csv.save_edits_as";
+        public const string RegexCount = "csv.regex_count";
+        public const string RegexReplace = "csv.regex_replace";
 
         private const string NoArgs = """{"type":"object","properties":{},"additionalProperties":false}""";
 
@@ -47,10 +49,10 @@ namespace NanumCsvViewer.Agent.Tools
                 """),
 
             new HostToolDefinition(SetFilter,
-                "Filter the grid with an expression, e.g. age > 30 AND city = \"Seoul\"; [col_a] >= [col_b] compares columns. Visible to the user.",
+                "Filter the grid with an expression, e.g. age > 30 AND NOT city = \"Seoul\"; [col_a] >= [col_b] compares columns; column * means any column. Text/regex ops: contains startswith endswith matches matches_cs and their ! negations, e.g. name !matches \"^test\". Visible to the user.",
                 """
                 {"type":"object","properties":{
-                "expression":{"type":"string","description":"Syntax: column op value; op is = != < <= > >= contains startswith endswith matches (regex, case-insensitive); combine with AND, OR and parentheses; quote text values; [col] on the right compares columns."},
+                "expression":{"type":"string","description":"Syntax: column op value. op: = != < <= > >= contains startswith endswith (case-insensitive), matches (regex, case-insensitive), matches_cs (regex, case-sensitive); prefix ! negates a text op (!contains !startswith !endswith !matches !matches_cs). Column * = any column (* matches \"x\"; * != \"x\" = no column equals x). Combine with NOT, AND, OR, parentheses (NOT binds tightest). Quote text and regex values; [col] on the right compares columns."},
                 "mode":{"type":"string","enum":["replace","and"],"description":"replace (default) clears every existing filter first; and narrows the current view."}
                 },"required":["expression"],"additionalProperties":false}
                 """),
@@ -124,8 +126,30 @@ namespace NanumCsvViewer.Agent.Tools
                 },"required":["edits"],"additionalProperties":false}
                 """),
 
+            new HostToolDefinition(RegexCount,
+                "Count how many cells of the current view match a regular expression (.NET syntax, case-insensitive unless case_sensitive) in some or all columns: rows scanned, matched cells/rows, cells that timed out. Sample values only if the data policy allows.",
+                """
+                {"type":"object","properties":{
+                "pattern":{"type":"string","description":"Regular expression; it may match anywhere in the cell (anchor with ^ and $)."},
+                "columns":{"type":"array","items":{"type":"string"},"maxItems":200,"description":"Column names. Default: all columns."},
+                "case_sensitive":{"type":"boolean","description":"Default false."},
+                "max_samples":{"type":"integer","minimum":0,"maximum":20,"description":"Matching cells to list (row numbers always; values only if the data policy allows). Default 5."}
+                },"required":["pattern"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(RegexReplace,
+                "Regex find & replace in the given columns of the current view after the user approves a - old / + new card. ONE undo step in the edit overlay (original file untouched). Replacement uses .NET syntax: $1, ${name}, $$.",
+                """
+                {"type":"object","properties":{
+                "pattern":{"type":"string","description":"Regular expression (.NET); every match inside a cell is replaced."},
+                "replacement":{"type":"string","description":"Replacement text; $1, ${name}, $$ are substitutions. \"\" deletes the match."},
+                "columns":{"type":"array","minItems":1,"items":{"type":"string"},"maxItems":200,"description":"Columns to change."},
+                "case_sensitive":{"type":"boolean","description":"Default false."}
+                },"required":["pattern","replacement","columns"],"additionalProperties":false}
+                """),
+
             new HostToolDefinition(Undo,
-                "Undo the latest edit step if it was made by csv.edit_cells (the user's own edits are never undone by the agent).",
+                "Undo the latest edit step if it was made by csv.edit_cells or csv.regex_replace (the user's own edits are never undone by the agent).",
                 NoArgs),
 
             new HostToolDefinition(SaveEditsAs,

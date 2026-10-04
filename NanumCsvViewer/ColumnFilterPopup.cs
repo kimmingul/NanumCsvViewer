@@ -323,12 +323,61 @@ namespace NanumCsvViewer
             panel.Controls.AddRange(new Control[] { combo, valueBox, caseChk });
             AddRow(panel, SizeType.Absolute, 126);
 
+            // 잘못된 정규식 오류를 팝업 안에 표시(적용 거부). 평소엔 높이 0.
+            const int ErrorRowHeight = 44;
+            var errorLabel = new Label
+            {
+                ForeColor = Color.FromArgb(0xD3, 0x2F, 0x2F),
+                Padding = new Padding(8, 0, 8, 0),
+                TextAlign = ContentAlignment.TopLeft,
+                Visible = false,
+            };
+            AddRow(errorLabel, SizeType.Absolute, 0);
+            int errorRowIndex = _root.RowCount - 1;
+            bool errorShown = false;
+            void ShowError(string? message)
+            {
+                if (message is null)
+                {
+                    if (!errorShown) return;
+                    errorShown = false;
+                    errorLabel.Visible = false;
+                    _root.RowStyles[errorRowIndex].Height = 0;
+                    Height -= ErrorRowHeight;
+                    return;
+                }
+                errorLabel.Text = message;
+                errorLabel.Visible = true;
+                if (errorShown) return;
+                errorShown = true;
+                _root.RowStyles[errorRowIndex].Height = ErrorRowHeight;
+                Height += ErrorRowHeight;
+            }
+
             AddRow(ButtonRow(out var ok, LT("Apply", "적용")), SizeType.AutoSize);
             Height = 24 + 126 + 44;
 
+            // 연산·값이 바뀌면 이전 오류 표시는 지운다(다시 [적용]할 때 재검증).
+            combo.SelectedIndexChanged += (_, _) => ShowError(null);
+            valueBox.TextChanged += (_, _) => ShowError(null);
+            caseChk.CheckedChanged += (_, _) => ShowError(null);
+
             ok.Click += (_, _) =>
             {
-                TextOp = ops[combo.SelectedIndex].Op;
+                var op = ops[combo.SelectedIndex].Op;
+                // 정규식은 적용 전에 검증한다: 잘못된 패턴이면 팝업을 닫지 않고 오류를 보여 준다(조용한 0행 방지).
+                if (op == TextFilterOp.Regex && valueBox.Text.Length > 0)
+                {
+                    try { _ = RegexSafety.Compile(valueBox.Text, caseChk.Checked); }
+                    catch (RegexPatternException ex)
+                    {
+                        DialogResult = DialogResult.None;   // [적용] 버튼의 DialogResult=OK로 닫히지 않도록 되돌린다
+                        ShowError(LT($"Invalid regular expression — not applied. {ex.InnerException?.Message ?? ex.Message}",
+                            "적용하지 않았습니다. " + ex.Message));
+                        return;
+                    }
+                }
+                TextOp = op;
                 TextValue = valueBox.Text;
                 TextCaseSensitive = caseChk.Checked;
                 DialogResult = DialogResult.OK;

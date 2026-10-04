@@ -15,14 +15,17 @@ namespace NanumCsvViewer.Csv
         (int Row, int Col, string Value)[] Cells,
         (int Col, string Name)[] Headers,
         int[] Deleted,
-        AddedRow[] Added);
+        AddedRow[] Added,
+        string[]? AppendedColumns = null,
+        int AppendBase = -1);
 
     /// <summary>
     /// 편집 덮개(overlay). 원본 파일은 절대 바꾸지 않고 다음을 보관한다:
     ///  - (행 id, 컬럼) → 문자열 셀 편집 — 값은 항상 "문자열 그대로"라 001의 선행 0이 사라지지 않는다.
     ///  - 컬럼 이름 변경(헤더 덮개)
     ///  - 행 삭제 집합 + 추가 행(앵커 기반 위치)
-    /// 읽기(그리드·필터·분석·내보내기)는 VirtualCsvDocument의 단일 파싱 경로에서 덮개를 적용한다.
+    ///  - 추가 컬럼(정규식 추출 등): 헤더 이름 + (행 id, 컬럼) 셀 값. 값이 비어 있지 않은 셀만 저장하므로 메모리는 O(비어 있지 않은 값)이다.
+    ///    추가 컬럼의 번호는 AppendBase(원본 컬럼 수)부터 이어 붙는다. 읽기 경로는 모든 행을 전체 너비로 맞춘다(ExpandRaw).
     /// 모든 변경은 되돌리기/다시 실행 이력에 단계(step)로 쌓인다 — 한 번의 커밋·붙여넣기·삭제 = 한 단계.
     /// </summary>
     public sealed class CellEdits
@@ -40,6 +43,8 @@ namespace NanumCsvViewer.Csv
         private readonly HashSet<int> _deleted = new();
         private readonly List<AddedRow> _added = new();
         private int _baseRows = -1;
+        private readonly List<string> _appended = new(); // 추가 컬럼 이름(_gate로 보호)
+        private int _appendBase = -1;                     // 첫 추가 컬럼이 놓이는 인덱스 = 원본 컬럼 수
 
         private readonly List<EditStep> _undo = new();
         private readonly List<EditStep> _redo = new();
@@ -57,10 +62,23 @@ namespace NanumCsvViewer.Csv
         public int HeaderEditCount => _headers.Count;
         public int DeletedCount { get { lock (_gate) return _deleted.Count; } }
         public int AddedCount { get { lock (_gate) return _added.Count; } }
-        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits;
+        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits && !HasAppendedColumns;
 
         /// <summary>행 삭제/추가가 있는가(행 구조가 원본과 다른가).</summary>
         public bool HasStructureEdits { get { lock (_gate) return _deleted.Count > 0 || _added.Count > 0; } }
+
+        /// <summary>추가 컬럼 수.</summary>
+        public int AppendedColumnCount { get { lock (_gate) return _appended.Count; } }
+        public bool HasAppendedColumns { get { lock (_gate) return _appended.Count > 0; } }
+
+        /// <summary>첫 추가 컬럼의 인덱스(= 추가 시점의 원본 컬럼 수). 추가 컬럼이 없으면 -1.</summary>
+        public int AppendBase { get { lock (_gate) return _appended.Count > 0 ? _appendBase : -1; } }
+
+        /// <summary>추가 컬럼 이름(추가한 순서). 이름 변경(헤더 덮개)은 반영하지 않은 "원래" 이름.</summary>
+        public string[] AppendedColumnNames() { lock (_gate) return _appended.ToArray(); }
+
+        /// <summary>col이 추가 컬럼의 인덱스인가.</summary>
+        public bool IsAppendedColumn(int col) { lock (_gate) return _appended.Count > 0 && col >= _appendBase && col < _appendBase + _appended.Count; }
 
         /// <summary>모든 변경에서 증가. 분석 결과 창의 "데이터가 바뀜" 판정과 디바운스용.</summary>
         public long Version { get; private set; }
@@ -123,13 +141,60 @@ namespace NanumCsvViewer.Csv
             Record(new HeaderChange(col, old, name));
         }
 
-        /// <summary>원본 헤더에 이름 변경을 반영한 새 배열(변경이 없으면 원본 그대로).</summary>
+        /// <summary>원본 헤더에 추가 컬럼 이름과 이름 변경을 반영한 새 배열(변경이 없으면 원본 그대로).</summary>
         public string[] ApplyHeader(string[] raw)
         {
-            if (_headers.IsEmpty) return raw;
-            var copy = (string[])raw.Clone();
+            string[] appended;
+            lock (_gate) appended = _appended.ToArray();
+            if (_headers.IsEmpty && appended.Length == 0) return raw;
+            var copy = new string[raw.Length + appended.Length];
+            Array.Copy(raw, copy, raw.Length);
+            Array.Copy(appended, 0, copy, raw.Length, appended.Length);
             foreach (var kv in _headers) if (kv.Key >= 0 && kv.Key < copy.Length) copy[kv.Key] = kv.Value;
             return copy;
+        }
+
+        /// <summary>
+        /// 원본(또는 추가 행 기본값) 행을 추가 컬럼이 있는 너비로 맞춘다(셀 편집 덮개 적용 전).
+        /// 원본 행: AppendBase 위치에 빈 추가 컬럼 칸을 끼워 넣고(헤더보다 긴 행의 남는 필드는 그 뒤로 보존), 모자라면 빈 칸으로 채운다.
+        /// 추가 행: 이미 전체 너비로 만들어졌으므로 모자랄 때만 채운다. 추가 컬럼이 없으면 입력 그대로.
+        /// </summary>
+        public string[] ExpandRaw(string[] fields, bool isAddedRow)
+        {
+            int n, b;
+            lock (_gate) { n = _appended.Count; b = _appendBase; }
+            if (n == 0) return fields;
+            int width = b + n;
+            if (isAddedRow || fields.Length <= b)
+            {
+                if (fields.Length >= width) return fields;
+                var padded = new string[width];
+                Array.Copy(fields, padded, fields.Length);
+                for (int i = fields.Length; i < width; i++) padded[i] = string.Empty;
+                return padded;
+            }
+            var result = new string[fields.Length + n];
+            Array.Copy(fields, result, b);
+            for (int i = 0; i < n; i++) result[b + i] = string.Empty;
+            Array.Copy(fields, b, result, b + n, fields.Length - b);
+            return result;
+        }
+
+        /// <summary>
+        /// 컬럼을 맨 뒤에 추가한다(값은 전부 빈 값). rawColumnCount = 파일의 원본 컬럼 수.
+        /// 같은 단계(BeginStep) 안에서 Set으로 값을 채우면 되돌리기 한 번에 컬럼과 값이 함께 사라진다. 새 컬럼의 인덱스를 돌려준다.
+        /// </summary>
+        public int AppendColumn(string name, int rawColumnCount, string? description = null)
+        {
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("The column name cannot be empty.", nameof(name));
+            int index;
+            lock (_gate)
+            {
+                if (_appended.Count > 0 && _appendBase != rawColumnCount) throw new InvalidOperationException("Raw column count changed.");
+                index = rawColumnCount + _appended.Count;
+            }
+            using (BeginStep(description)) Record(new ColumnChange(name, rawColumnCount, true));
+            return index;
         }
 
         // ------------------------------------------------------------ 행 구조
@@ -326,7 +391,7 @@ namespace NanumCsvViewer.Csv
             return true;
         }
 
-        /// <summary>모든 편집(셀·이름·삭제·추가 행)을 버린다. 한 단계라 되돌릴 수 있다.</summary>
+        /// <summary>모든 편집(셀·이름·삭제·추가 행·추가 컬럼)을 버린다. 한 단계라 되돌릴 수 있다.</summary>
         public void Clear()
         {
             if (IsEmpty) return;
@@ -339,6 +404,10 @@ namespace NanumCsvViewer.Csv
                 lock (_gate) { deleted = _deleted.ToArray(); added = _added.ToArray(); }
                 foreach (int id in deleted) Record(new DeleteChange(id, true, false));
                 for (int i = added.Length - 1; i >= 0; i--) Record(new RowChange(added[i], false)); // 뒤에서부터 제거
+                string[] columns;
+                int appendBase;
+                lock (_gate) { columns = _appended.ToArray(); appendBase = _appendBase; }
+                for (int i = columns.Length - 1; i >= 0; i--) Record(new ColumnChange(columns[i], appendBase, false));
             }
         }
 
@@ -359,7 +428,8 @@ namespace NanumCsvViewer.Csv
                 var deleted = _deleted.ToArray();
                 Array.Sort(deleted);
                 return new EditSnapshot(_baseRows, cells, headers, deleted,
-                    _added.Select(a => new AddedRow(a.Anchor, (string[])a.Values.Clone())).ToArray());
+                    _added.Select(a => new AddedRow(a.Anchor, (string[])a.Values.Clone())).ToArray(),
+                    _appended.Count > 0 ? _appended.ToArray() : null, _appended.Count > 0 ? _appendBase : -1);
             }
         }
 
@@ -382,8 +452,16 @@ namespace NanumCsvViewer.Csv
             foreach (var (row, col, value) in s.Cells)
                 if (row < 0 || row >= total || col < 0 || col >= 1 << 20 || value is null)
                     throw new InvalidDataException("Recovery data has a cell outside the table.");
+            int appendedCount = s.AppendedColumns?.Length ?? 0;
+            if (appendedCount > 0)
+            {
+                if (s.AppendBase != columnCount)
+                    throw new InvalidDataException("Recovery data was made for a different column count.");
+                if (s.AppendedColumns!.Any(string.IsNullOrWhiteSpace))
+                    throw new InvalidDataException("Recovery data has an empty appended column name.");
+            }
             foreach (var (col, name) in s.Headers)
-                if (col < 0 || col >= columnCount || name is null)
+                if (col < 0 || col >= columnCount + appendedCount || name is null)
                     throw new InvalidDataException("Recovery data has a column outside the table.");
             foreach (int id in s.Deleted)
                 if (id < 0 || id >= total) throw new InvalidDataException("Recovery data has an invalid deleted row.");
@@ -394,10 +472,11 @@ namespace NanumCsvViewer.Csv
                 foreach (var a in s.Added) _added.Add(new AddedRow(a.Anchor, (string[])a.Values.Clone()));
                 foreach (int id in s.Deleted) _deleted.Add(id);
                 if (s.Added.Length > 0 || s.Deleted.Length > 0) StructureVersion++;
+                if (appendedCount > 0) { _appendBase = columnCount; _appended.AddRange(s.AppendedColumns!); }
             }
             foreach (var (row, col, value) in s.Cells) RawCell(row, col, value);
             foreach (var (col, name) in s.Headers) RawHeader(col, name);
-            if (s.Headers.Length > 0) HeaderVersion++;
+            if (s.Headers.Length > 0 || appendedCount > 0) HeaderVersion++;
             _savedPos = -1;
             Raise();
         }
@@ -456,6 +535,26 @@ namespace NanumCsvViewer.Csv
             }
         }
 
+        private void RawAppendColumn(string name, int rawColumnCount)
+        {
+            lock (_gate)
+            {
+                if (_appended.Count == 0) _appendBase = rawColumnCount;
+                _appended.Add(name);
+            }
+            HeaderVersion++;
+        }
+
+        private void RawRemoveLastColumn()
+        {
+            lock (_gate)
+            {
+                if (_appended.Count == 0) throw new InvalidOperationException("No appended column to remove.");
+                _appended.RemoveAt(_appended.Count - 1);
+            }
+            HeaderVersion++;
+        }
+
         private abstract class EditChange
         {
             public abstract void Apply(CellEdits e, bool forward);
@@ -488,7 +587,19 @@ namespace NanumCsvViewer.Csv
             }
         }
 
+        private sealed class ColumnChange(string name, int rawColumnCount, bool added) : EditChange
+        {
+            public override void Apply(CellEdits e, bool forward)
+            {
+                if (forward == added) e.RawAppendColumn(name, rawColumnCount); else e.RawRemoveLastColumn();
+            }
+        }
+
         private sealed record EditStep(string? Description, List<EditChange> Changes);
+
+        /// <summary>새 텍스트의 줄바꿈을 원래 값의 스타일(CRLF/LF)에 맞춘다. 원래 값에 CRLF가 있으면 그대로 둔다.</summary>
+        public static string MatchNewlineStyle(string text, string original)
+            => original.Contains("\r\n", StringComparison.Ordinal) ? text : text.Replace("\r\n", "\n");
 
         // ------------------------------------------------------------ CSV 직렬화
 

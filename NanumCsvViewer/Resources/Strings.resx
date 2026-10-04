@@ -153,7 +153,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 [Filter]
 • Use the funnel icon on a header for type-aware filters: range for numbers/time, checkboxes for categories/booleans, text predicates (contains/regex/list/blank) for strings/identifiers.
 • Active conditions appear as chips above the grid — remove with ✕, click to edit, toggle ALL (AND) / ANY (OR).
-• Filter by Cell (Ctrl+B) and the Advanced expression filter (AND/OR/parentheses). Clear removes all.
+• Filter by Cell (Ctrl+B) and the Advanced expression filter (NOT/AND/OR/parentheses; regex via matches / matches_cs / !matches; * = any column, e.g. * matches "x"). A regex that times out on a cell counts that cell as non-matching and is reported with ⚠. Clear removes all.
 
 [Sort]
 • Click a column header to sort (click again to toggle direction).

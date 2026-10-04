@@ -57,6 +57,34 @@ namespace NanumCsvViewer.Csv
         public bool IsEmpty => ValueFilters.Count == 0 && DateFilters.Count == 0
             && NumericFilters.Count == 0 && TextFilters.Count == 0;
 
+        // 마지막으로 컴파일한 술어들의 정규식 상태(런타임 전용 — 직렬화 대상 아님: 필드이며 공개 속성이 아님).
+        // 컬럼당 필터는 하나뿐이므로 컬럼 번호로 색인한다. 컴파일마다 새 사전으로 교체해 이전 술어의 카운터와 섞이지 않는다.
+        private Dictionary<int, RegexTimeoutCounter> _timeouts = new();
+        private Dictionary<int, string> _regexErrors = new();
+
+        /// <summary>해당 컬럼 정규식 필터가 마지막 컴파일 이후 시간 초과로 불일치 처리한 셀 수.</summary>
+        public long TimeoutCount(int column)
+            => _timeouts.TryGetValue(column, out var c) ? c.Count : 0;
+
+        /// <summary>모든 컬럼 정규식 필터의 시간 초과 셀 수 합계.</summary>
+        public long TotalTimeouts()
+        {
+            long sum = 0;
+            foreach (var c in _timeouts.Values) sum += c.Count;
+            return sum;
+        }
+
+        /// <summary>
+        /// 해당 컬럼 정규식 필터가 컴파일되지 못했으면 그 이유(저장된 뷰·JSON에서 복원한 잘못된 패턴). 없으면 null.
+        /// 이런 필터는 어떤 행도 통과시키지 못하므로 호출부가 사용자에게 반드시 알려야 한다.
+        /// </summary>
+        public string? RegexErrorFor(int column)
+            => _regexErrors.TryGetValue(column, out var m) ? m : null;
+
+        /// <summary>정규식 오류가 있는 (컬럼, 메시지) 목록.</summary>
+        public IReadOnlyList<(int Column, string Message)> RegexErrors()
+            => _regexErrors.Select(kv => (kv.Key, kv.Value)).ToArray();
+
         public void SetValues(int column, IEnumerable<string> values, bool includeBlanks)
         {
             Remove(column);
@@ -85,6 +113,9 @@ namespace NanumCsvViewer.Csv
 
         public void SetText(int column, TextFilterOp op, string value, bool caseSensitive)
         {
+            // 잘못된 정규식은 적용을 거부한다(기존 필터는 그대로 유지): 조용히 0행이 되는 일이 없도록.
+            if (op == TextFilterOp.Regex && value.Length > 0)
+                _ = RegexSafety.Compile(value, caseSensitive);   // RegexPatternException
             Remove(column);
             // IsBlank/IsNotBlank가 아니면서 값이 비면 필터 없음으로 간주.
             if (op is not (TextFilterOp.IsBlank or TextFilterOp.IsNotBlank) && value.Length == 0) return;
@@ -98,6 +129,8 @@ namespace NanumCsvViewer.Csv
             DateFilters.RemoveAll(f => f.Column == column);
             NumericFilters.RemoveAll(f => f.Column == column);
             TextFilters.RemoveAll(f => f.Column == column);
+            _timeouts.Remove(column);
+            _regexErrors.Remove(column);
         }
 
         public void Clear()
@@ -106,6 +139,8 @@ namespace NanumCsvViewer.Csv
             DateFilters.Clear();
             NumericFilters.Clear();
             TextFilters.Clear();
+            _timeouts.Clear();
+            _regexErrors.Clear();
         }
 
         /// <summary>다른 상태의 모든 필터(값/시간/숫자/텍스트)를 깊은 복사로 대체. 저장된 뷰 복원에 사용.</summary>
@@ -140,7 +175,12 @@ namespace NanumCsvViewer.Csv
 
         /// <summary>필터 하나당 술어를 하나씩 컴파일한 목록. AND는 Predicate(), OR(any)는 호출부에서 결합.</summary>
         public IReadOnlyList<Func<string[], bool>> IndividualPredicates()
-            => CompileFilters().ToArray();
+        {
+            // 컴파일할 때마다 정규식 카운터·오류를 새로 시작(이전 술어의 시간 초과가 섞여 보고되지 않도록).
+            _timeouts = new Dictionary<int, RegexTimeoutCounter>();
+            _regexErrors = new Dictionary<int, string>();
+            return CompileFilters().ToArray();
+        }
 
         private IEnumerable<Func<string[], bool>> CompileFilters()
         {
@@ -180,8 +220,25 @@ namespace NanumCsvViewer.Csv
             foreach (var f in TextFilters)
             {
                 int col = f.Column; var op = f.Op; var value = f.Value; bool cs = f.CaseSensitive;
-                var regex = CompileRegex(f); var list = BuildList(f);
-                yield return row => TextMatches(Cell(row, col), op, value, cs, regex, list);
+                var list = BuildList(f);
+                Regex? regex = null;
+                RegexTimeoutCounter? counter = null;
+                if (op == TextFilterOp.Regex)
+                {
+                    try
+                    {
+                        regex = RegexSafety.Compile(value, cs);
+                        counter = new RegexTimeoutCounter();
+                        _timeouts[col] = counter;
+                    }
+                    catch (RegexPatternException ex)
+                    {
+                        // 저장된 뷰·JSON에서 온 잘못된 패턴. 이 필터는 어떤 행도 통과시키지 않으며(예전과 동일),
+                        // 대신 조용히 넘어가지 않도록 오류를 기록해 호출부(상태줄·칩)가 알리게 한다.
+                        _regexErrors[col] = ex.Message;
+                    }
+                }
+                yield return row => TextMatches(Cell(row, col), op, value, cs, regex, counter, list);
             }
         }
 
@@ -209,16 +266,6 @@ namespace NanumCsvViewer.Csv
             }
         }
 
-        private static Regex? CompileRegex(TextFilter f)
-        {
-            if (f.Op != TextFilterOp.Regex) return null;
-            try
-            {
-                var opts = RegexOptions.CultureInvariant | (f.CaseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
-                return new Regex(f.Value, opts);
-            }
-            catch (ArgumentException) { return null; } // 잘못된 정규식 → 매칭 없음
-        }
 
         // InList: 값을 줄바꿈/쉼표로 분리한 집합. 그 외 연산은 null.
         private static HashSet<string>? BuildList(TextFilter f)
@@ -230,7 +277,8 @@ namespace NanumCsvViewer.Csv
             return set;
         }
 
-        private static bool TextMatches(string v, TextFilterOp op, string value, bool caseSensitive, Regex? regex, HashSet<string>? list)
+        private static bool TextMatches(string v, TextFilterOp op, string value, bool caseSensitive, Regex? regex,
+            RegexTimeoutCounter? counter, HashSet<string>? list)
         {
             var cmp = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
             return op switch
@@ -241,7 +289,7 @@ namespace NanumCsvViewer.Csv
                 TextFilterOp.Equals => v.Equals(value, cmp),
                 TextFilterOp.StartsWith => v.StartsWith(value, cmp),
                 TextFilterOp.EndsWith => v.EndsWith(value, cmp),
-                TextFilterOp.Regex => regex is not null && regex.IsMatch(v),
+                TextFilterOp.Regex => regex is not null && RegexSafety.IsMatch(regex, v, counter),
                 TextFilterOp.InList => list is not null && list.Contains(v),
                 _ => true
             };

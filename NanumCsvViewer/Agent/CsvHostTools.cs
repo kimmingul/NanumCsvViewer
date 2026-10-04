@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using NanumCsvViewer.Agent.Tools;
 using NanumCsvViewer.Csv;
 using NanumCsvViewer.Csv.DataQuality;
@@ -16,6 +17,8 @@ namespace NanumCsvViewer.Agent
     ///    분석 결과(수준 이름 포함)만. column_stats의 상위 빈도 값은 생략, quality_scan의 예시 값·위장결측 후보 값·상수 값도 생략(행 번호만).
     ///  - RowsWithApproval: csv.get_rows와 top_values가 있는 column_stats는 요청마다 승인 카드. quality_scan 예시 값은 생략.
     ///  - RowsAllowed: csv.get_rows 승인 없이 MaxRowsPerRequest까지. top_values·품질 예시 값도 포함.
+    ///  - csv.regex_count: 개수·행 번호·시간 초과 셀 수는 항상. 일치한 셀의 값 예시는 SummaryOnly면 생략, RowsWithApproval이면 값을 담은 승인 카드 뒤에만, RowsAllowed면 상한(20)까지.
+    ///  - csv.regex_replace: 편집이므로 정책과 무관하게 항상 - 이전/+ 이후 승인 카드(로컬). 결과의 이전/이후 값 예시는 RowsAllowed에서만.
     /// 편집·저장은 정책과 무관하게 항상 승인 카드.
     /// </summary>
     public sealed class CsvHostTools : ICsvToolExecutor
@@ -65,6 +68,10 @@ namespace NanumCsvViewer.Agent
             {
                 result = HostToolResult.Error(ex.Message);
             }
+            catch (RegexPatternException ex)
+            {
+                result = HostToolResult.Error(RegexErrorText(ex));
+            }
             catch (Exception ex) when (IsUserInputError(ex))
             {
                 result = HostToolResult.Error(ex.Message);
@@ -99,6 +106,8 @@ namespace NanumCsvViewer.Agent
                 ToolDefinitions.QualityScan => await QualityScanAsync(args, ct),
                 ToolDefinitions.EditCells => await EditCellsAsync(args, approvals, ct),
                 ToolDefinitions.Undo => Undo(),
+                ToolDefinitions.RegexCount => await RegexCountAsync(args, approvals, ct),
+                ToolDefinitions.RegexReplace => await RegexReplaceAsync(args, approvals, ct),
                 ToolDefinitions.SaveEditsAs => await SaveEditsAsAsync(args, approvals, ct),
                 _ => HostToolResult.Error($"Unknown tool '{call.ToolName}'. Available: {string.Join(", ", ToolDefinitions.All.Select(d => d.Name))}."),
             };
@@ -356,7 +365,8 @@ namespace NanumCsvViewer.Agent
             {
                 throw new AgentToolException(
                     "Invalid filter expression: " + ex.Message + " " +
-                    "Syntax: <column> <op> <value>; op is = != < <= > >= contains startswith endswith matches (regex, case-insensitive); combine with AND / OR and parentheses (no NOT); " +
+                    "Syntax: <column> <op> <value>; op is = != < <= > >= contains startswith endswith matches (regex, case-insensitive) matches_cs (regex, case-sensitive), text ops can be negated with ! (!matches); " +
+                    "column * means any column; combine with NOT, AND, OR and parentheses (NOT binds tightest); " +
                     "put text values in double quotes; a right side like [other_column] compares two columns. " +
                     "Columns: " + string.Join(", ", names.Take(30)) + (names.Length > 30 ? ", …" : ""));
             }
@@ -370,6 +380,11 @@ namespace NanumCsvViewer.Agent
                 ["total_rows"] = change.TotalRows,
             };
             if (change.ViewRows == 0) warnings.Add("No row matches. Check column names and value spelling (csv.column_stats top_values, if the data policy allows).");
+            if (change.RegexTimedOut > 0)
+            {
+                json["regex_cells_timed_out"] = change.RegexTimedOut;
+                warnings.Add($"{change.RegexTimedOut:N0} cell(s) exceeded the {RegexSafety.MatchTimeout.TotalMilliseconds:N0} ms regex time limit and were treated as NOT matching the regular expression (with ! or NOT they count as passing), so the row count may be wrong. Simplify the pattern.");
+            }
             if (warnings.Count > 0) json["warnings"] = warnings;
             return Reply($"Filter applied: {change.ViewRows:N0} of {change.TotalRows:N0} rows match. The grid shows them now.", json);
         }
@@ -553,6 +568,188 @@ namespace NanumCsvViewer.Agent
                 ["note"] = "Applied through the edit overlay as one undo step; sheet edit mode was not needed. The source file is unchanged and the edits are unsaved until csv.save_edits_as. csv.undo reverts this step.",
             };
             return Reply($"Edited {result.Changed:N0} cell(s) as one undo step (overlay only; original file untouched, unsaved).", json);
+        }
+
+        // ------------------------------------------------------------------ csv.regex_count / csv.regex_replace
+
+        private const int MaxRegexSamples = 20;
+        private const int MaxRegexChanges = 50_000;
+        private const int RegexCardChanges = 15;
+
+        /// <summary>RegexSafety의 사용자용(한국어) 메시지 대신 모델이 고칠 수 있게 .NET 파서 메시지를 영어로 돌려준다.</summary>
+        internal static string RegexErrorText(RegexPatternException ex)
+            => ex.InnerException is { } inner
+                ? $"Invalid regular expression: {inner.Message}"
+                : "Invalid regular expression: the pattern is empty.";
+
+        private static Regex CompilePattern(ToolArgs args)
+        {
+            string pattern = args.OptString("pattern") ?? "";
+            if (pattern.Length == 0) throw new AgentToolException("'pattern' is required (a non-empty regular expression).");
+            if (pattern.Length > 2000) throw new AgentToolException("The pattern is too long (max 2000 characters).");
+            return RegexSafety.Compile(pattern, args.OptBool("case_sensitive") ?? false);
+        }
+
+        private static List<int> RegexColumns(ToolArgs args, string[] names, bool required)
+        {
+            var requested = args.OptStringArray("columns", 200);
+            if (requested is { Count: > 0 }) return ColumnNames.ResolveMany(names, requested, "columns");
+            if (required) throw new AgentToolException("'columns' is required: name the columns to change.");
+            return Enumerable.Range(0, names.Length).ToList();
+        }
+
+        private static string TimeoutNote(long timedOut)
+            => $"{timedOut:N0} cell(s) exceeded the {RegexSafety.MatchTimeout.TotalMilliseconds:N0} ms regex time limit and were NOT evaluated, so the counts are lower bounds. " +
+               "Simplify the pattern (avoid nested quantifiers such as (a+)+) or anchor it.";
+
+        private async Task<HostToolResult> RegexCountAsync(ToolArgs args, IAgentApprovals approvals, CancellationToken ct)
+        {
+            var regex = CompilePattern(args);
+            int maxSamples = (int)(args.OptInt("max_samples", 0, MaxRegexSamples) ?? 5);
+            var info = RequireReady();
+            var names = Names(info);
+            var cols = RegexColumns(args, names, required: false);
+
+            var scan = await _host.RegexCountAsync(regex, cols, maxSamples, ct);
+            var policy = Options().DataPolicy;
+            var notes = new JsonArray();
+
+            var samples = scan.Samples.Take(maxSamples).ToList();
+            bool includeValues = false;
+            if (samples.Count > 0)
+            {
+                if (policy == AgentDataPolicy.RowsAllowed) includeValues = true;
+                else if (policy == AgentDataPolicy.RowsWithApproval)
+                {
+                    var lines = new List<string> { L("  Matching cells (row · column: value):", "  일치한 셀(행 · 컬럼: 값):") };
+                    foreach (var s in samples)
+                        lines.Add($"+ {s.SourceRow:N0} · {names[s.Column]}: {ToolJson.OneLine(s.Value, EditCard.ValueWidth)}");
+                    includeValues = await approvals.ApproveAsync(
+                        L("Share matching cell values with the AI", "AI에게 일치한 셀 값 공유"),
+                        L($"{samples.Count} example value(s) matched by the regular expression (current view)", $"정규식에 일치한 예시 값 {samples.Count}개(현재 뷰)"),
+                        lines, ct);
+                    if (!includeValues) notes.Add("The user declined to share the matching values; only counts and row numbers are included.");
+                }
+                else notes.Add("Sample values omitted: the data policy is SummaryOnly (raw cell values are not shared). Row numbers and counts are included.");
+            }
+
+            var matches = new JsonArray();
+            foreach (var s in samples)
+            {
+                var o = new JsonObject { ["row"] = s.SourceRow, ["column"] = names[s.Column] };
+                if (includeValues) o["value"] = ToolJson.Clip(s.Value, MaxCellChars);
+                matches.Add(o);
+            }
+
+            var json = new JsonObject
+            {
+                ["pattern"] = regex.ToString(),
+                ["case_sensitive"] = (regex.Options & RegexOptions.IgnoreCase) == 0,
+                ["scope"] = "current view",
+                ["columns_scanned"] = cols.Count,
+                ["rows_scanned"] = scan.RowsScanned,
+                ["cells_matched"] = scan.CellsMatched,
+                ["rows_matched"] = scan.RowsMatched,
+                ["cells_timed_out"] = scan.CellsTimedOut,
+                ["examples"] = matches,
+            };
+            if (scan.CellsTimedOut > 0) json["warning"] = TimeoutNote(scan.CellsTimedOut);
+            if (notes.Count > 0) json["notes"] = notes;
+            string timeoutText = scan.CellsTimedOut > 0 ? $", {scan.CellsTimedOut:N0} cell(s) timed out (not evaluated)" : "";
+            return Reply(
+                $"{scan.CellsMatched:N0} cell(s) in {scan.RowsMatched:N0} of {scan.RowsScanned:N0} view rows match{timeoutText}.",
+                json);
+        }
+
+        private async Task<HostToolResult> RegexReplaceAsync(ToolArgs args, IAgentApprovals approvals, CancellationToken ct)
+        {
+            var regex = CompilePattern(args);
+            if (!args.Has("replacement")) throw new AgentToolException("'replacement' is required (use \"\" to delete the matched text).");
+            string replacement = args.OptString("replacement") ?? "";
+            if (replacement.Length > 2000) throw new AgentToolException("The replacement is too long (max 2000 characters).");
+            var info = RequireReady();
+            var names = Names(info);
+            var cols = RegexColumns(args, names, required: true);
+
+            var plan = await _host.PlanRegexReplaceAsync(regex, replacement, cols, MaxRegexChanges, ct);
+            string timeoutWarning = plan.CellsTimedOut > 0 ? TimeoutNote(plan.CellsTimedOut) : "";
+            if (plan.Truncated)
+                throw new AgentToolException(
+                    $"Refused: more than {MaxRegexChanges:N0} cells would change, so nothing was changed. Narrow it with csv.set_filter, fewer columns or a stricter pattern." +
+                    (plan.CellsTimedOut > 0 ? " " + timeoutWarning : ""));
+            if (plan.Changes.Count == 0)
+            {
+                var none = new JsonObject
+                {
+                    ["changed_cells"] = 0,
+                    ["rows_scanned"] = plan.RowsScanned,
+                    ["cells_matched"] = plan.CellsMatched,
+                    ["cells_timed_out"] = plan.CellsTimedOut,
+                };
+                if (plan.CellsTimedOut > 0) none["warning"] = timeoutWarning;
+                string why = plan.CellsMatched > 0 ? "the replacement gives the same text" : "no cell matches the pattern";
+                return Reply($"No change: {why}.", none);
+            }
+
+            var changes = plan.Changes;
+            var cardChanges = changes.Take(RegexCardChanges)
+                .Select(c => new EditCard.Change(c.SourceRow, names[c.Column], c.Old, c.New)).ToList();
+            var lines = new List<string>
+            {
+                L("  Pattern: ", "  패턴: ") + ToolJson.OneLine(regex.ToString(), EditCard.ValueWidth)
+                    + ((regex.Options & RegexOptions.IgnoreCase) == 0 ? L(" (case-sensitive)", " (대소문자 구분)") : ""),
+                L("  Replacement: ", "  바꿀 내용: ") + (replacement.Length == 0 ? L("(empty: delete the match)", "(빈 값: 일치한 부분 삭제)") : ToolJson.OneLine(replacement, EditCard.ValueWidth)),
+                L("  Columns: ", "  컬럼: ") + string.Join(", ", cols.Take(10).Select(c => names[c])) + (cols.Count > 10 ? $" … (+{cols.Count - 10})" : ""),
+            };
+            if (plan.CellsTimedOut > 0)
+                lines.Add(L($"  Warning: {plan.CellsTimedOut:N0} cell(s) timed out and are NOT changed.", $"  주의: {plan.CellsTimedOut:N0}개 셀은 시간 초과로 평가하지 못해 바뀌지 않습니다."));
+            lines.AddRange(EditCard.Lines(cardChanges, Korean));
+            if (changes.Count > cardChanges.Count)
+                lines.Add(L($"  … and {changes.Count - cardChanges.Count:N0} more cell(s) not shown", $"  … 외 {changes.Count - cardChanges.Count:N0}개 셀(표시 생략)"));
+
+            long lo = changes.Min(c => c.SourceRow), hi = changes.Max(c => c.SourceRow);
+            bool approved = await approvals.ApproveAsync(
+                L($"Regex replace in {changes.Count:N0} cell(s) of {info.FileName}", $"{info.FileName}의 셀 {changes.Count:N0}개 정규식 바꾸기"),
+                L($"-{changes.Count:N0} +{changes.Count:N0} · rows {lo:N0}–{hi:N0} · one undo step (Ctrl+Z); the original file is not changed",
+                  $"-{changes.Count:N0} +{changes.Count:N0} · {lo:N0}–{hi:N0}행 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음"),
+                lines, ct);
+            if (!approved) throw new AgentToolException("The user did not approve the regex replace. Nothing was changed.");
+
+            RequireReady(); // 승인을 기다리는 동안 사용자가 다른 작업을 시작했을 수 있다
+            var states = _host.GetCellStates(changes.Select(c => (c.SourceRow, c.Column)).ToList());
+            for (int i = 0; i < changes.Count; i++)
+                if (!states[i].Exists || !string.Equals(states[i].Current, changes[i].Old, StringComparison.Ordinal))
+                    throw new AgentToolException("Cells changed while waiting for the user's approval, so nothing was applied. Run csv.regex_replace again.");
+
+            var result = _host.ApplyEdits(
+                changes.Select(c => new AgentCellEdit(c.SourceRow, c.Column, c.New)).ToList(),
+                AgentEditTag.Prefix + L($"regex replace in {changes.Count:N0} cell(s)", $"정규식 바꾸기 셀 {changes.Count:N0}개"));
+
+            bool sharesValues = Options().DataPolicy == AgentDataPolicy.RowsAllowed;
+            var exampleRows = new JsonArray();
+            foreach (long r in changes.Select(c => c.SourceRow).Distinct().Take(10)) exampleRows.Add(r);
+            var json = new JsonObject
+            {
+                ["changed_cells"] = result.Changed,
+                ["unchanged_cells"] = result.Unchanged,
+                ["rows_scanned"] = plan.RowsScanned,
+                ["cells_matched"] = plan.CellsMatched,
+                ["cells_timed_out"] = plan.CellsTimedOut,
+                ["example_rows"] = exampleRows,
+                ["undo_steps_added"] = 1,
+                ["edits"] = EditStateJson(result.State),
+                ["note"] = "Applied through the edit overlay as one undo step. The source file is unchanged and the edits are unsaved until csv.save_edits_as. csv.undo reverts this step.",
+            };
+            if (sharesValues)
+            {
+                var examples = new JsonArray();
+                foreach (var c in changes.Take(10))
+                    examples.Add(new JsonObject { ["row"] = c.SourceRow, ["column"] = names[c.Column], ["old"] = ToolJson.Clip(c.Old, MaxCellChars), ["new"] = ToolJson.Clip(c.New, MaxCellChars) });
+                json["examples"] = examples;
+            }
+            if (plan.CellsTimedOut > 0) json["warning"] = timeoutWarning;
+            string timeoutText = plan.CellsTimedOut > 0 ? $" {plan.CellsTimedOut:N0} cell(s) timed out and were NOT changed." : "";
+            return Reply($"Regex replace changed {result.Changed:N0} cell(s) as one undo step (overlay only; original file untouched, unsaved).{timeoutText}", json);
         }
 
         // ------------------------------------------------------------------ csv.undo

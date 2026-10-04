@@ -14,7 +14,7 @@ namespace NanumCsvViewer
     {
         private ToolStripMenuItem? _editCellMenu, _editSheetMenu, _saveEditsMenu, _revertCellMenu, _discardEditsMenu;
         private ToolStripMenuItem? _undoMenu, _redoMenu, _pasteMenu, _clearCellsMenu, _renameColumnMenu,
-            _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu;
+            _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, _regexReplaceMenu, _extractColumnMenu;
         private readonly List<ToolStripItem> _editContextItems = new();
         private ToolStripButton? _editCellButton, _editSheetButton;
         private bool _sheetEditing;
@@ -42,6 +42,9 @@ namespace NanumCsvViewer
             _pasteMenu.ShortcutKeyDisplayString = "Ctrl+V";
             _clearCellsMenu = MakeItem("Clear Selected Cells", "선택한 셀 지우기", (_, _) => ClearSelectedCells());
             _clearCellsMenu.ShortcutKeyDisplayString = "Del";
+            _regexReplaceMenu = MakeItem("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", async (_, _) => await RegexReplaceAsync());
+            _regexReplaceMenu.ShortcutKeys = Keys.Control | Keys.H;
+            _extractColumnMenu = MakeItem("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", async (_, _) => await ExtractColumnAsync());
             _renameColumnMenu = MakeItem("Rename Column…", "컬럼 이름 변경…", (_, _) => RenameCurrentColumn());
             _insertAboveMenu = MakeItem("Insert Row Above", "위에 행 삽입", (_, _) => InsertRow(above: true));
             _insertBelowMenu = MakeItem("Insert Row Below", "아래에 행 삽입", (_, _) => InsertRow(above: false));
@@ -52,7 +55,7 @@ namespace NanumCsvViewer
             foreach (var m in new ToolStripItem?[]
                      {
                          _undoMenu, _redoMenu, new ToolStripSeparator(),
-                         _editCellMenu, _editSheetMenu, _pasteMenu, _clearCellsMenu, _renameColumnMenu,
+                         _editCellMenu, _editSheetMenu, _pasteMenu, _clearCellsMenu, _regexReplaceMenu, _extractColumnMenu, _renameColumnMenu,
                          _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, new ToolStripSeparator(),
                          _revertCellMenu, _saveEditsMenu, _discardEditsMenu,
                      })
@@ -68,6 +71,8 @@ namespace NanumCsvViewer
                          ("Insert Row Above", "위에 행 삽입", () => InsertRow(above: true)),
                          ("Insert Row Below", "아래에 행 삽입", () => InsertRow(above: false)),
                          ("Delete Selected Rows", "선택한 행 삭제", DeleteSelectedRows),
+                         ("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", () => _ = RegexReplaceAsync()),
+                         ("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", () => _ = ExtractColumnAsync()),
                      })
             {
                 var item = MakeItem(en, ko, (_, _) => act());
@@ -134,6 +139,9 @@ namespace NanumCsvViewer
             bool structure = sheet && _doc!.CanEditStructure;
             if (_pasteMenu is not null) _pasteMenu.Enabled = sheet && hasCell;
             if (_clearCellsMenu is not null) _clearCellsMenu.Enabled = sheet && hasCell;
+            // 정규식 바꾸기·추출은 보기 모드에서도 눌러 볼 수 있다: 거부 이유를 상태 표시줄에 알린다(붙여넣기와 같음).
+            if (_regexReplaceMenu is not null) _regexReplaceMenu.Enabled = ready;
+            if (_extractColumnMenu is not null) _extractColumnMenu.Enabled = ready;
             if (_renameColumnMenu is not null) _renameColumnMenu.Enabled = sheet && hasCell;
             if (_insertAboveMenu is not null) _insertAboveMenu.Enabled = structure;
             if (_insertBelowMenu is not null) _insertBelowMenu.Enabled = structure;
@@ -229,6 +237,7 @@ namespace NanumCsvViewer
             if (e.HeaderEditCount > 0) parts.Add(LT($"{e.HeaderEditCount:N0} column name(s)", $"컬럼 이름 {e.HeaderEditCount:N0}개"));
             if (e.DeletedCount > 0) parts.Add(LT($"{e.DeletedCount:N0} deleted row(s)", $"삭제 행 {e.DeletedCount:N0}개"));
             if (e.AddedCount > 0) parts.Add(LT($"{e.AddedCount:N0} added row(s)", $"추가 행 {e.AddedCount:N0}개"));
+            if (e.AppendedColumnCount > 0) parts.Add(LT($"{e.AppendedColumnCount:N0} new column(s)", $"새 컬럼 {e.AppendedColumnCount:N0}개"));
             return string.Join(LT(", ", ", "), parts);
         }
 
@@ -271,8 +280,7 @@ namespace NanumCsvViewer
             UpdateFeatureState();
         }
 
-        private static string MatchNewlineStyle(string text, string original)
-            => original.Contains("\r\n", StringComparison.Ordinal) ? text : text.Replace("\r\n", "\n");
+        private static string MatchNewlineStyle(string text, string original) => CellEdits.MatchNewlineStyle(text, original);
 
         private bool CurrentCellIsEdited()
         {
@@ -403,7 +411,13 @@ namespace NanumCsvViewer
             if (_doc is null || _doc.Edits.IsEmpty || e.RowIndex < 0 || e.ColumnIndex < 0 || e.CellStyle is null) return;
             int rowId = _doc.GetRowId(e.RowIndex);
             if (rowId < 0) return;
-            if (_doc.Edits.Contains(rowId, e.ColumnIndex))
+            if (_doc.Edits.IsAppendedColumn(e.ColumnIndex))
+            {
+                // 정규식 추출 등으로 만든 컬럼: 값이 있는 셀을 "편집됨" 앰버 대신 연한 파랑으로 구분한다.
+                if (_doc.Edits.Contains(rowId, e.ColumnIndex))
+                    e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(28, 58, 92) : Color.FromArgb(214, 232, 250);
+            }
+            else if (_doc.Edits.Contains(rowId, e.ColumnIndex))
                 e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(96, 78, 16) : Color.FromArgb(255, 238, 186);
             else if (rowId >= _doc.BaseRowCount)
                 e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(30, 74, 44) : Color.FromArgb(214, 240, 220);

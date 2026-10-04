@@ -510,5 +510,130 @@ namespace NanumCsvViewer.Tests
             Assert.Throws<InvalidDataException>(() => EditJournal.TryRead(dir, "k2"));
             Assert.Null(EditJournal.TryRead(dir, "absent"));
         }
+
+        // ------------------------------------------------------------ 추가 컬럼(정규식 추출 등)
+
+        private static void Extract(VirtualCsvDocument doc, string name, params (int Row, string Value)[] values)
+        {
+            int col = doc.ColumnCount;
+            using (doc.Edits.BeginStep("extract"))
+            {
+                doc.Edits.AppendColumn(name, doc.RawColumnCount);
+                foreach (var (row, value) in values) doc.Edits.Set(row, col, value, "");
+            }
+        }
+
+        [Fact]
+        public async Task Appended_column_widens_every_row_is_written_on_save_and_undo_removes_it_in_one_step()
+        {
+            string original = "id,v\n1,a\n2,b\n3,c\n";
+            using var doc = await OpenAsync(original);
+            Extract(doc, "x", (0, "A"), (2, "C"));
+
+            Assert.Equal(new[] { "id", "v", "x" }, doc.Header);
+            Assert.Equal(3, doc.ColumnCount);
+            Assert.Equal(2, doc.RawColumnCount);
+            Assert.All(Enumerable.Range(0, 3), i => Assert.Equal(3, doc.GetDisplayRow(i).Length));
+            Assert.Equal(new[] { "A", "", "C" }, Column(doc, 2));
+            Assert.Equal(2, doc.Edits.Count); // O(비어 있지 않은 값)
+            Assert.True(doc.Edits.IsAppendedColumn(2));
+            Assert.False(doc.Edits.IsAppendedColumn(1));
+            Assert.Equal("id,v,x\n1,a,A\n2,b,\n3,c,C\n", File.ReadAllText(Save(doc)));
+            Assert.Equal(new[] { "x" }, doc.Edits.AppendedColumnNames());
+
+            Assert.True(doc.Edits.Undo()); // 컬럼과 값이 한 번에
+            Assert.False(doc.Edits.CanUndo);
+            Assert.True(doc.Edits.IsEmpty);
+            Assert.Equal(new[] { "id", "v" }, doc.Header);
+            Assert.Equal(2, doc.GetDisplayRow(0).Length);
+            Assert.Equal(original, File.ReadAllText(Save(doc, "back.csv")));
+
+            Assert.True(doc.Edits.Redo());
+            Assert.Equal(new[] { "id", "v", "x" }, doc.Header);
+            Assert.Equal(new[] { "A", "", "C" }, Column(doc, 2));
+        }
+
+        [Fact]
+        public async Task Appended_column_on_ragged_rows_pads_short_rows_and_keeps_extra_fields_after_the_new_column()
+        {
+            using var doc = await OpenAsync("a,b,c\n1,2,3\n4\n5,6,7,8\n");
+            Extract(doc, "n", (0, "N"));
+            Assert.Equal(new[] { "1", "2", "3", "N" }, doc.GetDisplayRow(0));
+            Assert.Equal(new[] { "4", "", "", "" }, doc.GetDisplayRow(1));
+            Assert.Equal(new[] { "5", "6", "7", "", "8" }, doc.GetDisplayRow(2));
+            Assert.Equal("a,b,c,n\n1,2,3,N\n4,,,\n5,6,7,,8\n", File.ReadAllText(Save(doc)));
+        }
+
+        [Fact]
+        public async Task Appended_column_works_with_row_insert_delete_and_rename_and_everything_undoes()
+        {
+            string original = "id,v\n1,a\n2,b\n3,c\n";
+            using var doc = await OpenAsync(original);
+            var e = doc.Edits;
+            int early = e.AddRow(0, doc.ColumnCount, doc.BaseRowCount); // 컬럼보다 먼저 만든 행(너비 2)
+            Extract(doc, "x", (0, "A"), (1, "B"));
+            Assert.Equal(new[] { "", "", "" }, doc.GetRowById(early)); // 새 너비로 채워진다
+
+            int late = e.AddRow(2, doc.ColumnCount, doc.BaseRowCount); // 컬럼 뒤에 만든 행(너비 3)
+            e.Set(late, 2, "Z", "");
+            e.DeleteRows(new[] { 1 });
+            e.SetHeader(2, "renamed", doc.OriginalHeader[2]);
+
+            Assert.Equal(new[] { "id", "v", "x" }, doc.OriginalHeader);
+            Assert.Equal(new[] { "id", "v", "renamed" }, doc.Header);
+            // 화면 순서: 1(A), 빈 행(early, 1 아래), [2 삭제], 3, late(3 아래) — 추가 행 앵커: early=0 아래, late=2 아래
+            var shown = Enumerable.Range(0, doc.DisplayRowCount).Select(i => string.Join("|", doc.GetDisplayRow(i))).ToArray();
+            Assert.Equal(new[] { "1|a|A", "||", "3|c|", "||Z" }, shown);
+            Assert.Equal("id,v,renamed\n1,a,A\n,,\n3,c,\n,,Z\n", File.ReadAllText(Save(doc)));
+
+            // 이름을 원래 이름으로 돌리면 이름 변경이 사라진다
+            e.SetHeader(2, "x", doc.OriginalHeader[2]);
+            Assert.Equal(new[] { "id", "v", "x" }, doc.Header);
+            Assert.Equal(0, e.HeaderEditCount);
+
+            while (e.Undo()) { }
+            Assert.True(e.IsEmpty);
+            Assert.Equal(new[] { "id", "v" }, doc.Header);
+            Assert.Equal(original, File.ReadAllText(Save(doc, "all-undone.csv")));
+        }
+
+        [Fact]
+        public async Task Discard_all_removes_appended_columns_in_one_undoable_step()
+        {
+            using var doc = await OpenAsync("id,v\n1,a\n2,b\n");
+            Extract(doc, "x", (0, "A"));
+            Extract(doc, "y", (1, "B"));
+            Assert.Equal(new[] { "id", "v", "x", "y" }, doc.Header);
+
+            doc.Edits.Clear();
+            Assert.True(doc.Edits.IsEmpty);
+            Assert.Equal(new[] { "id", "v" }, doc.Header);
+
+            Assert.True(doc.Edits.Undo());
+            Assert.Equal(new[] { "id", "v", "x", "y" }, doc.Header);
+            Assert.Equal(new[] { "A", "" }, Column(doc, 2));
+            Assert.Equal(new[] { "", "B" }, Column(doc, 3));
+        }
+
+        [Fact]
+        public async Task Appended_columns_survive_the_recovery_journal_and_foreign_ones_are_rejected()
+        {
+            using var doc = await OpenAsync("id,v\n1,a\n2,b\n");
+            Extract(doc, "x", (1, "B"));
+            doc.Edits.SetHeader(2, "ex", doc.OriginalHeader[2]);
+            string dir = Path.Combine(_dir, "journal-cols");
+            EditJournal.Write(dir, "k", "src.csv", 0, doc.Edits.Snapshot());
+
+            using var doc2 = await OpenAsync("id,v\n1,a\n2,b\n");
+            doc2.Edits.Restore(EditJournal.TryRead(dir, "k")!, doc2.BaseRowCount, doc2.ColumnCount);
+            Assert.Equal(new[] { "id", "v", "ex" }, doc2.Header);
+            Assert.Equal(new[] { "", "B" }, Column(doc2, 2));
+            Assert.True(doc2.Edits.IsDirty);
+            Assert.Equal("id,v,ex\n1,a,\n2,b,B\n", File.ReadAllText(Save(doc2, "restored.csv")));
+
+            using var doc3 = await OpenAsync("id,v,w\n1,a,z\n");
+            Assert.Throws<InvalidDataException>(() => doc3.Edits.Restore(EditJournal.TryRead(dir, "k")!, doc3.BaseRowCount, doc3.ColumnCount));
+            Assert.True(doc3.Edits.IsEmpty);
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using NanumCsvViewer.Agent.Tools;
 using NanumCsvViewer.Csv;
 using NanumCsvViewer.Csv.DataQuality;
@@ -176,6 +177,47 @@ namespace NanumCsvViewer
             return await AgentRunAsync(doc, LT($"AI: {description}…", $"AI: {description}…"), token => work(data, token), cancellation);
         }
 
+        // ------------------------------------------------------------------ 정규식 (csv.regex_count / csv.regex_replace)
+
+        private static IEnumerable<long> ViewIndexes(int count)
+        {
+            for (long i = 0; i < count; i++) yield return i;
+        }
+
+        // 엔진에 넘기는 "데이터 행"은 이 스냅샷의 뷰 인덱스다(필터·정렬 순서, 편집 덮개 적용, 캐시를 건드리지 않는 읽기).
+        // 사용자에게 보이는 행 번호(행 머리글)로의 변환은 같은 busy 구간 안에서 한다.
+        async Task<AgentRegexScan> ICsvAgentHost.RegexCountAsync(Regex regex, IReadOnlyList<int> columns, int maxSamples, CancellationToken cancellation)
+        {
+            AgentRequireReady();
+            var doc = _doc!;
+            var rows = doc.SnapshotViewRows();
+            var cols = columns.ToArray();
+            return await AgentRunAsync(doc, LT("AI: regex count…", "AI: 정규식 개수 세기…"), token =>
+            {
+                var summary = RegexReplace.Count(i => rows[(int)i], ViewIndexes(rows.Count), cols, regex, maxSamples, token);
+                var samples = summary.Samples
+                    .Select(s => new AgentRegexSample(doc.GetSourceRowNumber((int)s.DataRow), s.Column, s.Value))
+                    .ToList();
+                return new AgentRegexScan(summary.RowsScanned, summary.CellsMatched, summary.RowsMatched, summary.CellsTimedOut, samples);
+            }, cancellation);
+        }
+
+        async Task<AgentRegexPlan> ICsvAgentHost.PlanRegexReplaceAsync(Regex regex, string replacement, IReadOnlyList<int> columns, int maxChanges, CancellationToken cancellation)
+        {
+            AgentRequireReady();
+            var doc = _doc!;
+            var rows = doc.SnapshotViewRows();
+            var cols = columns.ToArray();
+            return await AgentRunAsync(doc, LT("AI: regex replace plan…", "AI: 정규식 바꾸기 계획…"), token =>
+            {
+                var plan = RegexReplace.Plan(i => rows[(int)i], ViewIndexes(rows.Count), cols, regex, replacement, maxChanges, token);
+                var changes = plan.Changes
+                    .Select(c => new AgentRegexChange(doc.GetSourceRowNumber((int)c.DataRow), c.Column, c.OldValue, c.NewValue))
+                    .ToList();
+                return new AgentRegexPlan(changes, plan.RowsScanned, plan.CellsMatched, plan.CellsTimedOut, plan.Truncated);
+            }, cancellation);
+        }
+
         // ------------------------------------------------------------------ 분석 결과 창
 
         void ICsvAgentHost.ShowAnalysisWindow(AgentAnalysisOutcome outcome)
@@ -341,7 +383,7 @@ namespace NanumCsvViewer
                 }
             }
             UpdateFilterStatus();
-            return new AgentViewChange(doc.DisplayRowCount, doc.DataRowsAvailable);
+            return new AgentViewChange(doc.DisplayRowCount, doc.DataRowsAvailable, compiled.Timeouts.Count);
         }
 
         Task<AgentViewChange> ICsvAgentHost.ClearFilterAsync(CancellationToken cancellation)

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using NanumCsvViewer.Agent;
 using NanumCsvViewer.Agent.Tools;
 using NanumCsvViewer.Csv;
@@ -51,6 +52,8 @@ namespace NanumCsvViewer.Tests
             public virtual Task<AgentViewChange> SortAsync(IReadOnlyList<SortKey> keys, CancellationToken c) => throw new NotSupportedException();
             public virtual Task<AgentGotoResult> GotoAsync(long? sourceRow, int? column, CancellationToken c) => throw new NotSupportedException();
             public virtual Task<QualityReport> RunQualityScanAsync(CancellationToken c) => throw new NotSupportedException();
+            public virtual Task<AgentRegexScan> RegexCountAsync(Regex regex, IReadOnlyList<int> columns, int maxSamples, CancellationToken c) => throw new NotSupportedException();
+            public virtual Task<AgentRegexPlan> PlanRegexReplaceAsync(Regex regex, string replacement, IReadOnlyList<int> columns, int maxChanges, CancellationToken c) => throw new NotSupportedException();
             public virtual IReadOnlyList<AgentCellState> GetCellStates(IReadOnlyList<(long SourceRow, int Column)> cells) => throw new NotSupportedException();
             public virtual AgentEditResult ApplyEdits(IReadOnlyList<AgentCellEdit> edits, string description) => throw new NotSupportedException();
             public virtual AgentUndoResult UndoAgentEdit() => throw new NotSupportedException();
@@ -87,6 +90,8 @@ namespace NanumCsvViewer.Tests
             public string? SavedPath;
             public readonly List<AgentAnalysisOutcome> Shown = new();
             public QualityReport? Report;
+            public long ForcedRegexTimeouts, ForcedFilterTimeouts;
+            public bool ForceTruncatedPlan;
 
             public FakeHost() => View = Enumerable.Range(0, Rows.Count).ToList();
 
@@ -130,6 +135,24 @@ namespace NanumCsvViewer.Tests
                 return Task.FromResult(new AgentRowsPage(firstViewRow, rows, View.Count));
             }
 
+            // 엔진(RegexReplace)을 그대로 써서 현재 뷰를 스캔한다. 시간 초과는 테스트가 강제로 얹는다(실제 250ms 대기 없이 보고 경로만 검증).
+            public override Task<AgentRegexScan> RegexCountAsync(Regex regex, IReadOnlyList<int> columns, int maxSamples, CancellationToken c)
+            {
+                Calls.Add("regex_count");
+                var s = RegexReplace.Count(i => Current(View[(int)i]), Enumerable.Range(0, View.Count).Select(i => (long)i), columns, regex, maxSamples, c);
+                return Task.FromResult(new AgentRegexScan(s.RowsScanned, s.CellsMatched, s.RowsMatched, s.CellsTimedOut + ForcedRegexTimeouts,
+                    s.Samples.Select(x => new AgentRegexSample(View[(int)x.DataRow] + 1, x.Column, x.Value)).ToList()));
+            }
+
+            public override Task<AgentRegexPlan> PlanRegexReplaceAsync(Regex regex, string replacement, IReadOnlyList<int> columns, int maxChanges, CancellationToken c)
+            {
+                Calls.Add("regex_plan");
+                var p = RegexReplace.Plan(i => Current(View[(int)i]), Enumerable.Range(0, View.Count).Select(i => (long)i), columns, regex, replacement, maxChanges, c);
+                return Task.FromResult(new AgentRegexPlan(
+                    p.Changes.Select(x => new AgentRegexChange(View[(int)x.DataRow] + 1, x.Column, x.OldValue, x.NewValue)).ToList(),
+                    p.RowsScanned, p.CellsMatched, p.CellsTimedOut + ForcedRegexTimeouts, p.Truncated || ForceTruncatedPlan));
+            }
+
             public override Task<T> RunOnViewRowsAsync<T>(string description, Func<AgentViewData, CancellationToken, T> work, CancellationToken c)
             {
                 var data = new AgentViewData(View.Select(Current).ToList(), Headers, Types);
@@ -145,7 +168,7 @@ namespace NanumCsvViewer.Tests
                 if (replace) { Expressions.Clear(); ExtraFilters.Clear(); View = Enumerable.Range(0, Rows.Count).Where(i => pred(Current(i))).ToList(); }
                 else View = View.Where(i => pred(Current(i))).ToList();
                 Expressions.Add(expression);
-                return Task.FromResult(new AgentViewChange(View.Count, Rows.Count));
+                return Task.FromResult(new AgentViewChange(View.Count, Rows.Count, ForcedFilterTimeouts));
             }
 
             public override Task<AgentViewChange> ClearFilterAsync(CancellationToken c)
@@ -248,7 +271,7 @@ namespace NanumCsvViewer.Tests
             var expected = new[]
             {
                 "csv.info", "csv.column_stats", "csv.get_rows", "csv.set_filter", "csv.clear_filter", "csv.sort", "csv.goto",
-                "csv.run_analysis", "csv.quality_scan", "csv.edit_cells", "csv.undo", "csv.save_edits_as",
+                "csv.run_analysis", "csv.quality_scan", "csv.edit_cells", "csv.undo", "csv.save_edits_as", "csv.regex_count", "csv.regex_replace",
             };
             Assert.Equal(expected.OrderBy(x => x), defs.Select(d => d.Name).OrderBy(x => x));
 
@@ -514,6 +537,391 @@ namespace NanumCsvViewer.Tests
             var r = await Call(tools, "csv.clear_filter", "{}");
             Assert.False(r.IsError);
             Assert.Equal(5, Payload(r)["view_rows"]!.GetValue<int>());
+        }
+
+        // ------------------------------------------------------------------ 정규식 도구 · 새 필터 문법
+
+        private sealed class CallbackApprovals(Action onAsk) : IAgentApprovals
+        {
+            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation)
+            {
+                onAsk();
+                return Task.FromResult(true);
+            }
+        }
+
+        [Fact]
+        public async Task SetFilter_NewGrammar_ReachesTheHost_AndTimeoutsAreWarned()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            Assert.Equal(2, Payload(await Call(tools, "csv.set_filter", """{"expression":"city !matches \"^S\""}"""))["view_rows"]!.GetValue<int>());
+            Assert.Equal(1, Payload(await Call(tools, "csv.set_filter", """{"expression":"* matches \"secret\""}"""))["view_rows"]!.GetValue<int>());
+            Assert.Equal(3, Payload(await Call(tools, "csv.set_filter", """{"expression":"NOT (city = \"Seoul\")"}"""))["view_rows"]!.GetValue<int>());
+            Assert.Equal(1, Payload(await Call(tools, "csv.set_filter", """{"expression":"city matches_cs \"^S\"","mode":"and"}"""))["view_rows"]!.GetValue<int>());
+
+            host.ForcedFilterTimeouts = 4;
+            var timedOut = await Call(tools, "csv.set_filter", """{"expression":"city matches \"x\""}""");
+            Assert.False(timedOut.IsError);
+            var json = Payload(timedOut);
+            Assert.Equal(4, json["regex_cells_timed_out"]!.GetValue<int>());
+            Assert.Contains(json["warnings"]!.AsArray(), w => w!.ToString().Contains("time limit"));
+        }
+
+        [Fact]
+        public async Task SetFilter_InvalidRegex_IsAnErrorWithoutTouchingTheView()
+        {
+            var host = new FakeHost();
+            var r = await Call(Tools(host), "csv.set_filter", """{"expression":"city matches \"(\""}""");
+            Assert.True(r.IsError);
+            Assert.Contains("Syntax:", r.Text);
+            Assert.DoesNotContain(host.Calls, c => c.StartsWith("filter", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task RegexCount_SummaryOnly_ReportsCountsAndRowNumbersButNoValues()
+        {
+            var approvals = new FakeApprovals(true);
+            var r = await Call(Tools(new FakeHost()), "csv.regex_count", """{"pattern":"^S","columns":["city"]}""", approvals);
+            Assert.False(r.IsError, r.Text);
+            var json = Payload(r);
+            Assert.Equal(5, json["rows_scanned"]!.GetValue<int>());
+            Assert.Equal(3, json["cells_matched"]!.GetValue<int>());
+            Assert.Equal(3, json["rows_matched"]!.GetValue<int>());
+            Assert.Equal(0, json["cells_timed_out"]!.GetValue<int>());
+            var examples = json["examples"]!.AsArray();
+            Assert.Equal(new[] { 1, 3, 4 }, examples.Select(e => e!["row"]!.GetValue<int>()).ToArray());
+            Assert.All(examples, e => Assert.Null(e!["value"]));
+            Assert.DoesNotContain("SECRET_TOWN", r.Text);
+            Assert.Empty(approvals.Calls);
+        }
+
+        [Fact]
+        public async Task RegexCount_RowsWithApproval_ShowsTheValuesOnTheCardBeforeSharingThem()
+        {
+            var tools = Tools(new FakeHost(), AgentDataPolicy.RowsWithApproval);
+
+            var yes = new FakeApprovals(true);
+            var shared = await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"]}""", yes);
+            var card = Assert.Single(yes.Calls);
+            Assert.Contains("+ 3 · city: SECRET_TOWN", card.Lines);
+            Assert.Equal("SECRET_TOWN", (string?)Payload(shared)["examples"]![1]!["value"]);
+
+            var no = new FakeApprovals(false);
+            var declined = await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"]}""", no);
+            Assert.False(declined.IsError);
+            Assert.Single(no.Calls);
+            Assert.DoesNotContain("SECRET_TOWN", declined.Text);
+            Assert.Equal(3, Payload(declined)["cells_matched"]!.GetValue<int>());
+            Assert.Equal(3, Payload(declined)["examples"]!.AsArray().Count);
+            Assert.Contains("declined", declined.Text);
+
+            var none = new FakeApprovals(true);
+            await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"],"max_samples":0}""", none);
+            Assert.Empty(none.Calls);   // 공유할 값이 없으면 묻지 않는다
+        }
+
+        [Fact]
+        public async Task RegexCount_RowsAllowed_ListsCappedSamples_AndValidatesArguments()
+        {
+            var tools = Tools(new FakeHost(), AgentDataPolicy.RowsAllowed);
+            var approvals = new FakeApprovals(true);
+            var r = await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"],"max_samples":2}""", approvals);
+            var json = Payload(r);
+            Assert.Equal(3, json["cells_matched"]!.GetValue<int>());
+            Assert.Equal(2, json["examples"]!.AsArray().Count);
+            Assert.Equal("Seoul", (string?)json["examples"]![0]!["value"]);
+            Assert.Empty(approvals.Calls);
+
+            Assert.True((await Call(tools, "csv.regex_count", """{"pattern":"x","max_samples":21}""")).IsError);
+            Assert.True((await Call(tools, "csv.regex_count", """{"pattern":""}""")).IsError);
+            Assert.True((await Call(tools, "csv.regex_count", """{"columns":["city"]}""")).IsError);
+            Assert.True((await Call(tools, "csv.regex_count", """{"pattern":"x","columns":["nope"]}""")).IsError);
+        }
+
+        [Fact]
+        public async Task RegexCount_ScansTheCurrentViewAndAllColumnsByDefault_AndHonoursCase()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            await Call(tools, "csv.set_filter", """{"expression":"age > 30"}""");   // 행 2~5
+            var view = Payload(await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"]}"""));
+            Assert.Equal(4, view["rows_scanned"]!.GetValue<int>());
+            Assert.Equal(2, view["cells_matched"]!.GetValue<int>());
+
+            await Call(tools, "csv.clear_filter", "{}");
+            var all = Payload(await Call(tools, "csv.regex_count", """{"pattern":"^bus"}"""));
+            Assert.Equal(5, all["columns_scanned"]!.GetValue<int>());
+            Assert.Equal(2, all["cells_matched"]!.GetValue<int>());
+
+            Assert.Equal(3, Payload(await Call(tools, "csv.regex_count", """{"pattern":"^s","columns":["city"]}"""))["cells_matched"]!.GetValue<int>());
+            Assert.Equal(0, Payload(await Call(tools, "csv.regex_count", """{"pattern":"^s","columns":["city"],"case_sensitive":true}"""))["cells_matched"]!.GetValue<int>());
+        }
+
+        [Fact]
+        public async Task RegexCount_TimedOutCellsAreReportedNotSwallowed()
+        {
+            var host = new FakeHost { ForcedRegexTimeouts = 7 };
+            var r = await Call(Tools(host), "csv.regex_count", """{"pattern":"^S","columns":["city"]}""");
+            Assert.False(r.IsError);
+            var json = Payload(r);
+            Assert.Equal(7, json["cells_timed_out"]!.GetValue<int>());
+            Assert.Contains("NOT evaluated", json["warning"]!.ToString());
+            Assert.Contains("7 cell(s) timed out", r.Text);
+        }
+
+        [Fact]
+        public async Task RegexTools_InvalidPattern_IsAnEnglishErrorAndNothingRuns()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            var count = await Call(tools, "csv.regex_count", """{"pattern":"(unclosed"}""");
+            Assert.True(count.IsError);
+            Assert.StartsWith("Invalid regular expression", count.Text);
+            var replace = await Call(tools, "csv.regex_replace", """{"pattern":"[a-","replacement":"x","columns":["city"]}""");
+            Assert.True(replace.IsError);
+            Assert.StartsWith("Invalid regular expression", replace.Text);
+            Assert.DoesNotContain(host.Calls, c => c.StartsWith("regex", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task RegexReplace_ShowsCardRegardlessOfPolicy_AppliesAsOneTaggedUndoStep_AndUndoReverts()
+        {
+            var host = new FakeHost();
+            var approvals = new FakeApprovals(true);
+            var tools = Tools(host);     // SummaryOnly: 카드는 로컬이라 값을 그대로 보여 준다
+            var r = await Call(tools, "csv.regex_replace", """{"pattern":"(?<c>Seoul|Busan)","replacement":"${c}-KR","columns":["city"]}""", approvals);
+            Assert.False(r.IsError, r.Text);
+
+            var card = Assert.Single(approvals.Calls);
+            Assert.Contains("- Seoul", card.Lines);
+            Assert.Contains("+ Seoul-KR", card.Lines);
+            Assert.Contains("-4 +4", card.Summary);
+            Assert.Contains("rows 1–5", card.Summary);
+            Assert.DoesNotContain(card.Lines, l => l.Contains("SECRET_TOWN"));   // 바뀌지 않는 셀은 카드에 없다
+
+            var json = Payload(r);
+            Assert.Equal(4, json["changed_cells"]!.GetValue<int>());
+            Assert.Equal(0, json["cells_timed_out"]!.GetValue<int>());
+            Assert.Equal(1, json["undo_steps_added"]!.GetValue<int>());
+            Assert.Null(json["examples"]);                    // SummaryOnly: 개수만
+            Assert.DoesNotContain("-KR", r.Text);
+
+            var step = Assert.Single(host.Steps);
+            Assert.StartsWith(AgentEditTag.Prefix, step.Description);
+            Assert.Equal(4, step.Before.Count);
+            Assert.Equal("Seoul-KR", host.Current(0)[2]);
+            Assert.Equal("SECRET_TOWN", host.Current(2)[2]);
+
+            var undone = await Call(tools, "csv.undo", "{}");
+            Assert.False(undone.IsError);
+            Assert.Equal("Seoul", host.Current(0)[2]);
+            Assert.Equal("Busan", host.Current(4)[2]);
+            Assert.Empty(host.Steps);
+        }
+
+        [Fact]
+        public async Task RegexReplace_ResultExamples_OnlyWhenRowsAllowed()
+        {
+            foreach (var (policy, expectExamples) in new[]
+            {
+                (AgentDataPolicy.SummaryOnly, false), (AgentDataPolicy.RowsWithApproval, false), (AgentDataPolicy.RowsAllowed, true),
+            })
+            {
+                var r = await Call(Tools(new FakeHost(), policy), "csv.regex_replace", """{"pattern":"^Busan$","replacement":"Pusan","columns":["city"]}""");
+                Assert.False(r.IsError);
+                Assert.Equal(expectExamples, Payload(r)["examples"] is not null);
+                Assert.Equal(expectExamples, r.Text.Contains("Pusan"));
+            }
+        }
+
+        [Fact]
+        public async Task RegexReplace_Denied_ChangesNothing()
+        {
+            var host = new FakeHost();
+            var r = await Call(Tools(host), "csv.regex_replace", """{"pattern":"Seoul","replacement":"X","columns":["city"]}""", new FakeApprovals(false));
+            Assert.True(r.IsError);
+            Assert.Contains("did not approve", r.Text);
+            Assert.Empty(host.Steps);
+            Assert.Equal("Seoul", host.Current(0)[2]);
+        }
+
+        [Fact]
+        public async Task RegexReplace_DollarSyntax_AndEmptyReplacement_FollowDotNetRules()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            await Call(tools, "csv.regex_replace", """{"pattern":"^Busan$","replacement":"$$","columns":["city"]}""");
+            Assert.Equal("$", host.Current(1)[2]);
+            await Call(tools, "csv.regex_replace", """{"pattern":"eoul","replacement":"","columns":["city"]}""");
+            Assert.Equal("S", host.Current(0)[2]);
+            Assert.Equal(2, host.Steps.Count);
+        }
+
+        [Fact]
+        public async Task RegexReplace_NothingToChange_NeedsNoApproval_AndStillReportsTimeouts()
+        {
+            var host = new FakeHost();
+            var approvals = new FakeApprovals(true);
+            var tools = Tools(host);
+            var none = await Call(tools, "csv.regex_replace", """{"pattern":"zzz","replacement":"y","columns":["city"]}""", approvals);
+            Assert.False(none.IsError);
+            Assert.Contains("no cell matches", none.Text);
+            var same = await Call(tools, "csv.regex_replace", """{"pattern":"^Seoul$","replacement":"Seoul","columns":["city"]}""", approvals);
+            Assert.Contains("same text", same.Text);
+            Assert.Equal(2, Payload(same)["cells_matched"]!.GetValue<int>());
+            Assert.Empty(approvals.Calls);
+            Assert.Empty(host.Steps);
+
+            host.ForcedRegexTimeouts = 2;
+            var timed = await Call(tools, "csv.regex_replace", """{"pattern":"zzz","replacement":"y","columns":["city"]}""", approvals);
+            Assert.Equal(2, Payload(timed)["cells_timed_out"]!.GetValue<int>());
+            Assert.Contains("NOT evaluated", Payload(timed)["warning"]!.ToString());
+        }
+
+        [Fact]
+        public async Task RegexReplace_TimeoutsAppearOnTheCardAndInTheResult()
+        {
+            var host = new FakeHost { ForcedRegexTimeouts = 3 };
+            var approvals = new FakeApprovals(true);
+            var r = await Call(Tools(host), "csv.regex_replace", """{"pattern":"^Busan$","replacement":"Pusan","columns":["city"]}""", approvals);
+            Assert.False(r.IsError);
+            Assert.Contains(Assert.Single(approvals.Calls).Lines, l => l.Contains("3 cell(s) timed out and are NOT changed"));
+            var json = Payload(r);
+            Assert.Equal(3, json["cells_timed_out"]!.GetValue<int>());
+            Assert.NotNull(json["warning"]);
+            Assert.Contains("3 cell(s) timed out", r.Text);
+        }
+
+        [Fact]
+        public async Task RegexReplace_RequiresColumnsAndReplacement_BeforeAnythingRuns()
+        {
+            var host = new FakeHost();
+            var approvals = new FakeApprovals(true);
+            var tools = Tools(host);
+            Assert.True((await Call(tools, "csv.regex_replace", """{"pattern":"a","replacement":"b"}""", approvals)).IsError);
+            Assert.True((await Call(tools, "csv.regex_replace", """{"pattern":"a","replacement":"b","columns":[]}""", approvals)).IsError);
+            Assert.True((await Call(tools, "csv.regex_replace", """{"pattern":"a","columns":["city"]}""", approvals)).IsError);
+            Assert.True((await Call(tools, "csv.regex_replace", """{"pattern":"a","replacement":"b","columns":["nope"]}""", approvals)).IsError);
+            Assert.Empty(approvals.Calls);
+            Assert.DoesNotContain("regex_plan", host.Calls);
+        }
+
+        [Fact]
+        public async Task RegexReplace_CardShowsFirst15Changes_AndAllAreAppliedInOneStep()
+        {
+            var host = new FakeHost();
+            host.Rows = Enumerable.Range(1, 100).Select(i => new[] { i.ToString(), "30", "x" + i, "A", "1" }).ToList();
+            host.View = Enumerable.Range(0, 100).ToList();
+            var approvals = new FakeApprovals(true);
+            var r = await Call(Tools(host), "csv.regex_replace", """{"pattern":"^x","replacement":"y","columns":["city"]}""", approvals);
+            Assert.False(r.IsError, r.Text);
+
+            var card = Assert.Single(approvals.Calls);
+            Assert.Equal(15, card.Lines.Count(l => l.StartsWith("- ", StringComparison.Ordinal)));
+            Assert.Equal(15, card.Lines.Count(l => l.StartsWith("+ ", StringComparison.Ordinal)));
+            Assert.Contains("  … and 85 more cell(s) not shown", card.Lines);
+            Assert.Contains("-100 +100", card.Summary);
+            Assert.Equal(100, Payload(r)["changed_cells"]!.GetValue<int>());
+            Assert.Single(host.Steps);
+            Assert.Equal(10, Payload(r)["example_rows"]!.AsArray().Count);
+            Assert.Equal("y100", host.Current(99)[2]);
+        }
+
+        [Fact]
+        public async Task RegexReplace_TooManyChanges_IsRefusedHonestly()
+        {
+            var host = new FakeHost { ForceTruncatedPlan = true };
+            var approvals = new FakeApprovals(true);
+            var r = await Call(Tools(host), "csv.regex_replace", """{"pattern":"Seoul","replacement":"X","columns":["city"]}""", approvals);
+            Assert.True(r.IsError);
+            Assert.Contains("Refused", r.Text);
+            Assert.Contains("nothing was changed", r.Text);
+            Assert.Empty(approvals.Calls);
+            Assert.Empty(host.Steps);
+        }
+
+        [Fact]
+        public async Task RegexReplace_CellsEditedWhileWaitingForApproval_AreNotOverwritten()
+        {
+            var host = new FakeHost();
+            var approvals = new CallbackApprovals(() => host.UserEdit(0, 2, "Jeju"));
+            var r = await Call(Tools(host), "csv.regex_replace", """{"pattern":"Seoul","replacement":"X","columns":["city"]}""", approvals);
+            Assert.True(r.IsError);
+            Assert.Contains("changed while waiting", r.Text);
+            Assert.Equal("Jeju", host.Current(0)[2]);
+            Assert.Equal("Seoul", host.Current(3)[2]);
+            Assert.Single(host.Steps);    // 사용자의 편집 1단계뿐
+        }
+
+        // 실제 Form1 호스트: 필터된 뷰만 스캔하고, 행 번호는 행 머리글 번호이며, 적용은 AI 태그가 붙은 되돌리기 1단계다.
+        [Fact]
+        public void RealHost_RegexScanAndReplace_FollowTheFilteredViewAndUndoInOneStep()
+        {
+            string path = Path.Combine(_dir, "people.csv");
+            File.WriteAllText(path, "id,name\n1,Kim A\n2,Lee B\n3,Kim C\n4,Park D\n5,kim E\n", new UTF8Encoding(false));
+            Exception? failure = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    using var doc = VirtualCsvDocument.Open(path);
+                    Pump(doc.RunIndexingAsync(new Progress<IndexProgress>(), CancellationToken.None));
+                    Pump(doc.ApplyFilterAsync(row => row[0] != "2", null, CancellationToken.None));   // 2번 행(Lee B)을 뷰에서 뺀다
+                    using var form = new Form1(new AppSettings());
+                    _ = form.Handle;
+                    typeof(Form1).GetField("_doc", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(form, doc);
+                    ICsvAgentHost host = form;
+
+                    var regex = RegexSafety.Compile("^kim ");
+                    var scan = Await(host.RegexCountAsync(regex, new[] { 1 }, 5, CancellationToken.None));
+                    Assert.Equal(4, scan.RowsScanned);
+                    Assert.Equal(3, scan.CellsMatched);
+                    Assert.Equal(new long[] { 1, 3, 5 }, scan.Samples.Select(s => s.SourceRow).ToArray());
+                    Assert.Equal(0, scan.CellsTimedOut);
+
+                    var plan = Await(host.PlanRegexReplaceAsync(regex, "Dr. ", new[] { 1 }, 100, CancellationToken.None));
+                    Assert.Equal(new long[] { 1, 3, 5 }, plan.Changes.Select(c => c.SourceRow).ToArray());
+                    Assert.Equal("Kim A", plan.Changes[0].Old);
+                    Assert.Equal("Dr. A", plan.Changes[0].New);
+                    Assert.False(plan.Truncated);
+                    Assert.Equal("Kim A", doc.GetDataRow(0)[1]);        // 계획만으로는 아무것도 바뀌지 않는다
+
+                    var result = host.ApplyEdits(plan.Changes.Select(c => new AgentCellEdit(c.SourceRow, c.Column, c.New)).ToList(), AgentEditTag.Prefix + "regex");
+                    Assert.Equal(3, result.Changed);
+                    Assert.Equal("Dr. A", doc.GetDataRow(0)[1]);
+                    Assert.Equal("Lee B", doc.GetDataRow(1)[1]);
+
+                    // 편집이 반영된 현재 값을 다시 스캔한다.
+                    var after = Await(host.RegexCountAsync(RegexSafety.Compile("^Dr\\. "), new[] { 1 }, 5, CancellationToken.None));
+                    Assert.Equal(3, after.CellsMatched);
+
+                    var undone = host.UndoAgentEdit();
+                    Assert.Equal("regex", undone.Description);
+                    Assert.Equal("Kim A", doc.GetDataRow(0)[1]);
+                    Assert.Equal("kim E", doc.GetDataRow(4)[1]);
+                    Assert.False(doc.Edits.CanUndo);     // 한 단계뿐이었다
+                }
+                catch (Exception ex) { failure = ex; }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "UI test did not complete");
+            if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+
+            static void Pump(Task task)
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                while (!task.IsCompleted && watch.Elapsed < TimeSpan.FromSeconds(30)) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(1); }
+                Assert.True(task.IsCompleted);
+                task.GetAwaiter().GetResult();
+            }
+
+            static T Await<T>(Task<T> task)
+            {
+                Pump(task);
+                return task.Result;
+            }
         }
 
         // ------------------------------------------------------------------ 편집 · 되돌리기

@@ -63,5 +63,54 @@ namespace NanumCsvViewer.Tests
         {
             Assert.Null(CsvSearchQuery.FromUserInput("   ", null));
         }
+
+        [Theory]
+        [InlineData("//")]          // 빈 패턴
+        [InlineData("regex:")]
+        [InlineData("/(/")]
+        public void Empty_or_invalid_regex_reports_the_pattern_problem(string input)
+        {
+            var ex = Assert.Throws<CsvSearchException>(() => CsvSearchQuery.FromUserInput(input, null));
+            Assert.False(string.IsNullOrWhiteSpace(ex.Message));
+        }
+
+        [Fact]
+        public void Regex_timeout_is_counted_and_cell_is_treated_as_non_match()
+        {
+            var q = CsvSearchQuery.FromUserInput("/^(a+)+$/", null)!;
+            var matcher = new CsvSearchMatcher(q);
+            Assert.Equal(0, matcher.Timeouts.Count);
+
+            // 파국적 역추적 셀: 예외 없이 불일치. 같은 행의 뒤 셀은 계속 검사한다.
+            string bad = new string('a', 40) + "!";
+            Assert.Null(matcher.FirstMatch(new[] { bad, "x" }));
+            Assert.Equal(1, matcher.Timeouts.Count);
+
+            var hit = matcher.FirstMatch(new[] { bad, "aaa" });
+            Assert.Equal((1, "aaa"), hit!.Value);
+            Assert.Equal(2, matcher.Timeouts.Count);
+        }
+
+        [Fact]
+        public void Non_regex_modes_never_count_timeouts()
+        {
+            var matcher = new CsvSearchMatcher(CsvSearchQuery.FromUserInput("fuzzy:abc", null)!);
+            matcher.FirstMatch(new[] { new string('a', 40) + "!" });
+            Assert.Equal(0, matcher.Timeouts.Count);
+        }
+
+        [Fact]
+        public void Regex_search_checks_cancellation_between_cells()
+        {
+            var matcher = new CsvSearchMatcher(CsvSearchQuery.FromUserInput("/^(a+)+$/", null)!);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            string bad = new string('a', 40) + "!";
+            // 취소된 토큰이면 첫 셀(최대 250ms)조차 시작하지 않고 즉시 중단한다.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Throws<OperationCanceledException>(() => matcher.FirstMatch(new[] { bad, bad, bad }, cts.Token));
+            Assert.True(sw.ElapsedMilliseconds < 200, $"cancel took {sw.ElapsedMilliseconds} ms");
+            Assert.Equal(0, matcher.Timeouts.Count);
+        }
     }
 }

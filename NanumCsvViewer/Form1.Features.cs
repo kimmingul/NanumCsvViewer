@@ -1114,13 +1114,20 @@ namespace NanumCsvViewer
             {
                 int idx = i;
                 Action? edit = _valueConditions[idx].expr is not null ? () => EditValueCondition(idx) : null;
-                list.Add((_valueConditions[idx].desc, () => _valueConditions.RemoveAt(idx), edit));
+                string label = _valueConditions[idx].desc;
+                // 정규식 시간 초과로 불일치 처리된 셀이 있으면 ⚠ 표시(이미 오래된 식으로 ⚠가 붙은 칩은 그대로).
+                if ((AdvancedFilterExpression.TimeoutsOf(_valueConditions[idx].pred)?.Count ?? 0) > 0
+                    && !label.EndsWith("⚠", StringComparison.Ordinal))
+                    label += " ⚠";
+                list.Add((label, () => _valueConditions.RemoveAt(idx), edit));
             }
             if (_doc is not null)
                 foreach (var (col, text) in _columnFilters.DescribeEntries(_doc.Header))
                 {
                     int c = col;
-                    list.Add((text, () => _columnFilters.Remove(c), () => OpenColumnFilter(c)));
+                    // 정규식 필터가 시간 초과(셀이 불일치로 처리됨)이거나 컴파일 실패(어떤 행도 통과 못 함)면 ⚠.
+                    bool warn = _columnFilters.TimeoutCount(c) > 0 || _columnFilters.RegexErrorFor(c) is not null;
+                    list.Add((warn ? text + " ⚠" : text, () => _columnFilters.Remove(c), () => OpenColumnFilter(c)));
                 }
             return list;
         }
@@ -1654,13 +1661,14 @@ namespace NanumCsvViewer
         private async Task ShowAdvancedFilterCore(string? initial, int replaceIndex)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
-            using var dlg = new ParamDialog(LT("Advanced Filter", "고급 필터"), _palette);
-            dlg.AddNote(LT("e.g.  age > 30 AND city = \"서울\"\nOperators: = != < <= > >= contains startswith endswith matches (regex)",
-                           "예:  age > 30 AND city = \"서울\"\n연산자: = != < <= > >= contains startswith endswith matches(정규식)"));
-            var input = dlg.AddText(LT("Expression", "표현식"));
-            if (initial is not null) input.Text = initial;
-            if (!dlg.ShowOk(this)) return;
-            string expr = input.Text.Trim();
+            var doc = _doc;
+            var header = doc.Header;
+            string expr;
+            using (var dlg = new AdvancedFilterDialog(_palette, initial, (text, ct) => TestAdvancedFilter(doc, header, text, ct)))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                expr = dlg.Expression;
+            }
             if (expr.Length == 0) return;
 
             CompiledAdvancedFilter compiled;
@@ -1686,6 +1694,37 @@ namespace NanumCsvViewer
                     LT("Applying expression…", "표현식 적용 중…"));
                 UpdateFilterStatus();
             }
+        }
+
+        // 고급 필터 대화상자의 시험: 현재 뷰 앞 10,000행에서 일치 행 수와 표본 행. 잘못된 식·정규식은 오류 문구로 돌려준다.
+        private static TesterOutput TestAdvancedFilter(VirtualCsvDocument doc, string[] header, string expression, CancellationToken ct)
+        {
+            CompiledAdvancedFilter compiled;
+            try { compiled = AdvancedFilterExpression.Compile(expression, header); }
+            catch (AdvancedFilterExpressionException ex) { return TesterOutput.Fail(ex.Message); }
+            catch (RegexPatternException ex) { return TesterOutput.Fail(ex.Message); }
+
+            int total = doc.DisplayRowCount;
+            int n = Math.Min(total, RegexReplace.TestMaxRows);
+            long matched = 0;
+            var samples = new List<string>();
+            for (int i = 0; i < n; i++)
+            {
+                if ((i & 255) == 0) ct.ThrowIfCancellationRequested();
+                int id = doc.GetRowId(i);
+                if (id < 0) continue;
+                var row = doc.GetRowByIdUncached(id);
+                if (!compiled.Predicate(row)) continue;
+                matched++;
+                if (samples.Count < RegexReplace.TestMaxSamples)
+                    samples.Add($"• #{doc.GetSourceRowNumber(i):N0}  " + RegexUi.OneLine(string.Join(" | ", row.Take(6)), 100));
+            }
+            string scope = n < total
+                ? RegexUi.LT($"First {n:N0} of {total:N0} rows", $"전체 {total:N0}행 중 앞 {n:N0}행")
+                : RegexUi.LT($"All {n:N0} rows of the view", $"현재 뷰 {n:N0}행 전체");
+            string text = RegexUi.LT($"{scope}: {matched:N0} row(s) match.", $"{scope}: {matched:N0}행이 일치합니다.")
+                          + RegexUi.TimeoutNote(compiled.Timeouts.Count);
+            return new TesterOutput(text, samples);
         }
 
         // ---------------------------------------------------------------- 컬럼 표시/숨김 (G)

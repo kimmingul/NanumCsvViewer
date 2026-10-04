@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using NanumCsvViewer.Csv;
 
 namespace NanumCsvViewer
@@ -61,9 +62,11 @@ namespace NanumCsvViewer
             }
             if (IsDisposed || _doc is null) return;
             var edits = _doc.Edits;
+            bool columnsChanged = false;
             if (edits.HeaderVersion != _seenHeaderVersion)
             {
                 _seenHeaderVersion = edits.HeaderVersion;
+                columnsChanged = SyncGridColumnsWithHeader();
                 ApplyHeaderNamesToUi();
             }
             bool structural = edits.StructureVersion != _seenStructureVersion;
@@ -80,7 +83,7 @@ namespace NanumCsvViewer
 
             // E1: 편집이 멈추면(디바운스) 필터·정렬·타입 배지를 새 데이터로 다시 계산. 행 구조 변경은 바로.
             _settleTimer.Stop();
-            _settleTimer.Interval = structural ? 60 : 400;
+            _settleTimer.Interval = structural || columnsChanged ? 60 : 400;
             _settleTimer.Start();
             // E7: 저장하지 않은 편집은 잠시 뒤 복구 저널에 기록.
             _journalTimer.Stop();
@@ -555,6 +558,299 @@ namespace NanumCsvViewer
             UpdateFeatureState();
         }
 
+        // ---------------------------------------------------------------- 정규식 바꾸기 · 추출
+
+        private const int MaxRegexChanges = 1_000_000;     // 한 번에 바꾸거나 추출할 수 있는 셀 수 상한(넘으면 정직하게 거부)
+        private const int ConfirmRegexChanges = 1_000;     // 이 수를 넘으면 적용 전에 확인
+        private const int MaxSelectionScanCells = 200_000; // 이보다 큰 선택은 셀 단위로 훑지 않고 "보이는 모든 컬럼"으로 본다
+
+        /// <summary>현재 뷰의 행 id를 화면 순서대로(필터 적용). 편집 덮개의 키와 같은 값.</summary>
+        private static IEnumerable<long> ViewRowIds(VirtualCsvDocument doc)
+        {
+            int n = doc.DisplayRowCount;
+            for (int i = 0; i < n; i++)
+            {
+                int id = doc.GetRowId(i);
+                if (id >= 0) yield return id;
+            }
+        }
+
+        /// <summary>필터와 무관하게 표 전체(삭제 제외·추가 행 포함)의 행 id를 화면 순서대로.</summary>
+        private static IEnumerable<long> AllRowIds(VirtualCsvDocument doc)
+        {
+            int n = doc.DataRowsAvailable;
+            for (int i = 0; i < n; i++)
+            {
+                int id = doc.GetRowIdAtPosition(i);
+                if (id >= 0) yield return id;
+            }
+        }
+
+        private string[] ColumnDisplayNames()
+            => _doc!.Header.Select((h, i) => string.IsNullOrEmpty(h) ? $"Column{i + 1}" : h).ToArray();
+
+        /// <summary>선택한 셀이 걸친 보이는 컬럼들(없으면 현재 셀의 컬럼). 선택이 아주 크면 보이는 모든 컬럼.</summary>
+        private List<int> SelectedColumnsForRegex(List<int> visible)
+        {
+            var cols = new SortedSet<int>();
+            if (grid.GetCellCount(DataGridViewElementStates.Selected) > MaxSelectionScanCells) return new List<int>(visible);
+            foreach (DataGridViewCell c in grid.SelectedCells)
+                if (c.ColumnIndex >= 0 && c.ColumnIndex < grid.ColumnCount && grid.Columns[c.ColumnIndex].Visible) cols.Add(c.ColumnIndex);
+            if (cols.Count == 0 && grid.CurrentCell is { ColumnIndex: >= 0 } cc && grid.Columns[cc.ColumnIndex].Visible) cols.Add(cc.ColumnIndex);
+            return cols.ToList();
+        }
+
+        private static string TimeoutWarning(long timedOut, bool ko)
+            => timedOut <= 0 ? "" : ko
+                ? $"\n⚠ {timedOut:N0}개 셀이 {RegexSafety.MatchTimeout.TotalMilliseconds:N0}ms를 넘겨 일치하지 않는 것으로 처리했습니다(바뀌지 않음)."
+                : $"\n⚠ {timedOut:N0} cell(s) took longer than {RegexSafety.MatchTimeout.TotalMilliseconds:N0} ms and were treated as NOT matching (left unchanged).";
+
+        private string TimeoutWarning(long timedOut) => TimeoutWarning(timedOut, Loc.CurrentLanguage == "ko");
+
+        /// <summary>
+        /// 시트 편집 모드: 정규식 찾아 바꾸기. 현재 뷰(필터 적용)의 선택 컬럼 또는 보이는 모든 컬럼에서 일치하는 셀을 바꾸고,
+        /// 모든 변경을 되돌리기 한 단계로 기록한다. 시간 초과 셀은 세어서 알리고, 변경이 1,000개를 넘으면 확인하며, 100만 개를 넘으면 거부한다.
+        /// </summary>
+        private async Task RegexReplaceAsync()
+        {
+            if (!EditsReady) return;
+            if (!_sheetEditing)
+            {
+                statusLabel.Text = LT("Find & Replace works only in sheet edit mode (Ctrl+Shift+E); Edit Cell changes one cell at a time.",
+                                      "찾아 바꾸기는 시트 편집 모드(Ctrl+Shift+E)에서만 됩니다. 셀 편집은 셀 하나씩만 고칩니다.");
+                return;
+            }
+            var doc = _doc!;
+            CancelInlineEdit();
+            if (doc.DisplayRowCount == 0) { statusLabel.Text = LT("There are no rows to replace in.", "바꿀 행이 없습니다."); return; }
+            var visible = PasteColumnOrder();
+            if (visible.Count == 0) { statusLabel.Text = LT("There are no visible columns.", "보이는 컬럼이 없습니다."); return; }
+
+            string pattern, replacement;
+            bool caseSensitive;
+            IReadOnlyList<int> columns;
+            using (var dlg = new RegexReplaceDialog(_palette, id => doc.GetRowByIdUncached((int)id), () => ViewRowIds(doc), doc.DisplayRowCount,
+                       ColumnDisplayNames(), SelectedColumnsForRegex(visible), visible,
+                       id => { int vi = doc.FindViewIndex((int)id); return vi >= 0 ? doc.GetSourceRowNumber(vi) : id + 1; }))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                pattern = dlg.Pattern;
+                replacement = dlg.Replacement;
+                caseSensitive = dlg.CaseSensitive;
+                columns = dlg.Columns.ToList();
+            }
+
+            Regex regex;
+            try { regex = RegexSafety.Compile(pattern, caseSensitive); }
+            catch (RegexPatternException ex)
+            {
+                MessageBox.Show(this, ex.Message, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var plan = await RunAnalysisOperationAsync(doc, (_, ct) =>
+                RegexReplace.Plan(id => doc.GetRowByIdUncached((int)id), ViewRowIds(doc), columns, regex, replacement, MaxRegexChanges, ct));
+            if (IsDisposed || _closing || !ReferenceEquals(doc, _doc)) return;
+            if (plan is null)
+            {
+                statusLabel.Text = LT("Find & Replace was cancelled or failed; nothing was changed.", "찾아 바꾸기가 취소되었거나 실패했습니다. 아무것도 바꾸지 않았습니다.");
+                return;
+            }
+
+            if (plan.Truncated)
+            {
+                MessageBox.Show(this,
+                    LT($"More than {MaxRegexChanges:N0} cells would change, which is more than one replace can apply. Nothing was changed.\nNarrow the filter or the columns, or make the pattern more specific.",
+                       $"바뀔 셀이 {MaxRegexChanges:N0}개를 넘어 한 번에 적용할 수 없습니다. 아무것도 바꾸지 않았습니다.\n필터나 컬럼을 줄이거나 패턴을 더 구체적으로 만드세요.") + TimeoutWarning(plan.CellsTimedOut),
+                    ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                statusLabel.Text = LT($"Replace refused: more than {MaxRegexChanges:N0} cells would change.", $"바꾸기 거부: 바뀔 셀이 {MaxRegexChanges:N0}개를 넘습니다.");
+                return;
+            }
+
+            if (plan.Changes.Count == 0)
+            {
+                statusLabel.Text = (plan.CellsMatched == 0
+                    ? LT($"No cell matched the pattern ({plan.RowsScanned:N0} rows scanned); nothing was changed.", $"일치하는 셀이 없습니다({plan.RowsScanned:N0}행 검사). 아무것도 바꾸지 않았습니다.")
+                    : LT($"{plan.CellsMatched:N0} cell(s) matched but the replacement gives the same values; nothing was changed.", $"{plan.CellsMatched:N0}개 셀이 일치하지만 바꿔도 같은 값이라 아무것도 바꾸지 않았습니다."))
+                    + TimeoutWarning(plan.CellsTimedOut).Replace("\n", " ");
+                if (plan.CellsTimedOut > 0)
+                    MessageBox.Show(this, statusLabel.Text, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (plan.Changes.Count > ConfirmRegexChanges || plan.CellsTimedOut > 0)
+            {
+                string ask = LT($"Replace in {plan.Changes.Count:N0} cell(s)? (Undo brings them all back in one step.)",
+                                $"셀 {plan.Changes.Count:N0}개를 바꿀까요? (되돌리기 한 번으로 전부 복원됩니다.)") + TimeoutWarning(plan.CellsTimedOut);
+                if (MessageBox.Show(this, ask, ProgramName, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+                {
+                    statusLabel.Text = LT("Replace cancelled; nothing was changed.", "바꾸기를 취소했습니다. 아무것도 바꾸지 않았습니다.");
+                    return;
+                }
+            }
+
+            string description = LT($"Regex replace: {plan.Changes.Count:N0} cells", $"정규식 바꾸기: {plan.Changes.Count:N0}셀");
+            int changed = ApplyCellChanges(plan.Changes, description);
+            statusLabel.Text = LT($"Replaced {changed:N0} cell(s) ({plan.CellsMatched:N0} matched in {plan.RowsScanned:N0} rows). Ctrl+Z undoes the whole replace.",
+                                  $"셀 {changed:N0}개를 바꿨습니다({plan.RowsScanned:N0}행에서 {plan.CellsMatched:N0}개 일치). Ctrl+Z로 한 번에 되돌립니다.")
+                + TimeoutWarning(plan.CellsTimedOut).Replace("\n", " ");
+        }
+
+        /// <summary>
+        /// 변경 목록(행 id·컬럼·새 값)을 한 단계로 덮개에 기록한다. 실제로 값이 바뀐 셀 수를 돌려준다.
+        /// 확인창 없음 — 정규식 바꾸기와 에이전트 도구가 같이 쓴다. 삭제된 행·범위 밖 컬럼은 건너뛴다.
+        /// </summary>
+        internal int ApplyCellChanges(IReadOnlyList<RegexCellChange> changes, string description)
+        {
+            var doc = _doc;
+            if (doc is null || changes.Count == 0) return 0;
+            int changed = RegexReplace.Apply(doc, changes, description);
+            OnCurrentCellChanged(grid, EventArgs.Empty);
+            UpdateFeatureState();
+            return changed;
+        }
+
+        /// <summary>
+        /// 시트 편집 모드: 정규식 추출. 원본 컬럼의 값에서 캡처 그룹을 뽑아 표 맨 뒤 새 컬럼에 채운다(표 전체 행, 필터 무관).
+        /// 컬럼과 값은 편집 덮개에 한 단계로 기록되어 저장 파일에 쓰이고, 되돌리기 한 번으로 사라진다.
+        /// </summary>
+        private async Task ExtractColumnAsync()
+        {
+            if (!EditsReady) return;
+            if (!_sheetEditing)
+            {
+                statusLabel.Text = LT("Extract to New Column works only in sheet edit mode (Ctrl+Shift+E).",
+                                      "새 컬럼에 추출은 시트 편집 모드(Ctrl+Shift+E)에서만 됩니다.");
+                return;
+            }
+            var doc = _doc!;
+            if (!doc.CanEditStructure)
+            {
+                statusLabel.Text = LT("A column cannot be added to a table this large.", "이렇게 큰 표에는 컬럼을 추가할 수 없습니다.");
+                return;
+            }
+            CancelInlineEdit();
+            if (doc.DataRowsAvailable == 0) { statusLabel.Text = LT("There are no rows to extract from.", "추출할 행이 없습니다."); return; }
+
+            Regex regex;
+            int group, source;
+            string newName;
+            using (var dlg = new ExtractColumnDialog(_palette, ColumnDisplayNames(), grid.CurrentCell?.ColumnIndex ?? 0,
+                       id => doc.GetRowByIdUncached((int)id), () => ViewRowIds(doc), name => ValidateColumnName(-1, name)))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try { (regex, group) = ExtractColumnDialog.Compile(dlg.Pattern, dlg.GroupSpec, dlg.CaseSensitive); }
+                catch (RegexPatternException ex)
+                {
+                    MessageBox.Show(this, ex.Message, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                source = dlg.SourceColumn;
+                newName = dlg.NewColumnName;
+            }
+
+            var plan = await RunAnalysisOperationAsync(doc, (_, ct) =>
+                RegexExtract.Plan(id => doc.GetRowByIdUncached((int)id), AllRowIds(doc), source, regex, group, MaxRegexChanges, ct));
+            if (IsDisposed || _closing || !ReferenceEquals(doc, _doc)) return;
+            if (plan is null)
+            {
+                statusLabel.Text = LT("Extract was cancelled or failed; no column was added.", "추출이 취소되었거나 실패했습니다. 컬럼을 추가하지 않았습니다.");
+                return;
+            }
+
+            string counts = LT($"{plan.RowsMatched:N0} of {plan.RowsScanned:N0} rows matched, {plan.RowsNotMatched:N0} did not",
+                               $"{plan.RowsScanned:N0}행 중 {plan.RowsMatched:N0}행 일치, {plan.RowsNotMatched:N0}행 불일치");
+            if (plan.Truncated)
+            {
+                MessageBox.Show(this,
+                    LT($"More than {MaxRegexChanges:N0} rows would get a value, which is more than one extraction can store. No column was added.\nMake the pattern more specific.",
+                       $"값이 들어갈 행이 {MaxRegexChanges:N0}개를 넘어 한 번에 저장할 수 없습니다. 컬럼을 추가하지 않았습니다.\n패턴을 더 구체적으로 만드세요.") + TimeoutWarning(plan.CellsTimedOut),
+                    ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                statusLabel.Text = LT("Extract refused: too many values.", "추출 거부: 값이 너무 많습니다.");
+                return;
+            }
+            if (plan.Values.Count == 0)
+            {
+                string none = LT($"Nothing was extracted ({counts}); no column was added.", $"추출된 값이 없습니다({counts}). 컬럼을 추가하지 않았습니다.")
+                    + TimeoutWarning(plan.CellsTimedOut).Replace("\n", " ");
+                statusLabel.Text = none;
+                MessageBox.Show(this, none, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var edits = doc.Edits;
+            int newCol = doc.ColumnCount;
+            using (edits.BeginStep(LT($"Extract to column '{newName}': {plan.Values.Count:N0} values", $"정규식 추출 → '{newName}': {plan.Values.Count:N0}값")))
+            {
+                edits.AppendColumn(newName, doc.RawColumnCount);
+                foreach (var (row, value) in plan.Values) edits.Set((int)row, newCol, value, "");
+            }
+
+            try
+            {
+                if (newCol < grid.ColumnCount && grid.RowCount > 0)
+                {
+                    int vi = Math.Clamp(grid.CurrentCell?.RowIndex ?? 0, 0, grid.RowCount - 1);
+                    grid.CurrentCell = grid[newCol, vi];
+                }
+            }
+            catch { /* 레이아웃 중 일시 예외 무시 */ }
+            statusLabel.Text = LT($"Added column '{newName}' with {plan.Values.Count:N0} value(s) ({counts}; the rest are empty). It is saved with the file; Ctrl+Z removes it.",
+                                  $"컬럼 '{newName}'을 추가했습니다(값 {plan.Values.Count:N0}개, {counts}, 나머지는 빈 값). 저장 파일에 포함되며 Ctrl+Z로 제거됩니다.")
+                + TimeoutWarning(plan.CellsTimedOut).Replace("\n", " ");
+        }
+
+        /// <summary>
+        /// 덮개가 컬럼을 추가·제거했으면(추출 · 되돌리기 포함) 그리드 컬럼과 필터 콤보를 문서 헤더 길이에 맞춘다.
+        /// 사라지는 컬럼을 가리키던 정렬·필터·숨김·타입 지정은 함께 정리한다. 바뀌었으면 true.
+        /// </summary>
+        private bool SyncGridColumnsWithHeader()
+        {
+            if (_doc is null) return false;
+            var header = _doc.Header;
+            int want = header.Length;
+            if (grid.Columns.Count == want) return false;
+
+            if (grid.Columns.Count < want)
+            {
+                for (int i = grid.Columns.Count; i < want; i++)
+                {
+                    string name = string.IsNullOrEmpty(header[i]) ? $"Column{i + 1}" : header[i];
+                    grid.Columns.Add(new DataGridViewTextBoxColumn
+                    {
+                        HeaderText = name, Name = "col" + i, SortMode = DataGridViewColumnSortMode.Programmatic,
+                        Width = 130, Resizable = DataGridViewTriState.True,
+                    });
+                    filterColumnCombo.Items.Add(name);
+                }
+                return true;
+            }
+
+            int old = grid.Columns.Count;
+            if (grid.IsCurrentCellInEditMode) grid.CancelEdit();
+            bool sortRemoved = _sortKeys.RemoveAll(k => k.Column >= want) > 0;
+            for (int c = want; c < old; c++)
+            {
+                if (_columnFilters.HasFilterFor(c)) _columnFilters.Remove(c);
+                _manualTypeOverrides.Remove(c);
+                _hiddenColumns.Remove(c);
+            }
+            // 현재 셀이 사라질 컬럼에 있으면 먼저 옮긴다(그리드가 컬럼 제거 중 현재 셀을 잃지 않게).
+            if (grid.CurrentCell is { } cur && cur.ColumnIndex >= want && want > 0 && cur.RowIndex >= 0)
+            {
+                try { grid.CurrentCell = grid[want - 1, cur.RowIndex]; } catch { }
+            }
+            while (grid.Columns.Count > want) grid.Columns.RemoveAt(grid.Columns.Count - 1);
+            while (filterColumnCombo.Items.Count > want + 1) filterColumnCombo.Items.RemoveAt(filterColumnCombo.Items.Count - 1);
+            if (filterColumnCombo.SelectedIndex < 0 || filterColumnCombo.SelectedIndex > want) filterColumnCombo.SelectedIndex = 0;
+            if (sortRemoved)
+            {
+                UpdateSortGlyphs();
+                if (_sortKeys.Count == 0) { _doc.ResetViewOrder(); grid.Invalidate(); }
+            }
+            return true;
+        }
+
         // ---------------------------------------------------------------- E7 크래시 복구 저널
 
         private readonly object _journalLock = new();
@@ -646,8 +942,8 @@ namespace NanumCsvViewer
             if (snapshot is null) return;
 
             string summary = LT(
-                $"{snapshot.Cells.Length:N0} cell(s), {snapshot.Headers.Length:N0} column name(s), {snapshot.Deleted.Length:N0} deleted row(s), {snapshot.Added.Length:N0} added row(s)",
-                $"셀 {snapshot.Cells.Length:N0}개, 컬럼 이름 {snapshot.Headers.Length:N0}개, 삭제 행 {snapshot.Deleted.Length:N0}개, 추가 행 {snapshot.Added.Length:N0}개");
+                $"{snapshot.Cells.Length:N0} cell(s), {snapshot.Headers.Length:N0} column name(s), {snapshot.Deleted.Length:N0} deleted row(s), {snapshot.Added.Length:N0} added row(s), {snapshot.AppendedColumns?.Length ?? 0:N0} new column(s)",
+                $"셀 {snapshot.Cells.Length:N0}개, 컬럼 이름 {snapshot.Headers.Length:N0}개, 삭제 행 {snapshot.Deleted.Length:N0}개, 추가 행 {snapshot.Added.Length:N0}개, 새 컬럼 {snapshot.AppendedColumns?.Length ?? 0:N0}개");
             var answer = MessageBox.Show(this,
                 LT($"Unsaved edits from an earlier session were found for this file ({summary}).\n\nYes = recover them (they stay unsaved until you use Save Edits As…)\nNo = discard them",
                    $"이 파일에 대한 이전 세션의 저장되지 않은 편집이 있습니다({summary}).\n\n예 = 복구합니다(편집 내용 저장…을 쓰기 전까지는 저장되지 않은 상태)\n아니요 = 버립니다"),

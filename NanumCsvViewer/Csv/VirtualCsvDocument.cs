@@ -61,8 +61,11 @@ namespace NanumCsvViewer.Csv
         /// <summary>현재 컬럼 이름(파일의 이름 + 사용자가 바꾼 이름). 분석·필터·그리드가 모두 이 이름을 본다.</summary>
         public string[] Header => _header;
 
-        /// <summary>파일에 적힌 원래 컬럼 이름.</summary>
-        public string[] OriginalHeader => _rawHeader;
+        /// <summary>원래 컬럼 이름: 파일의 이름 + 시트 편집으로 추가한 컬럼의 처음 이름(이름 변경 전). 이름 변경 되돌림의 기준.</summary>
+        public string[] OriginalHeader => Edits.HasAppendedColumns ? _rawHeader.Concat(Edits.AppendedColumnNames()).ToArray() : _rawHeader;
+
+        /// <summary>파일에 적힌 컬럼 수(시트 편집으로 추가한 컬럼 제외). 추가 컬럼 인덱스는 이 값부터 시작한다.</summary>
+        public int RawColumnCount => _rawHeader.Length;
 
         public int ColumnCount => Header.Length;
         public string EncodingName { get; private set; }
@@ -361,13 +364,17 @@ namespace NanumCsvViewer.Csv
             return rowId < 0 ? EmptyRow : GetRowById(rowId);
         }
 
-        private string[] GetRowById(int rowId)
+        /// <summary>행 id → 현재 행(편집 덮개·추가 컬럼 적용, 캐시 사용). 행 id는 GetRowId가 돌려주는 값.</summary>
+        public string[] GetRowById(int rowId)
         {
             if (_cache.TryGet(rowId, out var cached)) return cached;
             string[] fields = ParseDataRow(rowId);
             _cache.Add(rowId, fields);
             return fields;
         }
+
+        /// <summary>행 id → 현재 행. 캐시를 조회하지도 채우지도 않는다(대량 스캔용).</summary>
+        public string[] GetRowByIdUncached(int rowId) => rowId < 0 ? EmptyRow : ParseDataRow(rowId);
 
         /// <summary>캐시를 조회하지도 채우지도 않는 디코드(데이터 행 위치 기준). 필터/정렬의 대량 스캔용(LRU 오염·락 경합 방지).</summary>
         public string[] GetDataRowUncached(int position)
@@ -379,7 +386,10 @@ namespace NanumCsvViewer.Csv
         // 모든 읽기(그리드·필터·정렬·분석·내보내기)의 단일 경로: 원본 파싱(또는 추가 행 기본값) + 셀 편집 덮개.
         private string[] ParseDataRow(int rowId) => Edits.Apply(rowId, ParseRawDataRow(rowId));
 
-        /// <summary>편집 덮개를 적용하지 않은 원본 행(편집 전 값 확인·되돌림 비교용). 추가 행은 빈 값 행.</summary>
+        /// <summary>
+        /// 편집 덮개의 셀 값을 적용하지 않은 행(편집 전 값 확인·되돌림 비교용). 추가 행은 빈 값 행.
+        /// 시트 편집으로 추가한 컬럼이 있으면 그 칸(빈 값)까지 포함한 전체 너비다 — 추가 컬럼의 "원래 값"은 항상 빈 값.
+        /// </summary>
         public string[] GetOriginalRow(int rowId) => ParseRawDataRow(rowId);
 
         private string[] ParseRawDataRow(int rowId)
@@ -390,11 +400,11 @@ namespace NanumCsvViewer.Csv
             if (rec >= count)
             {
                 // 원본 끝을 넘은 id = 시트 편집으로 추가한 행. 그 밖(레이스/인덱싱 중)이면 안전하게 빈 행.
-                return IndexingComplete && Edits.GetAddedBase(rowId) is { } added ? added : EmptyRow;
+                return Edits.ExpandRaw(IndexingComplete && Edits.GetAddedBase(rowId) is { } added ? added : EmptyRow, isAddedRow: true);
             }
             long start = _index[rec];
             long end = (rec + 1 < count) ? _index[rec + 1] : FileLength;
-            return DecodeAndParse(start, end);
+            return Edits.ExpandRaw(DecodeAndParse(start, end), isAddedRow: false);
         }
 
         // 덮개 변경 반영: 행 캐시 폐기 + 행 구조(화면 순서)·헤더 이름 재구성. 구독 순서상 UI 핸들러보다 먼저 실행된다.
@@ -441,7 +451,7 @@ namespace NanumCsvViewer.Csv
         /// <summary>
         /// 편집 내용을 새 파일로 저장(원본은 절대 덮어쓰지 않는다). 편집되지 않은 행은 원본 바이트를 그대로 복사하고,
         /// 편집된 행만 같은 인코딩·구분자·줄바꿈으로 다시 쓴다(값은 문자열 그대로 — 선행 0 보존).
-        /// 이름을 바꾼 컬럼이 있으면 헤더 레코드를 다시 쓰고(BOM·줄바꿈 보존), 삭제한 행은 건너뛰며,
+        /// 이름을 바꾸거나 컬럼을 추가했으면 헤더 레코드를 다시 쓰고(BOM·줄바꿈 보존), 컬럼을 추가했으면 모든 행을 같은 너비로 다시 쓰고, 삭제한 행은 건너뛰며,
         /// 추가한 행은 화면 순서대로 같은 줄바꿈으로 쓴다.
         /// 인덱싱이 끝난 뒤에만 호출한다. 실패·취소 시 부분 파일을 남기지 않는다.
         /// </summary>
@@ -476,7 +486,8 @@ namespace NanumCsvViewer.Csv
                     byte[] termBytes = _encoding.GetBytes(term);
 
                     bool pendingSeparator;
-                    if (Edits.HeaderEditCount > 0)
+                    bool widened = Edits.HasAppendedColumns; // 컬럼이 추가되면 모든 레코드가 새 너비로 다시 직렬화되어야 한다
+                    if (Edits.HeaderEditCount > 0 || widened)
                     {
                         CopyRange(src, fs, 0, _headerStart, chunk, ct); // BOM
                         byte[] body = _encoding.GetBytes(CellEdits.JoinRecord(_header, delim));
@@ -515,7 +526,7 @@ namespace NanumCsvViewer.Csv
                         long start = _index[rec];
                         long end = rec + 1 < count ? _index[rec + 1] : FileLength;
                         bool isLastRecord = rec + 1 >= count;
-                        if (Edits.HasRowEdits(rowId))
+                        if (widened || Edits.HasRowEdits(rowId))
                         {
                             // 원본 레코드의 끝 줄바꿈을 보존하고, 필드만 다시 직렬화한다.
                             int len = (int)(end - start);

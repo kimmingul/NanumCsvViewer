@@ -678,6 +678,16 @@ namespace NanumCsvViewer
         private void ChangeEncodingTo(string name)
         {
             if (_doc is null || string.Equals(name, _doc.EncodingName, StringComparison.Ordinal)) return;
+            if (!_doc.Edits.IsEmpty)
+            {
+                // 편집 덮개(셀·헤더·추가 열)는 현재 인코딩으로 읽은 컬럼 위치·값 기준이라 인코딩을 바꾸면 어긋난다.
+                MessageBox.Show(this,
+                    LT("Save or discard your edits before changing the encoding. Edits are tied to the current decoding of the file.",
+                       "인코딩을 바꾸기 전에 편집 내용을 저장하거나 버리세요. 편집은 현재 인코딩으로 읽은 내용에 맞춰져 있습니다."),
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                SyncEncodingUi(_doc.EncodingName);
+                return;
+            }
             _doc.ChangeEncoding(name);
             SyncEncodingUi(name);
             BuildColumns(_doc.Header);
@@ -779,20 +789,34 @@ namespace NanumCsvViewer
             {
                 statusLabel.Text = Loc.F("Status_NotFoundFmt", term);
             }
+            // 정규식 시간 초과 셀은 불일치로 처리됐다 — 결과(특히 '없음')가 그 때문일 수 있으니 조용히 넘기지 않는다.
+            AppendRegexTimeoutNotice(matcher.Timeouts.Count);
         }
+
+        /// <summary>상태줄 끝에 "정규식 시간 초과 N셀 — 해당 셀은 불일치로 처리"를 덧붙인다(N=0이면 아무것도 안 함).</summary>
+        private void AppendRegexTimeoutNotice(long timedOutCells)
+        {
+            if (timedOutCells <= 0) return;
+            statusLabel.Text += "  ⚠ " + RegexTimeoutNotice(timedOutCells);
+        }
+
+        private static string RegexTimeoutNotice(long timedOutCells)
+            => LT($"Regex timed out on {timedOutCells:N0} cell(s) — treated as non-matching",
+                  $"정규식 시간 초과 {timedOutCells:N0}셀 — 해당 셀은 불일치로 처리");
 
         private static int SearchForward(VirtualCsvDocument doc, CsvSearchMatcher matcher, int start, int total, CancellationToken ct)
         {
-            // start..total-1 후 0..start-1 (랩어라운드)
+            // start..total-1 후 0..start-1 (랩어라운드). 정규식 모드는 FirstMatch가 행·셀마다 ct를 확인한다
+            // (셀 하나가 시간 제한까지 걸릴 수 있어 0x3FFF행 간격 확인으로는 취소가 늦다).
             for (int i = start; i < total; i++)
             {
                 if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                if (matcher.FirstMatch(doc.GetDisplayRow(i)) is not null) return i;
+                if (matcher.FirstMatch(doc.GetDisplayRow(i), ct) is not null) return i;
             }
             for (int i = 0; i < start && i < total; i++)
             {
                 if ((i & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
-                if (matcher.FirstMatch(doc.GetDisplayRow(i)) is not null) return i;
+                if (matcher.FirstMatch(doc.GetDisplayRow(i), ct) is not null) return i;
             }
             return -1;
         }
@@ -897,6 +921,8 @@ namespace NanumCsvViewer
             // 모든 활성 조건을 개별 술어로 평탄화 → AND(모두) 또는 OR(하나라도)로 결합.
             var preds = new List<Func<string[], bool>>();
             if (_textCondition is not null) preds.Add(_textCondition);
+            // 전체 재평가이므로 식 필터의 정규식 시간 초과 카운터도 새로 센다(컬럼 필터는 컴파일 때 새로 만들어진다).
+            foreach (var v in _valueConditions) AdvancedFilterExpression.TimeoutsOf(v.pred)?.Reset();
             preds.AddRange(_valueConditions.Select(v => v.pred));
             preds.AddRange(_columnFilters.IndividualPredicates());
             var arr = preds.ToArray();
@@ -943,6 +969,25 @@ namespace NanumCsvViewer
             parts.AddRange(_columnFilters.Descriptions(_doc.Header));
             statusLabel.Text = Loc.F("Status_FilterFmt", parts.Count, string.Join(Loc.T("Filter_And"), parts),
                 _doc.DisplayRowCount.ToString("N0"), _doc.DataRowsAvailable.ToString("N0"), size);
+
+            // 정직한 보고: 정규식 시간 초과 셀(불일치로 처리됨)과 잘못된 정규식(어떤 행도 통과 못 함)을 숨기지 않는다.
+            AppendRegexTimeoutNotice(TotalRegexTimeouts());
+            foreach (var (col, _) in _columnFilters.RegexErrors())
+            {
+                string pattern = _columnFilters.TextFilters.FirstOrDefault(f => f.Column == col)?.Value ?? "";
+                string name = col >= 0 && col < _doc.Header.Length && _doc.Header[col].Length > 0 ? _doc.Header[col] : $"Column{col + 1}";
+                statusLabel.Text += "  ⚠ " + LT($"Invalid regex in '{name}' filter ({Trunc(pattern)}) — no row can match",
+                                                $"'{name}' 필터의 정규식이 잘못됨({Trunc(pattern)}) — 어떤 행도 일치하지 않음");
+            }
+        }
+
+        /// <summary>현재 활성 식 필터·컬럼 정규식 필터가 시간 초과로 불일치 처리한 셀 수(마지막 평가 기준).</summary>
+        private long TotalRegexTimeouts()
+        {
+            long total = _columnFilters.TotalTimeouts();
+            foreach (var v in _valueConditions)
+                total += AdvancedFilterExpression.TimeoutsOf(v.pred)?.Count ?? 0;
+            return total;
         }
 
         private static string Trunc(string s)
