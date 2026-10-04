@@ -452,7 +452,7 @@
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14 7l3 3"/></svg></div>
             <h3 data-i18n="f10.h">셀 편집 · 원본 보존</h3>
-            <p data-i18n="f10.p">기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·컬럼 이름 변경·행 삽입/삭제가 되는 시트 편집 모드를 구분합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.</p>
+            <p data-i18n="f10.p">기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·행 삽입/삭제·열 중간 삽입/이동/삭제·정규식 찾아 바꾸기가 되는 시트 편집 모드를 구분합니다. 조건부 서식(테마 색, 서식 되돌리기)으로 셀·행을 강조합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.</p>
             <div class="tags"><b data-i18n="f10.t1">단일 / 시트 모드</b><b data-i18n="f10.t2">Ctrl+Z</b><b data-i18n="f10.t3">비정상 종료 복구</b></div>
           </article>
           <article class="card reveal">
@@ -470,8 +470,8 @@
           <article class="card reveal">
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
             <h3 data-i18n="f13.h">AI 에이전트 (omp)</h3>
-            <p data-i18n="f13.p">오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·품질 검사·셀 편집. 편집과 저장은 승인 카드로 묻고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.</p>
-            <div class="tags"><b data-i18n="f13.t1">Ctrl+Shift+A</b><b data-i18n="f13.t2">승인 카드</b><b data-i18n="f13.t3">요약만 공유</b></div>
+            <p data-i18n="f13.p">오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·서식·셀 편집. 선택하면 로컬 Python으로 고급 분석·시각화를 하고 마크다운 보고서와 그림(PNG·PDF)을 저장해 보여 줍니다. 승인 모드(항상 묻기·편집 자동 승인·모두 허용)를 채팅 창에서 고르고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.</p>
+            <div class="tags"><b data-i18n="f13.t1">Ctrl+Shift+A</b><b data-i18n="f13.t2">승인 모드</b><b data-i18n="f13.t3">Python 보고서·그림</b></div>
           </article>
         </div>
       </div>
@@ -520,7 +520,7 @@
       <div class="wrap">
         <div class="sec-head center reveal">
           <p class="sec-eyebrow" data-i18n="dl.eyebrow">다운로드</p>
-          <h2 class="sec-title">Nanum CSV Viewer v2.1.0</h2>
+          <h2 class="sec-title">Nanum CSV Viewer v2.2.0</h2>
           <p class="sec-lede" data-i18n="dl.lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
         </div>
         <div class="dl-grid">
@@ -528,16 +528,16 @@
             <div class="arch"><span class="archname">Windows x64</span><span class="pill" data-i18n="dl.x64pill">대부분의 PC</span></div>
             <p class="for" data-i18n="dl.x64for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.1.0/NanumCsvViewer-v2.1.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.1.0/NanumCsvViewer-v2.1.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.2.0/NanumCsvViewer-v2.2.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.2.0/NanumCsvViewer-v2.2.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
           <div class="dl reveal">
             <div class="arch"><span class="archname">Windows ARM64</span><span class="pill" data-i18n="dl.armpill">ARM PC</span></div>
             <p class="for" data-i18n="dl.armfor">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.1.0/NanumCsvViewer-v2.1.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.1.0/NanumCsvViewer-v2.1.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.2.0/NanumCsvViewer-v2.2.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v2.2.0/NanumCsvViewer-v2.2.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
         </div>
@@ -636,7 +636,7 @@
         'f9.t2': { ko: '발견 → 필터', en: 'Findings → filter' },
         'f9.t3': { ko: '규칙 · 보고서', en: 'Rules · report' },
         'f10.h': { ko: '셀 편집 · 원본 보존', en: 'Cell editing · original kept' },
-        'f10.p': { ko: '기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·컬럼 이름 변경·행 삽입/삭제가 되는 시트 편집 모드를 구분합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.', en: 'Read-only by default. Single-cell editing is separate from a sheet edit mode that allows paste, undo, column rename and row insert/delete while it is on. The original file is never touched; edits are saved to a new CSV or xlsx, and values like 001 stay as typed.' },
+        'f10.p': { ko: '기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·행 삽입/삭제·열 중간 삽입/이동/삭제·정규식 찾아 바꾸기가 되는 시트 편집 모드를 구분합니다. 조건부 서식(테마 색, 서식 되돌리기)으로 셀·행을 강조합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.', en: 'Read-only by default. Single-cell editing is separate from a sheet edit mode with paste, undo, row insert/delete, column insert/move/delete and regex find & replace. Conditional formatting (theme-aware colors, its own undo) highlights cells or rows. The original file is never touched; edits are saved to a new CSV or xlsx, and values like 001 stay as typed.' },
         'f10.t1': { ko: '단일 / 시트 모드', en: 'Single / sheet mode' },
         'f10.t2': { ko: 'Ctrl+Z', en: 'Ctrl+Z' },
         'f10.t3': { ko: '비정상 종료 복구', en: 'Crash recovery' },
@@ -651,10 +651,10 @@
         'f12.t2': { ko: 'ONNX', en: 'ONNX' },
         'f12.t3': { ko: 'PDF · Excel', en: 'PDF · Excel' },
         'f13.h': { ko: 'AI 에이전트 (omp)', en: 'AI agent (omp)' },
-        'f13.p': { ko: '오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·품질 검사·셀 편집. 편집과 저장은 승인 카드로 묻고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.', en: 'Ask in the chat panel and the agent operates the open window itself: filter, sort, statistics, regression, quality checks and cell edits. Edits and saves ask for approval, and data sharing defaults to "summary only". It uses the models you configured in omp (oh-my-pi).' },
+        'f13.p': { ko: '오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·서식·셀 편집. 선택하면 로컬 Python으로 고급 분석·시각화를 하고 마크다운 보고서와 그림(PNG·PDF)을 저장해 보여 줍니다. 승인 모드(항상 묻기·편집 자동 승인·모두 허용)를 채팅 창에서 고르고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.', en: 'Ask in the chat panel and the agent operates the open window itself: filter, sort, statistics, regression, formatting and cell edits. Optionally it runs local Python for advanced analysis and charts, saving Markdown reports and figures (PNG, PDF) and showing them. Pick the approval mode (always ask, auto-approve edits, allow everything) in the chat; data sharing defaults to "summary only". It uses the models you configured in omp (oh-my-pi).' },
         'f13.t1': { ko: 'Ctrl+Shift+A', en: 'Ctrl+Shift+A' },
-        'f13.t2': { ko: '승인 카드', en: 'Approval cards' },
-        'f13.t3': { ko: '요약만 공유', en: 'Summary-only sharing' },
+        'f13.t2': { ko: '승인 모드', en: 'Approval modes' },
+        'f13.t3': { ko: 'Python 보고서·그림', en: 'Python reports & charts' },
         'piv.eyebrow': { ko: '피벗 빌더', en: 'Pivot builder' },
         'piv.title': { ko: '필드를 끌어다 놓으면<br>표와 차트가 됩니다.', en: 'Assign fields,<br>get a table and a chart.' },
         'piv.lede1': { ko: '행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.', en: 'Assign fields to Rows, Columns, Values, and Filters — with multiple measures, date grouping, and totals. Pick a day/week/month/year period for date dimensions and a type-aware aggregation for values, right on each chip.' },
