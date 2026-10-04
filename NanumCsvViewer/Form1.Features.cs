@@ -1655,7 +1655,8 @@ namespace NanumCsvViewer
         {
             if (_doc is null || !_doc.IndexingComplete || _busy) return;
             using var dlg = new ParamDialog(LT("Advanced Filter", "고급 필터"), _palette);
-            dlg.AddNote(LT("e.g.  age > 30 AND city = \"서울\"", "예:  age > 30 AND city = \"서울\""));
+            dlg.AddNote(LT("e.g.  age > 30 AND city = \"서울\"\nOperators: = != < <= > >= contains startswith endswith matches (regex)",
+                           "예:  age > 30 AND city = \"서울\"\n연산자: = != < <= > >= contains startswith endswith matches(정규식)"));
             var input = dlg.AddText(LT("Expression", "표현식"));
             if (initial is not null) input.Text = initial;
             if (!dlg.ShowOk(this)) return;
