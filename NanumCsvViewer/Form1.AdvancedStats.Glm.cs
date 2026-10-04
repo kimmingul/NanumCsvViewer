@@ -38,19 +38,25 @@ namespace NanumCsvViewer
             if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("ANCOVA", "공분산분석(ANCOVA)"), _palette);
             var dep = dlg.AddCombo(LT("Dependent (numeric)", "종속변수(수치)"), ColumnLabels(), FirstNumericColumn());
-            var factor = dlg.AddCombo(LT("Factor (categorical)", "요인(범주)"), ColumnLabels(), 0);
+            var factorList = dlg.AddCheckedList(LT("Factors (categorical, one or more)", "요인(범주, 하나 이상)"), ColumnLabels(), Math.Min(6, Math.Max(1, _doc.ColumnCount)));
+            int factorDefault = Enumerable.Range(0, _doc.ColumnCount).FirstOrDefault(c => !IsNumericColumn(c) && c != dep.SelectedIndex);
+            if (factorDefault < factorList.Items.Count) factorList.SetItemChecked(factorDefault, true);
             var cov = dlg.AddCheckedList(LT("Covariates (numeric)", "공변량(수치)"), ColumnLabels(), Math.Min(8, Math.Max(1, _doc.ColumnCount)));
             for (int c = 0; c < cov.Items.Count; c++)
-                if (IsNumericColumn(c) && c != dep.SelectedIndex && c != factor.SelectedIndex) cov.SetItemChecked(c, true);
+                if (IsNumericColumn(c) && c != dep.SelectedIndex && !factorList.GetItemChecked(c)) cov.SetItemChecked(c, true);
             UncheckWhenSelected(dep, cov);
-            UncheckWhenSelected(factor, cov);
+            UncheckWhenSelected(dep, factorList);
+            factorList.ItemCheck += (_, e) =>
+            {
+                if (e.NewValue == CheckState.Checked && e.Index < cov.Items.Count) cov.SetItemChecked(e.Index, false);
+            };
             dlg.AddNote(LT(
-                "Adjusted means are estimated at each covariate's mean. Homogeneity of slopes adds factor×covariate interactions.",
-                "보정 평균은 각 공변량의 평균에서 추정합니다. 기울기 동질성은 요인×공변량 상호작용을 넣어 검정합니다."));
+                "Main effects only. Adjusted means are estimated at each covariate's mean; with several factors the others are averaged with equal level weights. Homogeneity of slopes adds factor×covariate interactions (per factor and overall).",
+                "주효과만 다룹니다. 보정 평균은 각 공변량의 평균에서 추정하며, 요인이 여럿이면 다른 요인은 수준 동일 가중으로 평균합니다. 기울기 동질성은 요인×공변량 상호작용을 넣어 검정합니다(요인별·전체)."));
             if (!dlg.ShowOk(this)) return;
 
             int depCol = dep.SelectedIndex;
-            int factorCol = factor.SelectedIndex;
+            var factorCols = CheckedIndexes(factorList);
             var covCols = CheckedIndexes(cov);
             string title = LT("ANCOVA", "공분산분석(ANCOVA)");
             if (!IsNumericColumn(depCol))
@@ -58,9 +64,14 @@ namespace NanumCsvViewer
                 ShowResult(title, LT("The dependent variable must be numeric.", "종속변수는 수치형이어야 합니다."));
                 return;
             }
-            if (factorCol == depCol)
+            if (factorCols.Count == 0)
             {
-                ShowResult(title, LT("The factor must be a different column from the dependent variable.", "요인은 종속변수와 다른 열이어야 합니다."));
+                ShowResult(title, LT("Select at least one factor.", "요인을 하나 이상 선택하세요."));
+                return;
+            }
+            if (factorCols.Contains(depCol))
+            {
+                ShowResult(title, LT("A factor must be a different column from the dependent variable.", "요인은 종속변수와 다른 열이어야 합니다."));
                 return;
             }
             if (covCols.Count == 0)
@@ -68,7 +79,7 @@ namespace NanumCsvViewer
                 ShowResult(title, LT("Select at least one numeric covariate.", "수치 공변량을 하나 이상 선택하세요."));
                 return;
             }
-            if (covCols.Contains(depCol) || covCols.Contains(factorCol))
+            if (covCols.Contains(depCol) || covCols.Any(factorCols.Contains))
             {
                 ShowResult(title, LT("A covariate cannot also be the dependent variable or the factor.", "공변량은 종속변수·요인과 같을 수 없습니다."));
                 return;
@@ -83,16 +94,17 @@ namespace NanumCsvViewer
             }
 
             var headers = AdvHeaders();
-            var predictors = new List<string> { headers[factorCol] };
+            var factorNames = factorCols.Select(c => headers[c]).ToHashSet(StringComparer.Ordinal);
+            var predictors = new List<string>(factorCols.Select(c => headers[c]));
             predictors.AddRange(covCols.Select(c => headers[c]));
-            string factorName = headers[factorCol];
-            var formula = ModelFormula.Parse(FormulaText.MainEffects(headers[depCol], predictors, name => name == factorName));
+            var formula = ModelFormula.Parse(FormulaText.MainEffects(headers[depCol], predictors, name => factorNames.Contains(name)));
             await RunAdvancedAsync(title, input =>
             {
                 LinearModel.EnsureNumericResponse(input.Headers, formula, input.KindOf);
                 var dm = DesignMatrixBuilder.Build(input.Rows, input.Headers, formula, input.KindOf, cancellation: input.Cancellation);
-                var result = LinearModel.Ancova(dm, factorName, input.Cancellation);
-                return FormatAncovaResult(dm, result);
+                if (factorNames.Count == 1)
+                    return FormatAncovaResult(dm, LinearModel.Ancova(dm, factorNames.First(), input.Cancellation));
+                return FormatMultiAncovaResult(dm, LinearModel.AncovaMulti(dm, input.Cancellation));
             });
         }
 
@@ -186,6 +198,69 @@ namespace NanumCsvViewer
                 pairs.AddRow(d.LevelA, d.LevelB, StatFormat.G(d.Difference), StatFormat.G(d.StdError), StatFormat.G(d.T),
                     StatFormat.P(d.PValue), StatFormat.P(d.BonferroniP));
             sb.Append(pairs.Render());
+            sb.AppendLine();
+            AppendResidualBlock(sb, fit);
+            AppendNotes(sb, fit, result.TypeII);
+            return sb.ToString();
+        }
+
+        internal static string FormatMultiAncovaResult(DesignMatrix dm, MultiAncovaResult result)
+        {
+            var fit = result.Additive;
+            var sb = new StringBuilder();
+            sb.AppendLine(AdvScope(dm.RowsRead, dm.RowCount, dm.RowsDropped));
+            sb.AppendLine();
+            sb.AppendLine(dm.Formula.ToString());
+            sb.AppendLine(LT("Multi-factor ANCOVA · main effects · treatment coding · Type II SS · adjusted means at covariate means",
+                             "다요인 공분산분석 · 주효과 · 처리 코딩 · Type II 제곱합 · 공변량 평균에서의 보정 평균"));
+            sb.AppendLine();
+            AppendFitSummary(sb, fit);
+            sb.AppendLine();
+            sb.AppendLine(LT("Type II ANOVA  (partial η² = SS / (SS + residual SS))",
+                             "Type II 분산분석  (부분 η² = SS / (SS + 잔차 SS))"));
+            sb.Append(FormatAnova(result.TypeII, fit, partialEta: true));
+            sb.AppendLine();
+            sb.AppendLine(LT("Homogeneity of regression slopes", "회귀 기울기 동질성"));
+            sb.AppendLine(LT("Nested F against the additive model; each row adds that factor×covariate interactions. Denominator is the full-model residual mean square.",
+                             "가법 모형 대비 내포 F. 각 행은 해당 요인×공변량 상호작용을 더합니다. 분모는 완전모형 잔차 평균제곱입니다."));
+            var slopeTable = new TextTable(LT("Added interactions", "추가한 상호작용"), "F", "df", "p", " ");
+            foreach (var f in result.Factors)
+                slopeTable.AddRow(f.Factor + "×" + LT("covariates", "공변량"), StatFormat.G(f.Slopes.F),
+                    $"{StatFormat.Int(f.Slopes.DfNumerator)}, {StatFormat.Int(f.Slopes.DfDenominator)}",
+                    StatFormat.P(f.Slopes.PValue), StatFormat.Stars(f.Slopes.PValue));
+            slopeTable.AddRow(LT("all factors", "모든 요인"), StatFormat.G(result.AllSlopes.F),
+                $"{StatFormat.Int(result.AllSlopes.DfNumerator)}, {StatFormat.Int(result.AllSlopes.DfDenominator)}",
+                StatFormat.P(result.AllSlopes.PValue), StatFormat.Stars(result.AllSlopes.PValue));
+            sb.Append(slopeTable.Render());
+            if (result.Factors.Any(f => f.Slopes.PValue < 0.05) || result.AllSlopes.PValue < 0.05)
+                sb.AppendLine(LT("At least one parallel-slopes test is rejected (p < 0.05). Adjusted means come from the additive model, which is misspecified if slopes differ.",
+                                 "평행 기울기 검정이 하나 이상 기각됩니다(p < 0.05). 보정 평균은 가법 모형에서 구하며, 기울기가 다르면 그 모형은 부적합합니다."));
+            else
+                sb.AppendLine(LT("No parallel-slopes test is rejected (p ≥ 0.05).", "평행 기울기 검정을 기각하지 않습니다(p ≥ 0.05)."));
+
+            sb.AppendLine();
+            sb.AppendLine(LT("Covariate means (evaluation point of adjusted means)", "공변량 평균(보정 평균의 평가 지점)"));
+            for (int i = 0; i < result.Covariates.Count; i++)
+                sb.AppendLine($"  {result.Covariates[i]} = {StatFormat.G(result.CovariateMeans[i])}");
+
+            foreach (var f in result.Factors)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LT($"Adjusted (estimated marginal) means — {f.Factor}  (other factors averaged with equal level weights)",
+                                 $"보정(추정 주변) 평균 — {f.Factor}  (다른 요인은 수준 동일 가중 평균)"));
+                var means = new TextTable(LT("Level", "수준"), "n", LT("Estimate", "추정값"), "SE", LT("95% low", "95% 하한"), LT("95% high", "95% 상한"));
+                foreach (var m in f.AdjustedMeans)
+                    means.AddRow(m.Level, StatFormat.Int(m.Count), StatFormat.G(m.Estimate), StatFormat.G(m.StdError), StatFormat.G(m.CiLow), StatFormat.G(m.CiHigh));
+                sb.Append(means.Render());
+                sb.AppendLine();
+                sb.AppendLine(LT($"Pairwise differences of adjusted means — {f.Factor} (B − A), Bonferroni over {f.Pairwise.Count:N0} pairs",
+                                 $"보정 평균의 쌍별 차이 — {f.Factor} (B − A), {f.Pairwise.Count:N0}쌍 Bonferroni 보정"));
+                var pairs = new TextTable("A", "B", "B − A", "SE", "t", "p", LT("p Bonf.", "p Bonf."));
+                foreach (var d in f.Pairwise)
+                    pairs.AddRow(d.LevelA, d.LevelB, StatFormat.G(d.Difference), StatFormat.G(d.StdError), StatFormat.G(d.T),
+                        StatFormat.P(d.PValue), StatFormat.P(d.BonferroniP));
+                sb.Append(pairs.Render());
+            }
             sb.AppendLine();
             AppendResidualBlock(sb, fit);
             AppendNotes(sb, fit, result.TypeII);

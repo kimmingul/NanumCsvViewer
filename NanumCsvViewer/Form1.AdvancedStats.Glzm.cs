@@ -15,12 +15,18 @@ namespace NanumCsvViewer
             using var dlg = new FormulaDialog(
                 LT("Generalized Linear Model", "일반화선형모형"),
                 AdvHeaders(), ColumnLabels(), _palette, SuggestGlmFormula(),
-                LT("response ~ predictors. C(name) forces a factor, a:b is an interaction. Event level is used only for the binomial family (blank = second sorted level, or 1).",
-                   "반응 ~ 설명변수. C(이름)은 요인 강제, a:b는 상호작용. 사건 수준은 이항 분포에서만 쓰입니다(비우면 정렬상 두 번째 수준, 또는 1)."));
+                LT("response ~ predictors. C(name) forces a factor, a:b is an interaction. Event level is used only for the binomial family (blank = second sorted level, or 1). With a trials column the response is the number of successes.",
+                   "반응 ~ 설명변수. C(이름)은 요인 강제, a:b는 상호작용. 사건 수준은 이항 분포에서만 쓰입니다(비우면 정렬상 두 번째 수준, 또는 1). 시행 수 열을 쓰면 반응은 성공 횟수입니다."));
             var familyBox = dlg.AddOption(LT("Family", "분포족"), GlmFamilyOrder.Select(FamilyLabel), 0);
             var linkBox = dlg.AddOption(LT("Link", "연결 함수"), LinkLabels(GlmFamily.Gaussian), 0);
             var eventBox = dlg.AddTextOption(LT("Event level (binomial)", "사건 수준(이항)"), "");
             familyBox.SelectedIndexChanged += (_, _) => RepopulateLinks(familyBox, linkBox);
+            var optional = new[] { LT("(none)", "(없음)") }.Concat(ColumnLabels()).ToArray();
+            var offsetBox = dlg.AddOption(LT("Offset column (added as is)", "오프셋 열(그대로 더함)"), optional, 0);
+            var exposureBox = dlg.AddOption(LT("Exposure column (adds ln of value)", "노출 열(ln 값을 더함)"), optional, 0);
+            var varWeightBox = dlg.AddOption(LT("Variance weights (not binomial)", "분산 가중치(이항 제외)"), optional, 0);
+            var freqWeightBox = dlg.AddOption(LT("Frequency weights (positive integers)", "빈도 가중치(양의 정수)"), optional, 0);
+            var trialsBox = dlg.AddOption(LT("Trials (binomial only)", "시행 수 열(이항 전용)"), optional, 0);
             if (!dlg.ShowOk(this)) return;
             if (dlg.Parsed is not { } formula) return;
 
@@ -29,23 +35,40 @@ namespace NanumCsvViewer
             var link = links[Math.Clamp(linkBox.SelectedIndex, 0, links.Length - 1)];
             string eventLevel = eventBox.Text.Trim();
             string title = LT("Generalized Linear Model", "일반화선형모형");
+            var pickHeaders = AdvHeaders();
+            string? Pick(ComboBox box) => box.SelectedIndex > 0 && box.SelectedIndex - 1 < pickHeaders.Length ? pickHeaders[box.SelectedIndex - 1] : null;
+            string? offsetColumn = Pick(offsetBox), exposureColumn = Pick(exposureBox),
+                varWeightColumn = Pick(varWeightBox), freqWeightColumn = Pick(freqWeightBox), trialsColumn = Pick(trialsBox);
 
             await RunAdvancedAsync(title, input =>
             {
                 var design = DesignMatrixBuilder.Build(input.Rows, input.Headers, formula, input.KindOf,
                     new DesignMatrixOptions
                     {
-                        Response = family == GlmFamily.Binomial ? ResponseKind.Binary : ResponseKind.Numeric,
+                        Response = family == GlmFamily.Binomial && trialsColumn is null ? ResponseKind.Binary : ResponseKind.Numeric,
                         BinaryEventLevel = family == GlmFamily.Binomial && eventLevel.Length > 0 ? eventLevel : null,
+                        OffsetColumn = offsetColumn,
+                        ExposureColumn = exposureColumn,
+                        VarianceWeightColumn = varWeightColumn,
+                        FrequencyWeightColumn = freqWeightColumn,
+                        TrialsColumn = trialsColumn,
                     }, input.Cancellation);
-                bool logistic = family == GlmFamily.Binomial && link == GlmLink.Logit;
-                var fit = GeneralizedLinearModel.Fit(design, family, link, logistic, input.Cancellation);
+                var extras = design.GlmExtras;
+                bool logistic = family == GlmFamily.Binomial && link == GlmLink.Logit && extras is null;
+                var fit = GeneralizedLinearModel.Fit(design, family, link, logistic, input.Cancellation, extras);
                 string note = AdvSavedNote(design.RowCount);
-                var bundle = ModelBundle.FromFormula(ModelTypes.Glzm,
-                    family == GlmFamily.Binomial ? ModelTask.Classification : ModelTask.Regression,
-                    design, fit, note,
-                    new Dictionary<string, string> { ["family"] = family.ToString(), ["link"] = link.ToString(), ["converged"] = fit.Converged.ToString() });
-                return new AdvancedOutput(RenderGlm(design, fit, logistic) + "\n" + note, bundle);
+                // 오프셋·시행 수 모형은 새 데이터 예측에 같은 열이 필요하거나 응답 의미가 달라 저장 모형으로 쓰지 않는다.
+                bool savable = extras?.Offset is null && extras?.Trials is null;
+                object? bundle = savable
+                    ? ModelBundle.FromFormula(ModelTypes.Glzm,
+                        family == GlmFamily.Binomial ? ModelTask.Classification : ModelTask.Regression,
+                        design, fit, note,
+                        new Dictionary<string, string> { ["family"] = family.ToString(), ["link"] = link.ToString(), ["converged"] = fit.Converged.ToString() })
+                    : null;
+                string text = RenderGlm(design, fit, logistic) + "\n" + (savable ? note : LT(
+                    "This model uses an offset or trials column, so it cannot be saved or applied to new data as a stored model.",
+                    "이 모형은 오프셋 또는 시행 수 열을 쓰므로 저장 모형으로 저장하거나 새 데이터에 적용할 수 없습니다."));
+                return new AdvancedOutput(text, bundle);
             });
         }
 
@@ -150,6 +173,18 @@ namespace NanumCsvViewer
             sb.AppendLine(LT("Generalized linear model (IRLS)", "일반화선형모형 (IRLS)"));
             sb.AppendLine(LT("Formula: ", "식: ") + design.Formula);
             sb.AppendLine(LT("Family: ", "분포족: ") + FamilyLabel(fit.Family) + "    " + LT("Link: ", "연결: ") + LinkLabel(fit.Link));
+            if (fit.HasOffset || fit.HasTrials || fit.HasVarianceWeights || fit.HasFrequencyWeights)
+            {
+                var parts = new List<string>();
+                if (fit.HasOffset) parts.Add(LT("offset", "오프셋"));
+                if (fit.HasTrials) parts.Add(LT("binomial trials (response = successes)", "이항 시행 수(반응 = 성공 횟수)"));
+                if (fit.HasVarianceWeights) parts.Add(LT("variance weights", "분산 가중치"));
+                if (fit.HasFrequencyWeights) parts.Add(LT($"frequency weights (weighted n = {fit.WeightedN:N0})", $"빈도 가중치(가중 n = {fit.WeightedN:N0})"));
+                sb.AppendLine(LT("Inputs: ", "추가 입력: ") + string.Join(", ", parts));
+                if (fit.HasOffset || fit.HasTrials || fit.HasVarianceWeights || fit.HasFrequencyWeights)
+                    sb.AppendLine(LT("Logistic extras (odds ratios, ROC, classification table) are not produced with an offset, trials or weights.",
+                        "오프셋·시행 수·가중치를 쓰면 로지스틱 부가 지표(오즈비·ROC·분류표)는 만들지 않습니다."));
+            }
             if (design.ResponseLevels is { Count: 2 } levels)
                 sb.AppendLine(LT($"Event: {levels[1]}  (reference {levels[0]})", $"사건: {levels[1]}  (기준 {levels[0]})"));
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
@@ -187,7 +222,7 @@ namespace NanumCsvViewer
 
             sb.AppendLine(LT("Fit", "적합"));
             sb.AppendLine(LT("Deviance: ", "이탈도: ") + StatFormat.G(fit.Deviance));
-            sb.AppendLine(LT("Null deviance (intercept-only mean): ", "귀무 이탈도(절편만, 평균): ") + StatFormat.G(fit.NullDeviance));
+            sb.AppendLine(LT("Null deviance (intercept-only): ", "귀무 이탈도(절편만): ") + StatFormat.G(fit.NullDeviance));
             sb.AppendLine(LT("Pearson χ²: ", "Pearson χ²: ") + StatFormat.G(fit.PearsonChi2));
             sb.AppendLine(LT("Log-likelihood: ", "로그가능도: ") + StatFormat.G(fit.LogLikelihood));
             sb.AppendLine(LT("AIC: ", "AIC: ") + StatFormat.G(fit.Aic));

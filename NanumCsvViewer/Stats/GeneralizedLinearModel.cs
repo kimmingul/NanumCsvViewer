@@ -88,7 +88,14 @@ namespace NanumCsvViewer.Stats
         public required int DfModel { get; init; }
         public required int DfResid { get; init; }
         public required int Rank { get; init; }
+        /// <summary>사용한 행 수.</summary>
         public required int N { get; init; }
+        /// <summary>빈도 가중치 합(없으면 N). 자유도·BIC에 쓴다.</summary>
+        public int WeightedN { get; init; }
+        public bool HasOffset { get; init; }
+        public bool HasVarianceWeights { get; init; }
+        public bool HasFrequencyWeights { get; init; }
+        public bool HasTrials { get; init; }
         public required bool HasIntercept { get; init; }
         public required IReadOnlyList<GlmDiagnostic> Diagnostics { get; init; }
         public LogisticSummary? Logistic { get; init; }
@@ -118,9 +125,10 @@ namespace NanumCsvViewer.Stats
             GlmFamily family,
             GlmLink link,
             bool logisticExtras = false,
-            CancellationToken cancellation = default)
+            CancellationToken cancellation = default,
+            GlmExtras? extras = null)
             => Fit(design.X, design.Y, family, link, design.ColumnNames, design.HasIntercept,
-                logisticExtras, cancellation);
+                logisticExtras, cancellation, extras);
 
         public static GeneralizedLinearFit Fit(
             double[,] x,
@@ -130,9 +138,10 @@ namespace NanumCsvViewer.Stats
             IReadOnlyList<string>? names = null,
             bool hasIntercept = true,
             bool logisticExtras = false,
-            CancellationToken cancellation = default)
+            CancellationToken cancellation = default,
+            GlmExtras? extras = null)
             => Fit(x, y, family, link, names, hasIntercept, logisticExtras,
-                DefaultMaxIterations, DefaultTolerance, cancellation);
+                DefaultMaxIterations, DefaultTolerance, cancellation, extras);
 
         public static GeneralizedLinearFit Fit(
             double[,] x,
@@ -144,7 +153,9 @@ namespace NanumCsvViewer.Stats
             bool logisticExtras,
             int maxIterations,
             double tolerance,
-            CancellationToken cancellation = default)
+            CancellationToken cancellation = default,
+            GlmExtras? extras = null,
+            bool skipNullModel = false)
         {
             int n = x.GetLength(0), p = x.GetLength(1);
             if (y.Length != n) throw new ArgumentException("Row count mismatch.", nameof(y));
@@ -152,18 +163,23 @@ namespace NanumCsvViewer.Stats
                 throw new DesignMatrixException("No complete rows: every row has a missing or non-numeric value in the model columns.");
             if (!IsValidLink(family, link))
                 throw new DesignMatrixException($"Link '{link}' is not valid for the {family} family.");
-            ValidateResponse(y, family);
+            var originalY = y;
+            var prior = GlmPrior.Create(extras, y, n, family);
+            y = prior.Response;
+            if (prior.Trials is null) ValidateResponse(y, family);
+            double[] off = prior.Offset ?? new double[n];
 
             cancellation.ThrowIfCancellationRequested();
             var structure = LeastSquares.Fit(x, y, cancellation: cancellation);
             int rank = structure.Rank;
-            if (rank < 1 || n <= rank)
+            int wnobs = prior.WeightedN;
+            if (rank < 1 || wnobs <= rank)
                 throw new DesignMatrixException(
                     "Not enough complete rows to estimate the model (need more rows than parameters).");
 
-            // statsmodels: df_model = matrix_rank(exog) − 1, df_resid = n − rank, AIC 모수 개수 = rank.
+            // statsmodels: df_model = matrix_rank(exog) − 1, df_resid = wnobs − rank, AIC 모수 개수 = rank.
             int dfModel = rank - 1;
-            int dfResid = n - rank;
+            int dfResid = wnobs - rank;
             bool fixedScale = family is GlmFamily.Binomial or GlmFamily.Poisson;
 
             var mu = new double[n];
@@ -177,8 +193,8 @@ namespace NanumCsvViewer.Stats
                 mu[i] = family == GlmFamily.Binomial ? (y[i] + 0.5) / 2.0 : (y[i] + yMean) / 2.0;
             for (int i = 0; i < n; i++) eta[i] = ApplyLink(mu[i], link);
 
-            double scale = EstimateScale(y, mu, family, fixedScale, dfResid);
-            double dev0 = Deviance(y, mu, family);
+            double scale = EstimateScale(y, mu, family, fixedScale, dfResid, prior);
+            double dev0 = Deviance(y, mu, family, prior);
             if (!double.IsFinite(dev0))
                 throw new DesignMatrixException(
                     "The model could not be started (deviance is undefined). Check that the response matches the family and link.");
@@ -200,10 +216,10 @@ namespace NanumCsvViewer.Stats
                 {
                     double g = LinkDerivative(mu[i], link);
                     double v = Variance(mu[i], family);
-                    double w = 1.0 / (g * g * v);
+                    double w = prior.Pw[i] / (g * g * v);
                     if (!(w > 0) || !double.IsFinite(w) || !double.IsFinite(g)) { weightsOk = false; break; }
                     weights[i] = w;
-                    z[i] = eta[i] + g * (y[i] - mu[i]);
+                    z[i] = eta[i] - off[i] + g * (y[i] - mu[i]);
                     if (!double.IsFinite(z[i])) { weightsOk = false; break; }
                 }
                 if (!weightsOk)
@@ -232,7 +248,7 @@ namespace NanumCsvViewer.Stats
                 bool finite = true;
                 for (int i = 0; i < n; i++)
                 {
-                    eta[i] = lin[i];
+                    eta[i] = lin[i] + off[i];
                     mu[i] = InverseLink(eta[i], link);
                     if (!double.IsFinite(mu[i]) || !double.IsFinite(eta[i])) { finite = false; break; }
                 }
@@ -243,9 +259,9 @@ namespace NanumCsvViewer.Stats
                     break;
                 }
 
-                double dev = Deviance(y, mu, family);
+                double dev = Deviance(y, mu, family, prior);
                 double devScaled = dev / ConvergenceDivisor(scale);
-                scale = EstimateScale(y, mu, family, fixedScale, dfResid);
+                scale = EstimateScale(y, mu, family, fixedScale, dfResid, prior);
                 iterations = iteration + 1;
                 if (double.IsFinite(devScaled) && double.IsFinite(devPrev) && Math.Abs(devScaled - devPrev) <= tolerance)
                 {
@@ -262,19 +278,39 @@ namespace NanumCsvViewer.Stats
 
             if (!converged) numericalFailure = numericalFailure || !AllFinite(beta);
 
-            double deviance = Deviance(y, mu, family);
-            double pearson = PearsonChi2(y, mu, family);
+            double deviance = Deviance(y, mu, family, prior);
+            double pearson = PearsonChi2(y, mu, family, prior);
             if (!fixedScale && double.IsFinite(pearson))
                 scale = pearson / dfResid;
 
-            var nullMu = new double[n];
-            for (int i = 0; i < n; i++) nullMu[i] = yMean;
-            double nullDev = Deviance(y, nullMu, family);
-            double llf = LogLikelihood(y, mu, family, link, scale, n);
-            double llnull = LogLikelihood(y, nullMu, family, link, scale, n, nullModel: true);
+            // 귀무 모형(절편만). 오프셋이 없으면 가중 평균이 MLE, 있으면 오프셋을 둔 절편 모형을 다시 적합한다(statsmodels GLMResults.null).
+            double[] nullMu = new double[n];
+            if (prior.Offset is null)
+            {
+                double sw = 0, sy = 0;
+                for (int i = 0; i < n; i++) { sw += prior.Pw[i]; sy += prior.Pw[i] * y[i]; }
+                double m0 = sy / sw;
+                for (int i = 0; i < n; i++) nullMu[i] = m0;
+            }
+            else if (!skipNullModel)
+            {
+                try
+                {
+                    var ones = new double[n, 1];
+                    for (int i = 0; i < n; i++) ones[i, 0] = 1;
+                    nullMu = Fit(ones, originalY, family, link, null, true, false, maxIterations, tolerance, cancellation, extras, skipNullModel: true).Fitted;
+                }
+                catch (DesignMatrixException)
+                {
+                    for (int i = 0; i < n; i++) nullMu[i] = double.NaN;
+                }
+            }
+            double nullDev = Deviance(y, nullMu, family, prior);
+            double llf = LogLikelihood(y, mu, family, link, scale, n, false, prior);
+            double llnull = LogLikelihood(y, nullMu, family, link, scale, n, true, prior);
             int kParams = rank;
             double aic = -2 * llf + 2 * kParams;
-            double bic = -2 * llf + Math.Log(n) * kParams;
+            double bic = -2 * llf + Math.Log(wnobs) * kParams;
             double lr = 2 * (llf - llnull);
             double lrP = dfModel > 0 && double.IsFinite(lr) ? Dist.ChiSquareUpper(lr, dfModel) : double.NaN;
 
@@ -307,7 +343,7 @@ namespace NanumCsvViewer.Stats
             if (family == GlmFamily.Poisson && HasNonInteger(y)) diagnostics.Add(GlmDiagnostic.NonIntegerPoisson);
 
             LogisticSummary? logistic = null;
-            if (logisticExtras && family == GlmFamily.Binomial && link == GlmLink.Logit)
+            if (logisticExtras && family == GlmFamily.Binomial && link == GlmLink.Logit && !prior.Any)
                 logistic = BuildLogistic(y, mu, beta, se, llf, llnull, zcrit);
 
             return new GeneralizedLinearFit
@@ -340,6 +376,11 @@ namespace NanumCsvViewer.Stats
                 DfResid = dfResid,
                 Rank = rank,
                 N = n,
+                WeightedN = wnobs,
+                HasOffset = prior.Offset is not null,
+                HasVarianceWeights = prior.Var is not null,
+                HasFrequencyWeights = prior.Freq is not null,
+                HasTrials = prior.Trials is not null,
                 HasIntercept = hasIntercept,
                 Diagnostics = diagnostics,
                 Logistic = logistic,
@@ -543,15 +584,15 @@ namespace NanumCsvViewer.Stats
 
         private static double ConvergenceDivisor(double scale) => scale > 0 && double.IsFinite(scale) ? scale : 1.0;
 
-        private static double EstimateScale(double[] y, double[] mu, GlmFamily family, bool fixedScale, int dfResid)
+        private static double EstimateScale(double[] y, double[] mu, GlmFamily family, bool fixedScale, int dfResid, GlmPrior prior)
         {
             if (fixedScale) return 1.0;
-            double pearson = PearsonChi2(y, mu, family);
+            double pearson = PearsonChi2(y, mu, family, prior);
             if (!double.IsFinite(pearson) || dfResid <= 0) return double.NaN;
             return pearson / dfResid;
         }
 
-        private static double PearsonChi2(double[] y, double[] mu, GlmFamily family)
+        private static double PearsonChi2(double[] y, double[] mu, GlmFamily family, GlmPrior prior)
         {
             double s = 0;
             for (int i = 0; i < y.Length; i++)
@@ -559,19 +600,19 @@ namespace NanumCsvViewer.Stats
                 double v = Variance(mu[i], family);
                 if (!(v > 0) || !double.IsFinite(v)) return double.NaN;
                 double r = y[i] - mu[i];
-                s += r * r / v;
+                s += prior.Pw[i] * (r * r / v);
             }
             return s;
         }
 
-        private static double Deviance(double[] y, double[] mu, GlmFamily family)
+        private static double Deviance(double[] y, double[] mu, GlmFamily family, GlmPrior prior)
         {
             double s = 0;
             for (int i = 0; i < y.Length; i++)
             {
                 double d = DevianceTerm(y[i], mu[i], family);
                 if (!double.IsFinite(d)) return double.NaN;
-                s += d;
+                s += prior.Pw[i] * d;
             }
             return s;
         }
@@ -606,8 +647,10 @@ namespace NanumCsvViewer.Stats
         }
 
         /// <param name="nullModel">가우시안 항등 연결의 집중 가능도는 적합 모형에만 쓴다. 귀무 ll은 본 모형의 Pearson 척도.</param>
-        private static double LogLikelihood(double[] y, double[] mu, GlmFamily family, GlmLink link, double scale, int n, bool nullModel = false)
+        private static double LogLikelihood(double[] y, double[] mu, GlmFamily family, GlmLink link, double scale, int n, bool nullModel, GlmPrior prior)
         {
+            double[]? vwArr = prior.Var;
+            double[]? fwArr = prior.Freq;
             switch (family)
             {
                 case GlmFamily.Gaussian:
@@ -619,9 +662,9 @@ namespace NanumCsvViewer.Stats
                         for (int i = 0; i < n; i++)
                         {
                             double r = y[i] - mu[i];
-                            rss += r * r;
+                            rss += prior.Pw[i] * (r * r);
                         }
-                        used = rss / n;
+                        used = rss / prior.WeightedN;
                     }
                     if (!(used > 0) || !double.IsFinite(used)) return double.NaN;
                     double logTerm = Math.Log(used) + Math.Log(2 * Math.PI);
@@ -629,7 +672,11 @@ namespace NanumCsvViewer.Stats
                     for (int i = 0; i < n; i++)
                     {
                         double r = y[i] - mu[i];
-                        ll += -0.5 * (r * r / used + logTerm);
+                        double fw = fwArr is null ? 1.0 : fwArr[i];
+                        if (vwArr is null)
+                            ll += fw * (-0.5 * (r * r / used + logTerm));
+                        else
+                            ll += fw * ((-vwArr[i] * r * r / used - Math.Log(used / vwArr[i]) - Math.Log(2 * Math.PI)) / 2);
                     }
                     return ll;
                 }
@@ -639,38 +686,153 @@ namespace NanumCsvViewer.Stats
                     for (int i = 0; i < n; i++)
                     {
                         if (!(mu[i] > 0)) return double.NaN;
-                        ll += y[i] * Math.Log(mu[i]) - mu[i] - LogGamma(y[i] + 1);
+                        double fw = fwArr is null ? 1.0 : fwArr[i];
+                        double vw = vwArr is null ? 1.0 : vwArr[i];
+                        ll += fw * (vw * (y[i] * Math.Log(mu[i]) - mu[i] - LogGamma(y[i] + 1)));
                     }
                     return ll;
                 }
                 case GlmFamily.Gamma:
                 {
                     if (!(scale > 0) || !double.IsFinite(scale)) return double.NaN;
-                    double weight = 1.0 / scale;
-                    double lg = LogGamma(weight);
                     double ll = 0;
+                    double lgConst = vwArr is null ? LogGamma(1.0 / scale) : 0;
                     for (int i = 0; i < n; i++)
                     {
                         if (!(mu[i] > 0) || !(y[i] > 0)) return double.NaN;
+                        double fw = fwArr is null ? 1.0 : fwArr[i];
+                        double weight = vwArr is null ? 1.0 / scale : vwArr[i] / scale;
+                        double lg = vwArr is null ? lgConst : LogGamma(weight);
                         double ratio = Math.Max(y[i] / mu[i], Eps);
-                        ll += weight * Math.Log(weight * ratio) - weight * ratio - lg - Math.Log(y[i]);
+                        ll += fw * (weight * Math.Log(weight * ratio) - weight * ratio - lg - Math.Log(y[i]));
                     }
                     return ll;
                 }
                 case GlmFamily.Binomial:
                 {
                     double ll = 0;
+                    double[]? trials = prior.Trials;
                     for (int i = 0; i < n; i++)
                     {
                         double m = mu[i];
-                        if (m <= 0) ll += y[i] <= 0.5 ? 0 : double.NegativeInfinity;
-                        else if (m >= 1) ll += y[i] >= 0.5 ? 0 : double.NegativeInfinity;
-                        else ll += y[i] * Math.Log(m / (1 - m + 1e-20)) + Math.Log(1 - m + 1e-20);
+                        double fw = fwArr is null ? 1.0 : fwArr[i];
+                        if (trials is not null)
+                        {
+                            // statsmodels 2열 응답: 성공 수 s = y·N, ll = lnΓ(N+1) − lnΓ(s+1) − lnΓ(N−s+1) + s·ln(μ/(1−μ)) + N·ln(1−μ)
+                            double nTr = trials[i];
+                            double s = Math.Round(y[i] * nTr);
+                            if (!(m > 0 && m < 1)) return double.NaN;
+                            ll += fw * (LogGamma(nTr + 1) - LogGamma(s + 1) - LogGamma(nTr - s + 1)
+                                + s * Math.Log(m / (1 - m + 1e-20)) + nTr * Math.Log(1 - m + 1e-20));
+                            continue;
+                        }
+                        double term;
+                        if (m <= 0) term = y[i] <= 0.5 ? 0 : double.NegativeInfinity;
+                        else if (m >= 1) term = y[i] >= 0.5 ? 0 : double.NegativeInfinity;
+                        else term = y[i] * Math.Log(m / (1 - m + 1e-20)) + Math.Log(1 - m + 1e-20);
+                        ll += fw * term;
                     }
                     return ll;
                 }
                 default:
                     return double.NaN;
+            }
+        }
+
+        /// <summary>
+        /// 사전 정보: 오프셋, 분산 가중치, 빈도 가중치, 이항 시행 수. 이항 시행 수가 있으면 응답은 성공 횟수이고 내부에서 비율로 바꾼다.
+        /// 시행 수는 분산 가중치를 대신한다(statsmodels 2열 이항 응답과 같다).
+        /// </summary>
+        private sealed class GlmPrior
+        {
+            public required double[] Response { get; init; }
+            /// <summary>IRLS·이탈도·Pearson에 곱하는 사전 가중치 = (시행 수 또는 분산 가중치) × 빈도 가중치.</summary>
+            public required double[] Pw { get; init; }
+            public double[]? Offset { get; init; }
+            public double[]? Var { get; init; }
+            public double[]? Freq { get; init; }
+            public double[]? Trials { get; init; }
+            public required int WeightedN { get; init; }
+            public bool Any => Offset is not null || Var is not null || Freq is not null || Trials is not null;
+
+            public static GlmPrior Create(GlmExtras? extras, double[] y, int n, GlmFamily family)
+            {
+                double[] pw = new double[n];
+                Array.Fill(pw, 1.0);
+                if (extras is null || !extras.Any)
+                    return new GlmPrior { Response = y, Pw = pw, WeightedN = n };
+
+                void Check(double[]? a, string name)
+                {
+                    if (a is not null && a.Length != n) throw new ArgumentException($"{name} length must match the rows.");
+                }
+                Check(extras.Offset, "Offset");
+                Check(extras.VarianceWeights, "Variance weights");
+                Check(extras.FrequencyWeights, "Frequency weights");
+                Check(extras.Trials, "Trials");
+
+                if (extras.Offset is not null)
+                    for (int i = 0; i < n; i++)
+                        if (!double.IsFinite(extras.Offset[i])) throw new DesignMatrixException("The offset must be finite.");
+
+                int wn = n;
+                if (extras.FrequencyWeights is not null)
+                {
+                    long total = 0;
+                    for (int i = 0; i < n; i++)
+                    {
+                        double f = extras.FrequencyWeights[i];
+                        if (!double.IsFinite(f) || f < 1 || Math.Abs(f - Math.Round(f)) > 1e-8)
+                            throw new DesignMatrixException("Frequency weights must be positive integers.");
+                        total += (long)Math.Round(f);
+                        if (total > int.MaxValue) throw new DesignMatrixException("The total frequency weight is too large.");
+                    }
+                    wn = (int)total;
+                }
+                if (extras.VarianceWeights is not null)
+                    for (int i = 0; i < n; i++)
+                        if (!double.IsFinite(extras.VarianceWeights[i]) || !(extras.VarianceWeights[i] > 0))
+                            throw new DesignMatrixException("Variance weights must be positive.");
+
+                double[] response = y;
+                if (extras.Trials is not null)
+                {
+                    if (family != GlmFamily.Binomial)
+                        throw new DesignMatrixException("Trials are only valid for the binomial family.");
+                    if (extras.VarianceWeights is not null)
+                        throw new DesignMatrixException("Use either trials or variance weights, not both.");
+                    response = new double[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        double t = extras.Trials[i], s = y[i];
+                        if (!double.IsFinite(t) || t < 1 || Math.Abs(t - Math.Round(t)) > 1e-8)
+                            throw new DesignMatrixException("Trials must be positive integers.");
+                        if (!double.IsFinite(s) || s < 0 || s > t + 1e-8 || Math.Abs(s - Math.Round(s)) > 1e-8)
+                            throw new DesignMatrixException("Successes must be integers between 0 and the trials.");
+                        response[i] = Math.Min(s, t) / t;
+                    }
+                }
+                else if (extras.VarianceWeights is not null && family == GlmFamily.Binomial)
+                {
+                    throw new DesignMatrixException("Variance weights are not supported for the binomial family. Use a trials column.");
+                }
+
+                for (int i = 0; i < n; i++)
+                {
+                    double w = extras.Trials?[i] ?? extras.VarianceWeights?[i] ?? 1.0;
+                    if (extras.FrequencyWeights is not null) w *= extras.FrequencyWeights[i];
+                    pw[i] = w;
+                }
+                return new GlmPrior
+                {
+                    Response = response,
+                    Pw = pw,
+                    Offset = extras.Offset,
+                    Var = extras.VarianceWeights,
+                    Freq = extras.FrequencyWeights,
+                    Trials = extras.Trials,
+                    WeightedN = wn,
+                };
             }
         }
 

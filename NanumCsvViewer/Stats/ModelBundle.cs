@@ -19,6 +19,7 @@ namespace NanumCsvViewer.Stats
         public const string Logistic = "Logistic";
         public const string Glzm = "Glzm";
         public const string AdaBoost = "AdaBoost";
+        public const string MultinomialLogistic = "MultinomialLogistic";
     }
 
     /// <summary>설계행렬/특성행렬의 열 1개가 원본의 어느 컬럼·수준에서 왔는지. Level은 원-핫(범주) 열에서만.</summary>
@@ -32,7 +33,7 @@ namespace NanumCsvViewer.Stats
     /// </summary>
     public sealed record ModelBundle
     {
-        /// <summary>모형 종류 키(예: "GradientBoosting", "RandomForest", "DecisionTree", "NaiveBayes", "Lda", "Knn", "Svm", "AdaBoost", "LinearModel", "Logistic", "Glzm").</summary>
+        /// <summary>모형 종류 키(예: "GradientBoosting", "RandomForest", "DecisionTree", "NaiveBayes", "Lda", "Knn", "Svm", "AdaBoost", "MultinomialLogistic", "LinearModel", "Logistic", "Glzm").</summary>
         public required string ModelType { get; init; }
         public required ModelTask Task { get; init; }
         public required IReadOnlyList<ModelFeature> Features { get; init; }

@@ -186,6 +186,11 @@ namespace NanumCsvViewer
             }, 0, row);
             _options.Controls.Add(input, 1, row);
             _options.RowCount = row + 1;
+            // 옵션 행이 늘면 창을 키워 아래 행과 버튼이 잘리지 않게 한다(작업 영역 높이까지).
+            int needed = 58 + 64 + 34 + 40 + _options.PreferredSize.Height + 40 + Padding.Vertical + 16;
+            int limit = Math.Max(MinimumSize.Height, Screen.FromPoint(Cursor.Position).WorkingArea.Height - 80);
+            if (ClientSize.Height < Math.Min(needed, limit))
+                ClientSize = new Size(ClientSize.Width, Math.Min(needed, limit));
         }
 
         public bool ShowOk(IWin32Window owner) => ShowDialog(owner) == DialogResult.OK && Parsed is not null;

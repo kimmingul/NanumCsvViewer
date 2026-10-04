@@ -124,26 +124,22 @@ namespace NanumCsvViewer
 
         private void ExportPdf()
         {
-            if (!ReportExport.IsPdfPrinterAvailable())
+            ReportPdfFonts fonts;
+            try { fonts = ReportPdfFonts.Locate(); }
+            catch (PdfFontNotFoundException)
             {
                 OfferHtml();
                 return;
             }
-            Save(LT("PDF (*.pdf)|*.pdf", "PDF (*.pdf)|*.pdf"), ".pdf", path =>
-            {
-                try { ReportExport.WritePdf(Document, path); }
-                catch (ReportPdfUnavailableException)
-                {
-                    OfferHtml();
-                }
-            });
+            Save(LT("PDF (*.pdf)|*.pdf", "PDF (*.pdf)|*.pdf"), ".pdf",
+                path => ReportExport.WritePdf(Document, path, fonts));
         }
 
         private void OfferHtml()
         {
             var answer = MessageBox.Show(this,
-                LT("Microsoft Print to PDF is not installed, so a PDF cannot be written. Export HTML instead?",
-                   "Microsoft Print to PDF 프린터가 없어 PDF를 만들 수 없습니다. HTML로 내보낼까요?"),
+                LT("No installed font with Korean glyphs (such as Malgun Gothic) was found, so a PDF cannot be written. Export HTML instead?",
+                   "한글 글리프가 있는 글꼴(맑은 고딕 등)을 찾지 못해 PDF를 만들 수 없습니다. HTML로 내보낼까요?"),
                 Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (answer == DialogResult.Yes) ExportHtml();
         }

@@ -320,6 +320,7 @@ namespace NanumCsvViewer.Stats
                 KnnModel knn => PredictKnn(knn, x, model, cancellation),
                 NaiveBayesModel nb => PredictBayes(nb, x, cancellation),
                 LinearDiscriminantModel lda => PredictLda(lda, x, cancellation),
+                MultinomialLogisticModel mn => PredictMultinomial(mn, x, cancellation),
                 DecisionTreeModel tree => PredictTree(tree, x, cancellation),
                 RandomForestModel forest => PredictForest(forest, x, cancellation),
                 SvmModel svm => PredictSvm(svm, x, model, cancellation),
@@ -659,6 +660,20 @@ namespace NanumCsvViewer.Stats
             return new EncodedPredictions { Count = x.GetLength(0), ClassIndex = cls, Probability = proba, Value = EventProb(proba) };
         }
 
+        static EncodedPredictions PredictMultinomial(MultinomialLogisticModel model, double[,] x, CancellationToken cancellation)
+        {
+            var proba = model.PredictProbabilities(x, cancellation);
+            int n = proba.GetLength(0), k = proba.GetLength(1);
+            var cls = new int[n];
+            for (int i = 0; i < n; i++)
+            {
+                int best = 0;
+                for (int c = 1; c < k; c++) if (proba[i, c] > proba[i, best]) best = c;
+                cls[i] = best;
+            }
+            return new EncodedPredictions { Count = n, ClassIndex = cls, Probability = proba, Value = EventProb(proba) };
+        }
+
         static EncodedPredictions PredictTree(DecisionTreeModel model, double[,] x, CancellationToken cancellation)
         {
             int n = x.GetLength(0);
@@ -890,6 +905,7 @@ namespace NanumCsvViewer.Stats
             LinearModelFit m => ToElement(new EngineDto { Type = ModelTypes.LinearModel, Linear = WriteLinear(m) }),
             GeneralizedLinearFit m => ToElement(new EngineDto { Type = bundle.ModelType, Glm = WriteGlm(m) }),
             AdaBoostModel m => ToElement(new EngineDto { Type = ModelTypes.AdaBoost, Ada = WriteAda(m) }),
+            MultinomialLogisticModel m => ToElement(new EngineDto { Type = ModelTypes.MultinomialLogistic, Multinomial = WriteMultinomial(m) }),
             LinearScoreModel m => ToElement(new EngineDto { Type = bundle.ModelType, LinearScore = WriteScore(m) }),
             _ => throw new ModelStoreException($"'{bundle.ModelType}' has no save adapter (engine {bundle.Engine?.GetType().Name ?? "null"})."),
         };
@@ -913,6 +929,7 @@ namespace NanumCsvViewer.Stats
                 ModelTypes.Logistic => Has(engine, "linearScore") ? ReadScore(Require(engine, "linearScore"), featureCount) : Has(engine, "glm") ? ReadGlm(Require(engine, "glm"), featureCount) : throw new ModelStoreException("The model file is missing engine.glm or engine.linearScore."),
                 ModelTypes.Glzm => ReadGlm(Require(engine, "glm"), featureCount),
                 ModelTypes.AdaBoost => ReadAda(Require(engine, "ada"), featureCount),
+                ModelTypes.MultinomialLogistic => ReadMultinomial(Require(engine, "multinomial"), featureCount),
                 _ => throw new ModelStoreException($"Model type '{modelType}' cannot be loaded."),
             };
         }
@@ -1659,6 +1676,47 @@ namespace NanumCsvViewer.Stats
             return new LinearScoreModel { Coefficients = Unpack(dto.Coefficients, n, "linear score coefficients"), Logistic = dto.Logistic };
         }
 
+        static MultinomialDto WriteMultinomial(MultinomialLogisticModel m) => new()
+        {
+            ClassCount = m.ClassCount,
+            FeatureCount = m.FeatureCount,
+            ClassPresent = m.ClassPresent,
+            Coefficients = Pack(m.Coefficients),
+            C = m.C,
+            Converged = m.Converged,
+            Iterations = m.Iterations,
+            RowsFit = m.RowsFit,
+        };
+
+        static MultinomialLogisticModel ReadMultinomial(JsonElement el, int featureCount)
+        {
+            var dto = Parse<MultinomialDto>(el);
+            if (dto.FeatureCount != featureCount)
+                throw new ModelStoreException("Stored multinomial logistic feature count does not match the feature list. The model was not loaded.");
+            if (dto.ClassCount < 2)
+                throw new ModelStoreException("Stored multinomial logistic model needs at least two classes. The model was not loaded.");
+            if (dto.ClassPresent is null || dto.ClassPresent.Length != dto.ClassCount)
+                throw new ModelStoreException("Stored multinomial logistic class-presence flags do not match the class count. The model was not loaded.");
+            if (!dto.ClassPresent.Any(b => b))
+                throw new ModelStoreException("Stored multinomial logistic model has no fitted class. The model was not loaded.");
+            if (!double.IsFinite(dto.C) || dto.C <= 0)
+                throw new ModelStoreException("Stored multinomial logistic C must be a positive finite number. The model was not loaded.");
+            var coef = Unpack(dto.Coefficients, dto.ClassCount, featureCount + 1, "multinomial logistic coefficients");
+            for (int k = 0; k < dto.ClassCount; k++)
+                for (int j = 0; j <= featureCount; j++)
+                    if (!double.IsFinite(coef[k, j]))
+                        throw new ModelStoreException("Stored multinomial logistic coefficients contain a non-finite value. The model was not loaded.");
+            return new MultinomialLogisticModel
+            {
+                Coefficients = coef,
+                ClassPresent = dto.ClassPresent,
+                C = dto.C,
+                Converged = dto.Converged,
+                Iterations = Math.Max(dto.Iterations, 0),
+                RowsFit = Math.Max(dto.RowsFit, 0),
+            };
+        }
+
         static double[] Unpack(string? b64, int count, string what)
         {
             count = RequireElements(count, what);
@@ -1869,6 +1927,7 @@ namespace NanumCsvViewer.Stats
             public GlmDto? Glm { get; set; }
             public AdaDto? Ada { get; set; }
             public ScoreDto? LinearScore { get; set; }
+            public MultinomialDto? Multinomial { get; set; }
         }
 
         sealed class AdaDto
@@ -1910,6 +1969,18 @@ namespace NanumCsvViewer.Stats
         {
             public bool Logistic { get; set; }
             public string Coefficients { get; set; } = "";
+        }
+
+        sealed class MultinomialDto
+        {
+            public int ClassCount { get; set; }
+            public int FeatureCount { get; set; }
+            public bool[]? ClassPresent { get; set; }
+            public string Coefficients { get; set; } = "";
+            public double C { get; set; }
+            public bool Converged { get; set; }
+            public int Iterations { get; set; }
+            public int RowsFit { get; set; }
         }
 
 

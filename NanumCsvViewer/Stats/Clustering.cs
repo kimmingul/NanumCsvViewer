@@ -164,16 +164,29 @@ namespace NanumCsvViewer.Stats
             cancellation.ThrowIfCancellationRequested();
             int n = z.GetLength(0), p = z.GetLength(1);
             alglib.kmeansreport rep;
-            try
+            // ALGLIB 호출 자체는 중간에 멈출 수 없다. 별도 작업에서 실행하고, 취소되면 호출 쪽은 즉시 빠져나온다.
+            // 포기된 작업은 (초기화 표본 크기로 제한된) 계산을 마친 뒤 결과를 버린다.
+            var work = Task.Run(() =>
             {
                 alglib.clusterizercreate(out var state);
                 alglib.clusterizersetpoints(state, z, n, p, 2);
                 alglib.clusterizersetkmeanslimits(state, restarts, maxIts);
                 alglib.clusterizersetkmeansinit(state, 2);
                 alglib.clusterizersetseed(state, seed);
-                alglib.clusterizerrunkmeans(state, k, out rep);
+                alglib.clusterizerrunkmeans(state, k, out alglib.kmeansreport r);
+                return r;
+            });
+            try
+            {
+                work.Wait(cancellation);
+                rep = work.Result;
             }
-            catch (alglib.alglibexception ex)
+            catch (OperationCanceledException)
+            {
+                _ = work.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                throw;
+            }
+            catch (AggregateException agg) when (agg.InnerException is alglib.alglibexception ex)
             {
                 throw new DesignMatrixException(string.IsNullOrWhiteSpace(ex.msg) ? "K-means failed." : ex.msg);
             }

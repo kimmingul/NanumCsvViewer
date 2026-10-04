@@ -38,7 +38,7 @@ namespace NanumCsvViewer.Stats
     {
         /// <summary>
         /// 주성분분석. <paramref name="components"/>가 1 미만이면 min(5, p). p를 넘으면 p로 자른다.
-        /// 상관 척도는 각 열을 표본 표준편차(ddof=1)로 나눈 뒤 SVD한다 — 고유값은 상관행렬의 고유값.
+        /// 상관 척도는 각 열을 표본 표준편차(ddof=1)로 나눈 뒤 공분산을 고유분해한다 — 고유값은 상관행렬의 고유값.
         /// </summary>
         public static PcaResult Fit(
             double[,] x,
@@ -67,7 +67,7 @@ namespace NanumCsvViewer.Stats
             double[,] v;
             try
             {
-                alglib.pcabuildbasis(input, n, p, out s2, out v);
+                (s2, v) = CovarianceBasis(input, n, p, cancellation);
             }
             catch (alglib.alglibexception ex)
             {
@@ -119,6 +119,66 @@ namespace NanumCsvViewer.Stats
                 ConstantFeatures = constant,
                 RowCount = n,
             };
+        }
+
+        /// <summary>
+        /// 중심화 공분산(ddof=1)을 행 범위 병렬·취소 가능한 두 번의 패스로 만든 뒤 p×p 대칭 고유분해(ALGLIB smatrixevd)로 푼다.
+        /// n·p² 비용이 전부 취소 가능한 구간이고, 취소 불가한 고유분해는 p³(p×p)뿐이다.
+        /// 고유값은 내림차순, 열은 고유벡터(부호는 호출 쪽 FlipColumnSign이 정한다).
+        /// </summary>
+        internal static (double[] Variances, double[,] Vectors) CovarianceBasis(double[,] x, int n, int p, CancellationToken cancellation)
+        {
+            var mean = new double[p];
+            for (int i = 0; i < n; i++)
+            {
+                if ((i & 4095) == 0) cancellation.ThrowIfCancellationRequested();
+                for (int j = 0; j < p; j++) mean[j] += x[i, j];
+            }
+            for (int j = 0; j < p; j++) mean[j] /= n;
+
+            const int Chunk = 8192;
+            int chunks = (n + Chunk - 1) / Chunk;
+            var partial = new double[chunks][];
+            Parallel.For(0, chunks, new ParallelOptions { CancellationToken = cancellation }, c =>
+            {
+                var acc = new double[p * p];
+                var row = new double[p];
+                int lo = c * Chunk, hi = Math.Min(n, lo + Chunk);
+                for (int i = lo; i < hi; i++)
+                {
+                    for (int j = 0; j < p; j++) row[j] = x[i, j] - mean[j];
+                    for (int a = 0; a < p; a++)
+                    {
+                        double ra = row[a];
+                        int off = a * p;
+                        for (int b = a; b < p; b++) acc[off + b] += ra * row[b];
+                    }
+                }
+                partial[c] = acc;
+            });
+            cancellation.ThrowIfCancellationRequested();
+
+            var cov = new double[p, p];
+            double denom = n - 1;
+            for (int a = 0; a < p; a++)
+                for (int b = a; b < p; b++)
+                {
+                    double s = 0;
+                    for (int c = 0; c < chunks; c++) s += partial[c][a * p + b];
+                    cov[a, b] = s / denom;
+                }
+
+            if (!alglib.smatrixevd(cov, p, 1, true, out double[] d, out double[,] z))
+                throw new DesignMatrixException("PCA eigen decomposition did not converge.");
+            var s2 = new double[p];
+            var v = new double[p, p];
+            for (int k = 0; k < p; k++)
+            {
+                int src = p - 1 - k; // ALGLIB는 오름차순
+                s2[k] = d[src];
+                for (int j = 0; j < p; j++) v[j, k] = z[j, src];
+            }
+            return (s2, v);
         }
 
         private static int CountConstantColumns(double[,] x, CancellationToken ct)

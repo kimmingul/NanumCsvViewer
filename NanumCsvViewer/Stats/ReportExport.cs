@@ -1,5 +1,3 @@
-using System.Drawing;
-using System.Drawing.Printing;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -43,16 +41,11 @@ namespace NanumCsvViewer.Stats
         IReadOnlyList<ReportBlock> Blocks,
         bool Preformatted);
 
-    /// <summary>Microsoft Print to PDF가 설치되어 있지 않다.</summary>
-    public sealed class ReportPdfUnavailableException : Exception
-    {
-        public ReportPdfUnavailableException(string message) : base(message) { }
-    }
-
     /// <summary>페이지에 놓을 한 조각. Height는 측정기 단위.</summary>
     public abstract record ReportLayoutItem(float Height);
 
-    public enum ReportTextRole { Title, Meta, Body, TableHeader }
+    /// <summary>Mono는 표를 찾지 못해 원문 그대로 둔 본문(격자 정렬 고정폭).</summary>
+    public enum ReportTextRole { Title, Meta, Body, TableHeader, Mono }
 
     public sealed record ReportLayoutText(string Text, ReportTextRole Role, float Height) : ReportLayoutItem(Height);
 
@@ -88,12 +81,11 @@ namespace NanumCsvViewer.Stats
     }
 
     /// <summary>
-    /// 고급 통계 보고서 내보내기(이슈 #27 Phase 3). HTML·XLSX는 패키지 없이 직접 쓰고,
-    /// PDF는 Microsoft Print to PDF로 인쇄한다. 쪽 나눔은 <see cref="Paginate"/>가 순수하게 계산한다.
+    /// 고급 통계 보고서 내보내기(이슈 #27 Phase 3). HTML·XLSX·PDF 모두 패키지·프린터 없이 직접 쓴다.
+    /// PDF는 <see cref="ReportPdf"/>(<see cref="PdfDocument"/>)가 만든다. 쪽 나눔은 <see cref="Paginate"/>가 순수하게 계산한다.
     /// </summary>
     public static class ReportExport
     {
-        public const string PdfPrinterName = "Microsoft Print to PDF";
         public const string ReportSheetName = "Report";
 
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -237,43 +229,23 @@ namespace NanumCsvViewer.Stats
             WriteAtomic(path, fs => WriteXlsx(document, fs));
         }
 
-        public static bool IsPdfPrinterAvailable()
-        {
-            foreach (string name in PrinterSettings.InstalledPrinters)
-                if (string.Equals(name, PdfPrinterName, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            return false;
-        }
-
-        /// <summary>Microsoft Print to PDF로 지정 경로에 조용히 인쇄한다. 프린터가 없으면 예외.</summary>
+        /// <summary>
+        /// 보고서를 직접 작성한 PDF(A4, 한글 글꼴 부분집합 내장)로 지정 경로에 쓴다. 인쇄 드라이버를 쓰지 않는다.
+        /// 한글 TrueType 글꼴이 없으면 <see cref="PdfFontNotFoundException"/>(파일은 만들지 않는다).
+        /// </summary>
         public static void WritePdf(ReportDocument document, string path)
+            => WritePdf(document, path, ReportPdfFonts.Locate());
+
+        public static void WritePdf(ReportDocument document, string path, ReportPdfFonts fonts)
         {
             ArgumentNullException.ThrowIfNull(document);
             ArgumentException.ThrowIfNullOrWhiteSpace(path);
-            if (!IsPdfPrinterAvailable())
-                throw new ReportPdfUnavailableException(PdfPrinterName + " is not installed.");
-
-            string full = Path.GetFullPath(path);
-            string? dir = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            if (File.Exists(full)) File.Delete(full);
-
-            using var print = new PrintDocument();
-            print.PrinterSettings.PrinterName = PdfPrinterName;
-            if (!print.PrinterSettings.IsValid)
-                throw new ReportPdfUnavailableException(PdfPrinterName + " is not available.");
-            print.PrinterSettings.PrintToFile = true;
-            print.PrinterSettings.PrintFileName = full;
-            print.DefaultPageSettings.PrinterSettings = print.PrinterSettings;
-            print.DefaultPageSettings.Margins = new Margins(50, 50, 50, 64);
-            print.DocumentName = document.Title.Length == 0 ? "Report" : document.Title;
-            print.PrintController = new StandardPrintController();
-
-            var job = new PdfPrintJob(document);
-            print.PrintPage += job.OnPrintPage;
-            try { print.Print(); }
-            finally { job.Dispose(); }
+            ArgumentNullException.ThrowIfNull(fonts);
+            WriteAtomic(path, fs => ReportPdf.Write(document, fs, fonts));
         }
+
+        public static void WritePdf(ReportDocument document, Stream stream, ReportPdfFonts fonts)
+            => ReportPdf.Write(document, stream, fonts);
 
         /// <summary>
         /// 제목·메타는 첫 페이지만. 표가 페이지를 넘으면 머리글을 반복한다.
@@ -323,8 +295,9 @@ namespace NanumCsvViewer.Stats
             {
                 if (block is ReportTextBlock text)
                 {
+                    var role = text.Preformatted ? ReportTextRole.Mono : ReportTextRole.Body;
                     foreach (string raw in text.Text.Replace("\r\n", "\n").Split('\n'))
-                        PlaceWrapped(raw, ReportTextRole.Body);
+                        PlaceWrapped(raw, role);
                     if (measure.BlockGap > 0) Place(new ReportLayoutSpacer(measure.BlockGap));
                 }
                 else if (block is ReportTableBlock table)
@@ -897,167 +870,6 @@ namespace NanumCsvViewer.Stats
             {
                 if (File.Exists(tmp)) File.Delete(tmp);
             }
-        }
-
-        /// <summary>PrintPage에서 측정·쪽 나눔·그리기를 한다. 글꼴은 인쇄가 끝난 뒤 버린다.</summary>
-        private sealed class PdfPrintJob : IDisposable
-        {
-            private readonly ReportDocument _document;
-            private IReadOnlyList<ReportPage>? _pages;
-            private int _index;
-            private Font? _title, _meta, _body, _header;
-            private bool _disposed;
-
-            public PdfPrintJob(ReportDocument document) => _document = document;
-
-            public void OnPrintPage(object? sender, PrintPageEventArgs e)
-            {
-                var g = e.Graphics ?? throw new InvalidOperationException("Print page has no graphics.");
-                if (_pages is null)
-                {
-                    _title = KoreanFont(14f, FontStyle.Bold);
-                    _meta = KoreanFont(9f, FontStyle.Regular);
-                    _body = KoreanFont(10f, FontStyle.Regular);
-                    _header = KoreanFont(10f, FontStyle.Bold);
-                    var bounds = e.MarginBounds;
-                    var measurer = new GdiMeasurer(g, bounds.Width, bounds.Height, _title, _meta, _body, _header);
-                    _pages = Paginate(_document, measurer);
-                    _index = 0;
-                }
-                if (_pages.Count == 0) { e.HasMorePages = false; return; }
-                Draw(g, e.MarginBounds, _pages[_index]);
-                string footer = (_index + 1).ToString(Inv) + " / " + _pages.Count.ToString(Inv);
-                var footerFont = _meta ?? _body!;
-                g.DrawString(footer, footerFont, Brushes.Black, e.MarginBounds.Left, e.MarginBounds.Bottom + 8);
-                _index++;
-                e.HasMorePages = _index < _pages.Count;
-            }
-
-            private void Draw(Graphics g, Rectangle bounds, ReportPage page)
-            {
-                float y = bounds.Top;
-                using var border = new Pen(Color.FromArgb(180, 180, 180));
-                using var headerFill = new SolidBrush(Color.FromArgb(240, 240, 240));
-                using var format = new StringFormat(StringFormat.GenericTypographic)
-                {
-                    FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces,
-                    Trimming = StringTrimming.None,
-                };
-                foreach (var item in page.Items)
-                {
-                    if (item is ReportLayoutText text && text.Text.Length > 0)
-                    {
-                        var font = text.Role switch
-                        {
-                            ReportTextRole.Title => _title,
-                            ReportTextRole.Meta => _meta,
-                            _ => _body,
-                        } ?? _body!;
-                        g.DrawString(text.Text, font, Brushes.Black, bounds.Left, y, format);
-                    }
-                    else if (item is ReportLayoutTableRow row)
-                    {
-                        float x = bounds.Left;
-                        float width = 0;
-                        foreach (float w in row.ColumnWidths) width += w;
-                        if (row.Header) g.FillRectangle(headerFill, bounds.Left, y, width, row.Height);
-                        var font = row.Header ? _header! : _body!;
-                        for (int c = 0; c < row.Cells.Count && c < row.ColumnWidths.Count; c++)
-                        {
-                            float col = row.ColumnWidths[c];
-                            g.DrawRectangle(border, x, y, col, row.Height);
-                            var lines = c < row.WrappedLines.Count ? row.WrappedLines[c] : new[] { row.Cells[c] ?? "" };
-                            bool numeric = !row.Header && lines.Count <= 1 && TryParseNumber(row.Cells[c], out _);
-                            float textY = y + row.PadY;
-                            foreach (string line in lines)
-                            {
-                                float textX = x + row.PadX;
-                                if (numeric)
-                                {
-                                    float measured = g.MeasureString(line, font, int.MaxValue, format).Width;
-                                    float inner = Math.Max(0, col - 2 * row.PadX);
-                                    textX = x + row.PadX + Math.Max(0, inner - measured);
-                                }
-                                if (line.Length > 0)
-                                    g.DrawString(line, font, Brushes.Black, textX, textY, format);
-                                textY += row.LineHeight;
-                            }
-                            x += col;
-                        }
-                    }
-                    y += item.Height;
-                }
-            }
-
-            public void Dispose()
-            {
-                if (_disposed) return;
-                _disposed = true;
-                _title?.Dispose();
-                _meta?.Dispose();
-                _body?.Dispose();
-                _header?.Dispose();
-            }
-        }
-
-        private static Font KoreanFont(float sizePt, FontStyle style)
-        {
-            foreach (string name in new[] { "Malgun Gothic", "맑은 고딕", "Gulim", "굴림", "Segoe UI" })
-            {
-                try
-                {
-                    var font = new Font(name, sizePt, style, GraphicsUnit.Point);
-                    if (font.FontFamily.Name.Equals(name, StringComparison.OrdinalIgnoreCase)
-                        || name is "Segoe UI" && font.FontFamily.Name.Equals("Segoe UI", StringComparison.OrdinalIgnoreCase))
-                        return font;
-                    font.Dispose();
-                }
-                catch (ArgumentException) { }
-            }
-            return new Font(FontFamily.GenericSansSerif, sizePt, style, GraphicsUnit.Point);
-        }
-
-        private sealed class GdiMeasurer : IReportMeasurer
-        {
-            private readonly Graphics _g;
-            private readonly Font _title, _meta, _body, _header;
-            private readonly StringFormat _format;
-
-            public GdiMeasurer(Graphics g, float width, float height, Font title, Font meta, Font body, Font header)
-            {
-                _g = g;
-                ContentWidth = Math.Max(1, width);
-                ContentHeight = Math.Max(1, height);
-                _title = title;
-                _meta = meta;
-                _body = body;
-                _header = header;
-                _format = new StringFormat(StringFormat.GenericTypographic)
-                {
-                    FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces,
-                };
-            }
-
-            public float ContentWidth { get; }
-            public float ContentHeight { get; }
-            public float CellPadX => 4;
-            public float CellPadY => 2;
-            public float BlockGap => 8;
-            public float LineHeight(ReportTextRole role) => FontOf(role).GetHeight(_g);
-
-            public float Measure(string text, ReportTextRole role)
-            {
-                if (string.IsNullOrEmpty(text)) return 0;
-                return _g.MeasureString(text, FontOf(role), int.MaxValue, _format).Width;
-            }
-
-            private Font FontOf(ReportTextRole role) => role switch
-            {
-                ReportTextRole.Title => _title,
-                ReportTextRole.Meta => _meta,
-                ReportTextRole.TableHeader => _header,
-                _ => _body,
-            };
         }
     }
 }

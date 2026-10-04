@@ -453,12 +453,7 @@ namespace NanumCsvViewer.Stats
             options ??= new ClassifierOptions();
             ClassifierCommon.Validate(x, labels, classCount, options, neighbors: false);
             int p = x.GetLength(1);
-            var numeric = new List<int>();
-            foreach (var g in groups)
-                if (!g.Categorical)
-                    foreach (int col in g.Columns) numeric.Add(col);
-            var mask = new bool[p];
-            foreach (int col in numeric) mask[col] = true;
+            var mask = NumericMask(groups, p);
 
             NaiveBayesModel? holdoutModel = null;
             FeatureScaler? holdoutScaler = null;
@@ -479,7 +474,7 @@ namespace NanumCsvViewer.Stats
             if (options.Scheme == EvalScheme.Holdout)
             {
                 parameters = holdoutModel ?? throw new DesignMatrixException("Naive Bayes produced no training fit.");
-                parameterScaler = holdoutScaler;
+                parameterScaler = holdoutScaler?.WithIdentityOutside(mask);
                 allRows = false;
             }
             else
@@ -494,8 +489,18 @@ namespace NanumCsvViewer.Stats
                 Evaluation = eval,
                 Parameters = parameters,
                 ParametersUseAllRows = allRows,
-                ParameterScaler = parameterScaler,
+                ParameterScaler = parameterScaler?.WithIdentityOutside(mask),
             };
+        }
+
+        /// <summary>수치 특성 열만 true. 범주(원-핫) 열은 스케일하지 않는다.</summary>
+        public static bool[] NumericMask(IReadOnlyList<FeatureGroup> groups, int p)
+        {
+            var mask = new bool[p];
+            foreach (var g in groups)
+                if (!g.Categorical)
+                    foreach (int col in g.Columns) mask[col] = true;
+            return mask;
         }
 
         private static int[] AllRows(int n)

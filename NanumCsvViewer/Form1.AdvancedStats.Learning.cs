@@ -104,7 +104,8 @@ namespace NanumCsvViewer
                 }
                 else
                 {
-                    scaler = options.Scaling == ScalingMethod.None ? null : FeatureScaler.Fit(matrix.X, options.Scaling);
+                    var nbMask = NaiveBayesClassifier.NumericMask(groups, matrix.X.GetLength(1));
+                    scaler = options.Scaling == ScalingMethod.None ? null : FeatureScaler.Fit(matrix.X, options.Scaling).WithIdentityOutside(nbMask);
                     saved = NaiveBayesModel.Fit(scaler is null ? matrix.X : scaler.Transform(matrix.X),
                         matrix.ClassLabels!, matrix.ClassNames!.Count, groups, cancellation: input.Cancellation);
                 }

@@ -258,5 +258,16 @@ namespace NanumCsvViewer.Stats
                     result[i, j] = (x[i, j] - Center[j]) / Scale[j];
             return result;
         }
+
+        /// <summary>mask가 false인 열은 항등 변환(중심 0, 나눗수 1)으로 바꾼 사본. 범주(원-핫) 열을 스케일하지 않는 모형이 저장 모형에 쓴다.</summary>
+        public FeatureScaler WithIdentityOutside(bool[] mask)
+        {
+            if (mask.Length != Center.Length) throw new ArgumentException("Mask length must match the columns.", nameof(mask));
+            var center = (double[])Center.Clone();
+            var scale = (double[])Scale.Clone();
+            for (int j = 0; j < mask.Length; j++)
+                if (!mask[j]) { center[j] = 0; scale[j] = 1; }
+            return new FeatureScaler(Method, center, scale);
+        }
     }
 }

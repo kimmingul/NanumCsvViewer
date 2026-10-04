@@ -6,6 +6,9 @@ namespace NanumCsvViewer.Stats
 
     public enum AutoMlSkip { LogisticNeedsBinary, SvmTooLarge }
 
+    /// <summary>SVM 후보의 해법. ExactSmo는 libsvm SMO(탐색 표본 800행 이하), LinearDcd는 선형 쌍대 좌표 강하(one-vs-rest).</summary>
+    public enum AutoMlSvmMode { None, ExactSmo, LinearDcd }
+
     /// <summary>
     /// 학습 분할 안에서만 탐색한다. 시험 행은 탐색·교차검증에 넣지 않는다.
     /// 시간 예산 0은 첫 설정만 적합하고 다음 설정은 시작하지 않는다.
@@ -22,6 +25,8 @@ namespace NanumCsvViewer.Stats
         public int SearchRowBudget { get; init; } = 2_000;
         /// <summary>시험 지표용 재적합·저장 모형의 행 상한. 선형·로지스틱은 상한을 쓰지 않는다.</summary>
         public int RefitRowCap { get; init; } = 40_000;
+        /// <summary>DCD SVM 에폭당 작업 상한(행×특성×클래스). 테스트가 표본추출 경로를 작은 데이터로 확인하려고 줄인다.</summary>
+        internal long SvmWorkPerEpoch { get; init; } = AutoMl.SvmDcdWorkPerEpoch;
     }
 
     public sealed class AutoMlTrial
@@ -84,6 +89,209 @@ namespace NanumCsvViewer.Stats
         }
     }
 
+    /// <summary>
+    /// 다항(소프트맥스) 로지스틱 회귀. 계수는 [클래스, 1 + 특성] 이고 0열이 절편(규제 없음)이다.
+    /// 목적함수 = (1/n)·Σ 교차엔트로피 + (1/(2·C·n))·‖W‖² 로 sklearn LogisticRegression(multinomial, L2, C)의
+    /// 목적(C·Σ손실 + ½‖W‖²)을 n·C로 나눈 것과 최소점이 같다. 학습 행에 없는 클래스는 확률 0(예측 불가)이다.
+    /// 입력은 호출자가 스케일한 특성이어야 한다.
+    /// </summary>
+    public sealed class MultinomialLogisticModel
+    {
+        public const string ModelTypeName = "MultinomialLogistic";
+
+        /// <summary>[ClassCount, 1 + 특성]. 0열 절편. 학습 행에 없는 클래스의 행은 0.</summary>
+        public required double[,] Coefficients { get; init; }
+        public required bool[] ClassPresent { get; init; }
+        public required double C { get; init; }
+        public required bool Converged { get; init; }
+        public required int Iterations { get; init; }
+        public required int RowsFit { get; init; }
+        public int ClassCount => Coefficients.GetLength(0);
+        public int FeatureCount => Coefficients.GetLength(1) - 1;
+
+        /// <summary>행별 클래스 확률 [n, ClassCount]. 학습에 없는 클래스는 0.</summary>
+        public double[,] PredictProbabilities(double[,] x, CancellationToken cancellation = default)
+        {
+            int n = x.GetLength(0), p = x.GetLength(1), k = ClassCount;
+            if (p != FeatureCount) throw new ArgumentException("Feature count must match the fitted model.", nameof(x));
+            var prob = new double[n, k];
+            var z = new double[k];
+            for (int i = 0; i < n; i++)
+            {
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                double max = double.NegativeInfinity;
+                for (int c = 0; c < k; c++)
+                {
+                    if (!ClassPresent[c]) { z[c] = double.NegativeInfinity; continue; }
+                    double s = Coefficients[c, 0];
+                    for (int j = 0; j < p; j++) s += Coefficients[c, j + 1] * x[i, j];
+                    z[c] = s;
+                    if (s > max) max = s;
+                }
+                double sum = 0;
+                for (int c = 0; c < k; c++)
+                {
+                    double e = ClassPresent[c] ? Math.Exp(z[c] - max) : 0;
+                    z[c] = e;
+                    sum += e;
+                }
+                for (int c = 0; c < k; c++) prob[i, c] = z[c] / sum;
+            }
+            return prob;
+        }
+
+        /// <summary>확률 최대 클래스. 동점은 작은 클래스 번호.</summary>
+        public int[] PredictClasses(double[,] x, CancellationToken cancellation = default)
+        {
+            var prob = PredictProbabilities(x, cancellation);
+            int n = prob.GetLength(0), k = prob.GetLength(1);
+            var cls = new int[n];
+            for (int i = 0; i < n; i++)
+            {
+                int best = 0;
+                for (int c = 1; c < k; c++)
+                    if (prob[i, c] > prob[i, best]) best = c;
+                cls[i] = best;
+            }
+            return cls;
+        }
+    }
+
+    public static class MultinomialLogistic
+    {
+        public const int MaxIterations = 500;
+        const int ChunkRows = 1024;
+
+        public static MultinomialLogisticModel Fit(double[,] x, int[] y, int classCount, double c = 1.0, CancellationToken cancellation = default)
+        {
+            int n = x.GetLength(0), p = x.GetLength(1);
+            if (p < 1) throw new DesignMatrixException("Select at least one feature column.");
+            if (n < 2) throw new DesignMatrixException("Need at least 2 complete rows.");
+            if (y.Length != n) throw new ArgumentException("Label length must match rows.", nameof(y));
+            if (classCount < 2) throw new DesignMatrixException("The target has only one class in the complete rows.");
+            if (!(c > 0) || double.IsInfinity(c)) throw new DesignMatrixException("C must be positive and finite.");
+            var counts = new int[classCount];
+            for (int i = 0; i < n; i++)
+            {
+                if ((uint)y[i] >= (uint)classCount) throw new DesignMatrixException("A class index is outside 0..K-1.");
+                counts[y[i]]++;
+            }
+            var present = new bool[classCount];
+            var compact = new int[classCount];
+            int k = 0;
+            for (int cl = 0; cl < classCount; cl++)
+            {
+                present[cl] = counts[cl] > 0;
+                compact[cl] = present[cl] ? k++ : -1;
+            }
+            if (k < 2) throw new DesignMatrixException("The target has only one class in the complete rows.");
+            var yc = new int[n];
+            for (int i = 0; i < n; i++) yc[i] = compact[y[i]];
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < p; j++)
+                    if (!double.IsFinite(x[i, j])) throw new DesignMatrixException("Features must be finite.");
+
+            int stride = p + 1;
+            int dim = k * stride;
+            double lambda = 1.0 / (c * n);
+            var start = new double[dim];
+            alglib.minlbfgscreate(dim, Math.Min(10, dim), start, out var state);
+            alglib.minlbfgssetcond(state, 1e-9, 0, 0, MaxIterations);
+            int iterations = 0;
+            while (alglib.minlbfgsiteration(state))
+            {
+                var inner = state.innerobj;
+                if (inner.needfg || inner.needf)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    var g = inner.needfg ? inner.g : new double[dim];
+                    inner.f = Objective(x, yc, n, p, k, lambda, inner.x, g, cancellation);
+                    iterations++;
+                }
+            }
+            alglib.minlbfgsresults(state, out var sol, out var rep);
+            if (rep.terminationtype < 0 || !sol.All(double.IsFinite))
+                throw new DesignMatrixException("Multinomial logistic regression diverged.");
+            var coef = new double[classCount, stride];
+            for (int cl = 0; cl < classCount; cl++)
+            {
+                if (!present[cl]) continue;
+                for (int j = 0; j < stride; j++) coef[cl, j] = sol[compact[cl] * stride + j];
+            }
+            return new MultinomialLogisticModel
+            {
+                Coefficients = coef,
+                ClassPresent = present,
+                C = c,
+                Converged = rep.terminationtype != 5,
+                Iterations = rep.iterationscount,
+                RowsFit = n,
+            };
+        }
+
+        static double Objective(double[,] x, int[] y, int n, int p, int k, double lambda, double[] theta, double[] grad, CancellationToken ct)
+        {
+            int stride = p + 1, dim = k * stride;
+            int chunks = (n + ChunkRows - 1) / ChunkRows;
+            var lossParts = new double[chunks];
+            var gradParts = new double[chunks][];
+            void Run(int ch)
+            {
+                int lo = ch * ChunkRows, hi = Math.Min(n, lo + ChunkRows);
+                var g = new double[dim];
+                var z = new double[k];
+                double loss = 0;
+                for (int i = lo; i < hi; i++)
+                {
+                    double max = double.NegativeInfinity;
+                    for (int c = 0; c < k; c++)
+                    {
+                        int o = c * stride;
+                        double s = theta[o];
+                        for (int j = 0; j < p; j++) s += theta[o + 1 + j] * x[i, j];
+                        z[c] = s;
+                        if (s > max) max = s;
+                    }
+                    double sum = 0;
+                    for (int c = 0; c < k; c++) sum += Math.Exp(z[c] - max);
+                    double lse = max + Math.Log(sum);
+                    loss += lse - z[y[i]];
+                    for (int c = 0; c < k; c++)
+                    {
+                        double r = Math.Exp(z[c] - lse) - (c == y[i] ? 1 : 0);
+                        int o = c * stride;
+                        g[o] += r;
+                        for (int j = 0; j < p; j++) g[o + 1 + j] += r * x[i, j];
+                    }
+                }
+                lossParts[ch] = loss;
+                gradParts[ch] = g;
+            }
+            if (chunks >= 4)
+                Parallel.For(0, chunks, new ParallelOptions { CancellationToken = ct }, Run);
+            else
+                for (int ch = 0; ch < chunks; ch++) Run(ch);
+            double total = 0;
+            Array.Clear(grad, 0, dim);
+            for (int ch = 0; ch < chunks; ch++)
+            {
+                total += lossParts[ch];
+                var g = gradParts[ch];
+                for (int d = 0; d < dim; d++) grad[d] += g[d];
+            }
+            double f = total / n;
+            for (int d = 0; d < dim; d++) grad[d] /= n;
+            for (int c = 0; c < k; c++)
+                for (int j = 1; j < stride; j++)
+                {
+                    double w = theta[c * stride + j];
+                    f += 0.5 * lambda * w * w;
+                    grad[c * stride + j] += lambda * w;
+                }
+            return f;
+        }
+    }
+
 
 
     public sealed class AutoMlReport
@@ -126,6 +334,13 @@ namespace NanumCsvViewer.Stats
         public required double TimeBudgetSeconds { get; init; }
         public required int SearchRowBudget { get; init; }
         public required double ElapsedSeconds { get; init; }
+        /// <summary>실제로 탐색한 후보 이름(계획된 격자, 실행 순서). 시간 예산으로 건너뛴 것도 포함한다.</summary>
+        public required IReadOnlyList<string> Grid { get; init; }
+        public required AutoMlSvmMode SvmMode { get; init; }
+        /// <summary>SVM 한 번의 적합에 쓰는 학습 행 상한(시드 고정 층화 표본). 상한이 없으면 null.</summary>
+        public int? SvmFitRowCap { get; init; }
+        /// <summary>다항 로지스틱 승자가 L-BFGS 반복 상한 전에 기울기 허용오차에 닿았는지. 해당 없으면 null.</summary>
+        public bool? BestConverged { get; init; }
     }
 
     /// <summary>
@@ -135,6 +350,11 @@ namespace NanumCsvViewer.Stats
     public static class AutoMl
     {
         public const int SvmSearchRowCap = 800;
+        public const int SvmExactMaxFeatures = 40;
+        /// <summary>DCD SVM: 한 번의 적합에서 에폭당 곱셈-덧셈 수(행 × 특성 × 클래스)의 상한. 넘으면 행을 시드 고정 층화 표본으로 줄인다.</summary>
+        public const long SvmDcdWorkPerEpoch = 10_000_000;
+        public const int SvmDcdMaxRows = 100_000;
+        public const int SvmDcdMinRows = 200;
         public const int DefaultSearchRows = 2_000;
         public const int DefaultRefitCap = 40_000;
 
@@ -181,10 +401,9 @@ namespace NanumCsvViewer.Stats
             var searchX = AdaBoost.TakeRows(x, search);
             int[]? searchY = regression ? null : LabelsOf(labels!, search);
             double[]? searchReg = regression ? ValuesOf(y!, search) : null;
-            var specs = Specs(regression, classCount, search.Length, x.GetLength(1));
             var skipped = new List<AutoMlSkip>();
+            var specs = Specs(regression, classCount, search.Length, x.GetLength(1), skipped, opt.SvmWorkPerEpoch);
             if (!regression && classCount != 2) skipped.Add(AutoMlSkip.LogisticNeedsBinary);
-            if (!regression && search.Length > SvmSearchRowCap) skipped.Add(AutoMlSkip.SvmTooLarge);
 
             var clock = Stopwatch.StartNew();
             var successes = new List<AutoMlTrial>();
@@ -216,7 +435,8 @@ namespace NanumCsvViewer.Stats
                         var split = folds[f];
                         if (split.Train.Length == 0 || split.Test.Length == 0)
                             throw new DesignMatrixException("A cross-validation fold is empty. Use fewer folds or more rows.");
-                        var fitted = spec.Fit(searchX, searchY, searchReg, split.Train, classCount, opt.Seed, cancellation);
+                        var foldRows = regression ? split.Train : CapRows(split.Train, searchY!, spec.FitRowCap, opt.Seed);
+                        var fitted = spec.Fit(searchX, searchY, searchReg, foldRows, classCount, opt.Seed, cancellation);
                         if (regression)
                         {
                             var actual = TakeDouble(searchReg!, split.Test);
@@ -278,12 +498,13 @@ namespace NanumCsvViewer.Stats
             bestSpec = specs.First(s => s.Name == successes[0].Name);
             bool evalSampled = false;
             int[] evalRows = train;
-            if (!bestSpec.UnboundedRefit && train.Length > opt.RefitRowCap)
+            int fitCap = EffectiveCap(bestSpec, opt.RefitRowCap);
+            if (train.Length > fitCap)
             {
                 evalSampled = true;
                 evalRows = regression
-                    ? Map(train, RowSample.Random(train.Length, opt.RefitRowCap, opt.Seed, out _))
-                    : Map(train, RowSample.Stratified(LabelsOf(labels!, train), opt.RefitRowCap, opt.Seed, out _));
+                    ? Map(train, RowSample.Random(train.Length, fitCap, opt.Seed, out _))
+                    : Map(train, RowSample.Stratified(LabelsOf(labels!, train), fitCap, opt.Seed, out _));
             }
             var evalFit = bestSpec.Fit(x, labels, y, evalRows, classCount, opt.Seed, cancellation);
             double testScore;
@@ -322,12 +543,12 @@ namespace NanumCsvViewer.Stats
 
             bool bundleSampled = false;
             int[] bundleRows = DecisionTree.Identity(n);
-            if (!bestSpec.UnboundedRefit && n > opt.RefitRowCap)
+            if (n > fitCap)
             {
                 bundleSampled = true;
                 bundleRows = regression
-                    ? RowSample.Random(n, opt.RefitRowCap, opt.Seed, out _)
-                    : RowSample.Stratified(labels!, opt.RefitRowCap, opt.Seed, out _);
+                    ? RowSample.Random(n, fitCap, opt.Seed, out _)
+                    : RowSample.Stratified(labels!, fitCap, opt.Seed, out _);
             }
             var bundle = bestSpec.Fit(x, labels, y, bundleRows, classCount, opt.Seed, cancellation);
             clock.Stop();
@@ -366,6 +587,11 @@ namespace NanumCsvViewer.Stats
                 TestFraction = opt.TestFraction,
                 TimeBudgetSeconds = opt.TimeBudgetSeconds,
                 SearchRowBudget = opt.SearchRowBudget,
+                Grid = specs.Select(s => s.Name).ToArray(),
+                SvmMode = specs.Any(s => s.Name == "SVM-linear") ? AutoMlSvmMode.ExactSmo
+                    : specs.Any(s => s.Name == "SVM-linear-dcd") ? AutoMlSvmMode.LinearDcd : AutoMlSvmMode.None,
+                SvmFitRowCap = specs.FirstOrDefault(s => s.Name == "SVM-linear-dcd")?.FitRowCap,
+                BestConverged = evalFit.Converged is null && bundle.Converged is null ? null : evalFit.Converged != false && bundle.Converged != false,
                 ElapsedSeconds = clock.Elapsed.TotalSeconds,
             };
         }
@@ -376,18 +602,21 @@ namespace NanumCsvViewer.Stats
             public required string ModelType { get; init; }
             public bool Scale { get; init; }
             public bool UnboundedRefit { get; init; }
+            /// <summary>한 번의 적합에 쓰는 행 상한(교차검증 겹·시험 지표 모형·저장 모형 공통). 넘으면 시드 고정 층화 표본.</summary>
+            public int FitRowCap { get; init; } = int.MaxValue;
             public required Func<double[,], int[]?, double[]?, int[], int, int, CancellationToken, Fitted> Fit { get; init; }
         }
 
         sealed class Fitted
         {
             public required object Engine { get; init; }
+            public bool? Converged { get; init; }
             public FeatureScaler? Scaler { get; init; }
             public required Func<double[,], CancellationToken, int[]> PredictClass { get; init; }
             public required Func<double[,], CancellationToken, double[]> PredictValue { get; init; }
         }
 
-        static List<Spec> Specs(bool regression, int classCount, int searchRows, int features)
+        static List<Spec> Specs(bool regression, int classCount, int searchRows, int features, List<AutoMlSkip> skipped, long svmWork)
         {
             var list = new List<Spec>();
             if (regression)
@@ -401,7 +630,13 @@ namespace NanumCsvViewer.Stats
                 list.Add(Boosted(regression: true, loss: AdaBoostLoss.Square, rate: 0.8));
                 return list;
             }
-            if (classCount == 2) list.Add(Linear(logistic: true));
+            if (classCount == 2)
+                list.Add(Linear(logistic: true));
+            else
+            {
+                list.Add(Multinomial(1.0));
+                list.Add(Multinomial(0.1));
+            }
             list.Add(Bayes());
             list.Add(Lda());
             list.Add(Knn(3));
@@ -412,8 +647,23 @@ namespace NanumCsvViewer.Stats
             list.Add(Boost(false));
             list.Add(Boosted(false, AdaBoostLoss.Linear, 1));
             list.Add(Boosted(false, AdaBoostLoss.Linear, 0.5));
-            if (searchRows <= SvmSearchRowCap && features <= 40) list.Add(Svm());
+            var (svmMode, svmCap) = PlanSvm(searchRows, features, classCount, svmWork);
+            if (svmMode == AutoMlSvmMode.ExactSmo) list.Add(Svm());
+            else if (svmMode == AutoMlSvmMode.LinearDcd) list.Add(SvmDcd(svmCap));
+            else skipped.Add(AutoMlSkip.SvmTooLarge);
             return list;
+        }
+
+        /// <summary>
+        /// SVM 후보 결정. 탐색 표본이 작으면 정확한 SMO. 아니면 DCD이고 한 번의 적합 행 상한은
+        /// min(100,000, 10,000,000 / (특성 × 클래스)). 200행도 못 넣으면 None(생략).
+        /// </summary>
+        internal static (AutoMlSvmMode Mode, int RowCap) PlanSvm(int searchRows, int features, int classCount, long work = SvmDcdWorkPerEpoch)
+        {
+            if (searchRows <= SvmSearchRowCap && features <= SvmExactMaxFeatures) return (AutoMlSvmMode.ExactSmo, int.MaxValue);
+            long perRow = Math.Max(1L, (long)features * classCount);
+            int cap = (int)Math.Min(SvmDcdMaxRows, work / perRow);
+            return cap < SvmDcdMinRows ? (AutoMlSvmMode.None, 0) : (AutoMlSvmMode.LinearDcd, cap);
         }
 
         static Spec Linear(bool logistic) => new()
@@ -642,6 +892,66 @@ namespace NanumCsvViewer.Stats
                 return Predictor(model, scaler, (z, token) => model.Predict(scaler.Transform(z), token), null);
             },
         };
+
+        /// <summary>선형 SVM, 쌍대 좌표 강하(one-vs-rest, 정규화된 절편). 한 번의 적합은 rowCap 행까지, 넘으면 시드 고정 층화 표본.</summary>
+        static Spec SvmDcd(int rowCap) => new()
+        {
+            Name = "SVM-linear-dcd",
+            ModelType = ModelTypes.Svm,
+            Scale = true,
+            FitRowCap = rowCap,
+            Fit = (x, labels, _, rows, classCount, seed, ct) =>
+            {
+                var raw = AdaBoost.TakeRows(x, rows);
+                var scaler = FeatureScaler.Fit(raw, ScalingMethod.ZScore);
+                var sx = scaler.Transform(raw);
+                var opt = new SvmOptions
+                {
+                    Kernel = SvmKernel.Linear,
+                    C = 1,
+                    Seed = seed,
+                    MaxIterations = 200,
+                    LinearEpochs = 12,
+                    // 훈련 행이 이 값을 넘으면 SVM이 커널 행렬 없는 DCD 경로를 쓴다. 항상 넘도록 n-1.
+                    MaxTrainingRows = Math.Max(sx.GetLength(0) - 1, 2),
+                };
+                var model = SupportVectorMachine.Fit(sx, TakeInt(labels!, rows), classCount, opt, ct);
+                return Predictor(model, scaler, (z, token) => model.Predict(scaler.Transform(z), token), null);
+            },
+        };
+
+        /// <summary>L2 규제 다항 로지스틱(C는 sklearn과 같은 역규제 강도). 행 수 상한은 재적합 상한을 따른다.</summary>
+        static Spec Multinomial(double c) => new()
+        {
+            Name = "Multinomial-C" + c.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture),
+            ModelType = MultinomialLogisticModel.ModelTypeName,
+            Scale = true,
+            Fit = (x, labels, _, rows, classCount, _, ct) =>
+            {
+                var raw = AdaBoost.TakeRows(x, rows);
+                var scaler = FeatureScaler.Fit(raw, ScalingMethod.ZScore);
+                var sx = scaler.Transform(raw);
+                var model = MultinomialLogistic.Fit(sx, TakeInt(labels!, rows), classCount, c, ct);
+                return new Fitted
+                {
+                    Engine = model,
+                    Scaler = scaler,
+                    Converged = model.Converged,
+                    PredictClass = (z, token) => model.PredictClasses(scaler.Transform(z), token),
+                    PredictValue = (_, _) => throw new InvalidOperationException("This configuration is not a regressor."),
+                };
+            },
+        };
+
+        static int EffectiveCap(Spec spec, int refitCap)
+            => Math.Min(spec.UnboundedRefit ? int.MaxValue : refitCap, spec.FitRowCap);
+
+        /// <summary>rows가 cap을 넘으면 시드 고정 층화 표본(원 행 번호, 오름차순). labels는 rows와 같은 좌표계(탐색 행렬 안의 위치).</summary>
+        internal static int[] CapRows(int[] rows, int[] labels, int cap, int seed)
+        {
+            if (rows.Length <= cap) return rows;
+            return Map(rows, RowSample.Stratified(LabelsOf(labels, rows), cap, seed, out _));
+        }
 
         static Fitted Predictor(object engine, FeatureScaler? scaler, Func<double[,], CancellationToken, int[]>? cls, Func<double[,], CancellationToken, double[]>? val)
             => new()

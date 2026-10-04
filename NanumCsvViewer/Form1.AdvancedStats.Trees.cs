@@ -139,6 +139,12 @@ namespace NanumCsvViewer
             var pct = dlg.AddNumeric(LT("Test % (holdout)", "시험 비율 %(홀드아웃)"), 5, 50, 30);
             var folds = dlg.AddNumeric(LT("Folds (k-fold)", "겹 수(k-겹)"), 2, 10, 5);
             var seed = dlg.AddNumeric(LT("Seed", "시드"), 1, 1_000_000_000, 1);
+            NumericUpDown? capBox = null, binsBox = null;
+            if (forest)
+            {
+                capBox = dlg.AddNumeric(LT("Training row cap (fixed-seed sample above)", "학습 행 상한 (넘으면 시드 고정 표본)"), 1_000, 5_000_000, RandomForest.DefaultMaxTrainingRows);
+                binsBox = dlg.AddNumeric(LT("Quantile bins (binned splits)", "분위 구간 수 (구간 분할)"), 2, 256, 64);
+            }
             dlg.AddNote(forest
                 ? LT($"A numeric target is regression (MSE); any other target is classification. Importances are mean impurity decrease (MDI), not permutation. Out-of-bag error is on the training sample. Above {RandomForest.DefaultMaxTrainingRows:N0} rows the forest uses a fixed-seed sample. Auto splits bin above {RandomForest.AutoBinRowThreshold:N0} training rows.",
                      $"수치 목표는 회귀(MSE), 그 외는 분류입니다. 중요도는 불순도 감소 평균(MDI)이며 순열 중요도가 아닙니다. OOB는 학습 표본 기준입니다. {RandomForest.DefaultMaxTrainingRows:N0}행을 넘으면 시드 고정 표본만 학습합니다. 자동 분할은 학습 행 {RandomForest.AutoBinRowThreshold:N0}을 넘으면 구간 근사입니다.")
@@ -201,7 +207,8 @@ namespace NanumCsvViewer
                     Seed = (int)seed.Value,
                     SplitMode = mode,
                     Criterion = regression ? TreeCriterion.Mse : crit,
-                    Bins = 64,
+                    Bins = (int)binsBox!.Value,
+                    MaxTrainingRows = (int)capBox!.Value,
                 };
             }
             return true;
@@ -249,6 +256,8 @@ namespace NanumCsvViewer
             var pct = dlg.AddNumeric(LT("Test % (holdout)", "시험 비율 %(홀드아웃)"), 5, 50, 30);
             var folds = dlg.AddNumeric(LT("Folds (k-fold)", "겹 수(k-겹)"), 2, 10, 5);
             var seed = dlg.AddNumeric(LT("Seed", "시드"), 1, 1_000_000_000, 1);
+            var trainCap = dlg.AddNumeric(LT("Training row cap (kernel SMO; time grows ~n²)", "학습 행 상한 (커널 SMO, 시간은 약 n²로 증가)"), 1_000, 200_000, SupportVectorMachine.DefaultMaxTrainingRows);
+            var evalCap = dlg.AddNumeric(LT("Evaluation row cap", "평가 행 상한"), 1_000, 5_000_000, SupportVectorMachine.DefaultMaxEvaluationRows);
             dlg.AddNote(LT(
                 $"Classification only. Scaling is fit on training rows only. Gamma 'scale' uses the population variance of the rows actually fit. Kernel SMO (libsvm WSS, no shrinking) trains on at most {SupportVectorMachine.DefaultMaxTrainingRows:N0} rows (fixed-seed stratified sample). Metrics score at most {SupportVectorMachine.DefaultMaxEvaluationRows:N0} test rows the same way; both sizes are reported. Linear above the training cap uses dual coordinate descent on all rows; that intercept is regularized and is not sklearn SVC.",
                 $"분류만 지원합니다. 스케일링은 학습 행으로만 적합합니다. gamma 'scale'은 실제 학습 행의 모분산입니다. 커널 SMO(libsvm WSS, shrinking 없음)는 최대 {SupportVectorMachine.DefaultMaxTrainingRows:N0}행(시드 고정 층화 표본)만 학습합니다. 지표는 같은 방식으로 시험 행 최대 {SupportVectorMachine.DefaultMaxEvaluationRows:N0}개만 점수화하며, 두 크기를 모두 적습니다. 선형이 학습 상한을 넘으면 전 행에 쌍대 좌표 강하를 쓰며, 절편은 정규화되어 sklearn SVC와 다릅니다."));
@@ -291,6 +300,8 @@ namespace NanumCsvViewer
                 GammaMode = gMode,
                 Gamma = gamma,
                 Seed = (int)seed.Value,
+                MaxTrainingRows = (int)trainCap.Value,
+                MaxEvaluationRows = (int)evalCap.Value,
             };
             eval = new ClassifierOptions
             {

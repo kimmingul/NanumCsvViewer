@@ -33,6 +33,13 @@ namespace NanumCsvViewer.Stats
         public int MaxLevelsPerFactor { get; init; } = 500;
         /// <summary>설계행렬 최대 열 수. XᵀX 누적(p²)과 역행렬 비용을 묶는다.</summary>
         public int MaxColumns { get; init; } = 1000;
+        /// <summary>GLM 선택 열(컬럼 이름). 지정하면 그 값이 없거나 수치가 아닌 행도 목록별 삭제한다.</summary>
+        public string? OffsetColumn { get; init; }
+        /// <summary>노출(exposure) 열. 오프셋에 ln(값)을 더한다(값은 양수여야 함).</summary>
+        public string? ExposureColumn { get; init; }
+        public string? VarianceWeightColumn { get; init; }
+        public string? FrequencyWeightColumn { get; init; }
+        public string? TrialsColumn { get; init; }
     }
 
     public sealed class DesignMatrix
@@ -55,6 +62,8 @@ namespace NanumCsvViewer.Stats
         /// <summary>결측·해석 불가로 제외한 행.</summary>
         public required long RowsDropped { get; init; }
         public required ModelFormula Formula { get; init; }
+        /// <summary>옵션으로 지정한 오프셋·가중치·시행 수 열(행 순서는 X와 같다). 지정이 없으면 null.</summary>
+        public GlmExtras? GlmExtras { get; init; }
 
         public int RowCount => Y.Length;
         public int ColumnCount => X.GetLength(1);
@@ -127,6 +136,15 @@ namespace NanumCsvViewer.Stats
             int responseCol = StatValue.ResolveColumn(headers, formula.Response);
             var predictorNames = formula.PredictorVariables;
             var predictorCols = predictorNames.Select(n => StatValue.ResolveColumn(headers, n)).ToArray();
+            int offsetCol = options.OffsetColumn is null ? -1 : StatValue.ResolveColumn(headers, options.OffsetColumn);
+            int exposureCol = options.ExposureColumn is null ? -1 : StatValue.ResolveColumn(headers, options.ExposureColumn);
+            int varWeightCol = options.VarianceWeightColumn is null ? -1 : StatValue.ResolveColumn(headers, options.VarianceWeightColumn);
+            int freqWeightCol = options.FrequencyWeightColumn is null ? -1 : StatValue.ResolveColumn(headers, options.FrequencyWeightColumn);
+            int trialsCol = options.TrialsColumn is null ? -1 : StatValue.ResolveColumn(headers, options.TrialsColumn);
+            var offsetList = offsetCol >= 0 || exposureCol >= 0 ? new List<double>() : null;
+            var varWeightList = varWeightCol >= 0 ? new List<double>() : null;
+            var freqWeightList = freqWeightCol >= 0 ? new List<double>() : null;
+            var trialsList = trialsCol >= 0 ? new List<double>() : null;
             var kinds = predictorNames.Select((n, k) =>
                 formula.ForcedCategorical.Contains(n) ? VariableKind.Categorical : kindOfColumn(predictorCols[k])).ToArray();
             RequireHierarchy(formula, predictorNames, kinds);
@@ -155,7 +173,20 @@ namespace NanumCsvViewer.Stats
                     dropped++;
                     continue;
                 }
+                if (!TryExtra(row, offsetCol, false, out double offRaw)
+                    || !TryExtra(row, exposureCol, true, out double expRaw)
+                    || !TryExtra(row, varWeightCol, false, out double varWeightValue)
+                    || !TryExtra(row, freqWeightCol, false, out double freqWeightValue)
+                    || !TryExtra(row, trialsCol, false, out double trialsValue))
+                {
+                    dropped++;
+                    continue;
+                }
                 if ((long)(viewRows.Count + 1) * bytesPerRow > budget) throw new AnalysisMemoryLimitException();
+                offsetList?.Add(offRaw + expRaw);
+                varWeightList?.Add(varWeightValue);
+                freqWeightList?.Add(freqWeightValue);
+                trialsList?.Add(trialsValue);
 
                 raw.Add(parsedNum, parsedCat);
                 if (binary && yCat is not null)
@@ -309,6 +340,15 @@ namespace NanumCsvViewer.Stats
                 RowsRead = rows.Count,
                 RowsDropped = dropped,
                 Formula = formula,
+                GlmExtras = offsetList is null && varWeightList is null && freqWeightList is null && trialsList is null
+                    ? null
+                    : new GlmExtras
+                    {
+                        Offset = offsetList?.ToArray(),
+                        VarianceWeights = varWeightList?.ToArray(),
+                        FrequencyWeights = freqWeightList?.ToArray(),
+                        Trials = trialsList?.ToArray(),
+                    },
             };
         }
 
@@ -337,6 +377,21 @@ namespace NanumCsvViewer.Stats
             for (int i = 0; i < names.Count; i++)
                 if (string.Equals(names[i], name, StringComparison.Ordinal)) return i;
             return -1;
+        }
+
+        // 선택 열 하나. 열이 없으면(col<0) 통과. 노출 열은 ln(값)을 돌려주며 양수여야 한다. 해석 불가·결측이면 행 삭제.
+        private static bool TryExtra(string[] row, int col, bool logOfValue, out double value)
+        {
+            value = 0;
+            if (col < 0) return true;
+            if (col >= row.Length || !StatValue.TryNumber(row[col], out double v)) return false;
+            if (logOfValue)
+            {
+                if (!(v > 0)) return false;
+                v = Math.Log(v);
+            }
+            value = v;
+            return true;
         }
 
         private static bool TryParseRow(string[] row, int responseCol, int[] predictorCols, VariableKind[] kinds,

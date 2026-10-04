@@ -78,6 +78,22 @@ namespace NanumCsvViewer.Stats
         IReadOnlyList<AdjustedMean> AdjustedMeans,
         IReadOnlyList<AdjustedMeanDifference> Pairwise);
 
+    /// <summary>한 요인의 보정 평균(다른 요인은 수준 동일 가중, 공변량은 평균)과 Bonferroni 쌍별 비교.</summary>
+    public sealed record AncovaFactorResult(
+        string Factor,
+        IReadOnlyList<AdjustedMean> AdjustedMeans,
+        IReadOnlyList<AdjustedMeanDifference> Pairwise,
+        NestedFTest Slopes);
+
+    /// <summary>다요인 ANCOVA(주효과만): 가법 적합, Type II, 요인별 보정 평균·쌍별 비교·기울기 동질성(요인×공변량).</summary>
+    public sealed record MultiAncovaResult(
+        LinearModelFit Additive,
+        IReadOnlyList<AnovaTerm> TypeII,
+        NestedFTest AllSlopes,
+        IReadOnlyList<string> Covariates,
+        IReadOnlyList<double> CovariateMeans,
+        IReadOnlyList<AncovaFactorResult> Factors);
+
     /// <summary>
     /// 일반선형모형(OLS) 적합. 계수·적합 통계·잔차 요약.
     /// R²는 절편이 있으면 중심화 TSS, 없으면 비중심 TSS(statsmodels 정의).
@@ -427,6 +443,117 @@ namespace NanumCsvViewer.Stats
                 means,
                 adjusted,
                 diffs);
+        }
+
+        /// <summary>
+        /// 다요인 ANCOVA. design은 y ~ 범주 요인 2개 이상 + 수치 공변량(주효과만, 절편 있음).
+        /// 요인 F의 보정 평균 = 절편 + F 수준 효과 + 다른 요인 효과의 수준 동일 가중 평균(R emmeans·SAS LSMEANS 기본)
+        /// + 공변량 평균. 기울기 동질성은 요인 F×공변량 열을 더한 모형과 내포 F(요인별, 그리고 전체).
+        /// </summary>
+        public static MultiAncovaResult AncovaMulti(DesignMatrix additive, CancellationToken cancellation = default)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if (!additive.HasIntercept)
+                throw new DesignMatrixException("ANCOVA requires an intercept so adjusted means are estimable.");
+            if (additive.Terms.Any(t => t.Term.Order != 1))
+                throw new DesignMatrixException(
+                    "ANCOVA expects main effects only (one factor + covariates). Interactions are added internally for the slopes test.");
+            var factorTerms = new List<TermColumns>();
+            var covariates = new List<TermColumns>();
+            foreach (var t in additive.Terms)
+            {
+                string v = t.Term.Variables[0];
+                if (additive.Factors.ContainsKey(v)) factorTerms.Add(t);
+                else if (t.Count == 1) covariates.Add(t);
+                else throw new DesignMatrixException($"'{t.Term.Name}' is not a numeric covariate. ANCOVA covariates must be numeric.");
+            }
+            if (factorTerms.Count == 0)
+                throw new DesignMatrixException("ANCOVA needs at least one categorical factor with two or more levels in the complete rows.");
+            if (covariates.Count == 0)
+                throw new DesignMatrixException("ANCOVA requires at least one numeric covariate.");
+
+            var additiveFit = Fit(additive, cancellation);
+            var type2 = TypeII(additive, additiveFit, cancellation);
+            int n = additive.RowCount;
+
+            var means = new double[covariates.Count];
+            for (int k = 0; k < covariates.Count; k++) means[k] = ColumnMean(additive.X, covariates[k].Start, cancellation);
+
+            // 기울기: 요인별 + 전체
+            NestedFTest Slopes(IReadOnlyList<TermColumns> withFactors)
+            {
+                int extra = withFactors.Sum(f => f.Count) * covariates.Count;
+                var x = new double[n, additive.ColumnCount + extra];
+                for (int i = 0; i < n; i++)
+                {
+                    if ((i & 8191) == 0) cancellation.ThrowIfCancellationRequested();
+                    for (int j = 0; j < additive.ColumnCount; j++) x[i, j] = additive.X[i, j];
+                }
+                int col = additive.ColumnCount;
+                foreach (var f in withFactors)
+                    foreach (var cov in covariates)
+                        for (int d = 0; d < f.Count; d++, col++)
+                            for (int i = 0; i < n; i++)
+                            {
+                                if ((i & 16383) == 0) cancellation.ThrowIfCancellationRequested();
+                                x[i, col] = additive.X[i, f.Start + d] * additive.X[i, cov.Start];
+                            }
+                var ls = LeastSquares.Fit(x, additive.Y, cancellation: cancellation);
+                return NestedF(n, additiveFit.Rss, additiveFit.Rank, ls.WeightedRss, ls.Rank);
+            }
+
+            var results = new List<AncovaFactorResult>(factorTerms.Count);
+            foreach (var ft in factorTerms)
+            {
+                string name = ft.Term.Variables[0];
+                var levels = additive.Factors[name].Levels;
+                int m = levels.Count;
+                var counts = LevelCounts(additive, ft, m);
+                var contrasts = new double[m][];
+                var adjusted = new List<AdjustedMean>(m);
+                double crit = Dist.TQuantile(1 - (1 - Confidence) / 2, additiveFit.DfResidual);
+                for (int L = 0; L < m; L++)
+                {
+                    var c = new double[additive.ColumnCount];
+                    c[0] = 1;
+                    if (L > 0) c[ft.Start + L - 1] = 1;
+                    foreach (var other in factorTerms)
+                    {
+                        if (other.Equals(ft)) continue;
+                        int mo = additive.Factors[other.Term.Variables[0]].Levels.Count;
+                        for (int d = 0; d < other.Count; d++) c[other.Start + d] = 1.0 / mo;
+                    }
+                    for (int k = 0; k < covariates.Count; k++) c[covariates[k].Start] = means[k];
+                    contrasts[L] = c;
+                    if (!TryLinearCombination(additiveFit, c, out double est, out double se))
+                        adjusted.Add(new AdjustedMean(levels[L], counts[L], double.NaN, double.NaN, double.NaN, double.NaN));
+                    else
+                    {
+                        double lo = double.NaN, hi = double.NaN;
+                        if (!double.IsNaN(est) && !double.IsNaN(se) && !double.IsNaN(crit)) { lo = est - crit * se; hi = est + crit * se; }
+                        adjusted.Add(new AdjustedMean(levels[L], counts[L], est, se, lo, hi));
+                    }
+                }
+                int pairs = m * (m - 1) / 2;
+                var diffs = new List<AdjustedMeanDifference>(pairs);
+                for (int a = 0; a < m; a++)
+                    for (int b = a + 1; b < m; b++)
+                    {
+                        var c = new double[additive.ColumnCount];
+                        for (int j = 0; j < c.Length; j++) c[j] = contrasts[b][j] - contrasts[a][j];
+                        if (!TryLinearCombination(additiveFit, c, out double diff, out double se) || !(se > 0))
+                        {
+                            diffs.Add(new AdjustedMeanDifference(levels[a], levels[b], diff, se, double.NaN, double.NaN, double.NaN));
+                            continue;
+                        }
+                        double t = diff / se;
+                        double p = Dist.TTwoSided(t, additiveFit.DfResidual);
+                        diffs.Add(new AdjustedMeanDifference(levels[a], levels[b], diff, se, t, p, double.IsNaN(p) ? double.NaN : Math.Min(1, p * pairs)));
+                    }
+                results.Add(new AncovaFactorResult(name, adjusted, diffs, Slopes(new[] { ft })));
+            }
+
+            return new MultiAncovaResult(additiveFit, type2, Slopes(factorTerms), covariates.Select(t => t.Term.Name).ToArray(), means, results);
         }
 
         /// <summary>c′β 와 표준오차. 별칭 열에 0이 아닌 가중이면 추정 불가(false).</summary>

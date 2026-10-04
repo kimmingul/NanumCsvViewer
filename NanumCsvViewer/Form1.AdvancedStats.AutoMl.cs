@@ -182,12 +182,17 @@ namespace NanumCsvViewer
             var pct = dlg.AddNumeric(LT("Test % (held out)", "시험 비율 %(홀드아웃)"), 5, 50, 30);
             var seed = dlg.AddNumeric(LT("Seed", "시드"), 1, 1_000_000_000, 1);
             dlg.AddNote(LT(
-                "Search is a fixed small grid on a seeded sample of the training split only. The test split is not used to choose a model. A time budget of 0 fits the first configuration and does not start another. Linear and logistic are scaled on each fold's training rows. SVM is tried only when the search sample has at most "
+                "Search is a fixed small grid on a seeded sample of the training split only. The test split is not used to choose a model. A time budget of 0 fits the first configuration and does not start another. Linear, logistic, and multinomial logistic (3+ classes, L2, C = 1 and 0.1) are scaled on each fold's training rows. Linear SVM: exact SMO when the search sample has at most "
                 + AutoMl.SvmSearchRowCap.ToString("N0", CultureInfo.InvariantCulture)
-                + " rows. The saved model is refit on all used rows (including the holdout), or a seeded sample if that exceeds the refit cap — the note says which. Test metrics are from a separate fit on the training split.",
-                "탐색은 학습 분할의 시드 고정 표본에서만 도는 고정된 작은 격자입니다. 시험 분할은 모형 선택에 쓰지 않습니다. 시간 예산 0은 첫 설정만 적합하고 다음 설정은 시작하지 않습니다. 선형·로지스틱은 각 겹의 학습 행으로만 스케일합니다. SVM은 탐색 표본이 "
+                + " rows and " + AutoMl.SvmExactMaxFeatures + " features; otherwise a one-vs-rest dual coordinate-descent solver, with each fit limited to a seeded stratified sample so rows × features × classes stays within "
+                + AutoMl.SvmDcdWorkPerEpoch.ToString("N0", CultureInfo.InvariantCulture)
+                + " (skipped, and listed, if even "
+                + AutoMl.SvmDcdMinRows + " rows would not fit). The saved model is refit on all used rows (including the holdout), or a seeded sample if that exceeds the refit cap — the note says which. Test metrics are from a separate fit on the training split. A multinomial logistic winner cannot be saved yet.",
+                "탐색은 학습 분할의 시드 고정 표본에서만 도는 고정된 작은 격자입니다. 시험 분할은 모형 선택에 쓰지 않습니다. 시간 예산 0은 첫 설정만 적합하고 다음 설정은 시작하지 않습니다. 선형·로지스틱·다항 로지스틱(3클래스 이상, L2, C = 1과 0.1)은 각 겹의 학습 행으로만 스케일합니다. 선형 SVM: 탐색 표본이 "
                 + AutoMl.SvmSearchRowCap.ToString("N0", CultureInfo.InvariantCulture)
-                + "행 이하일 때만 시도합니다. 저장 모형은 사용 행 전체(홀드아웃 포함)로 다시 적합하거나, 재적합 상한을 넘으면 시드 고정 표본입니다 — 어느 쪽인지는 안내 문장이 적습니다. 시험 지표는 학습 분할만으로 다시 적합한 별도 모형입니다."));
+                + "행, 특성 " + AutoMl.SvmExactMaxFeatures + "개 이하면 정확한 SMO, 그보다 크면 one-vs-rest 쌍대 좌표 강하이며 행×특성×클래스가 "
+                + AutoMl.SvmDcdWorkPerEpoch.ToString("N0", CultureInfo.InvariantCulture)
+                + " 이내가 되도록 한 번의 적합을 시드 고정 층화 표본으로 제한합니다(" + AutoMl.SvmDcdMinRows + "행도 못 넣으면 생략하고 표시). 저장 모형은 사용 행 전체(홀드아웃 포함)로 다시 적합하거나, 재적합 상한을 넘으면 시드 고정 표본입니다 — 어느 쪽인지는 안내 문장이 적습니다. 시험 지표는 학습 분할만으로 다시 적합한 별도 모형입니다. 다항 로지스틱 승자는 아직 저장할 수 없습니다."));
             if (!dlg.ShowOk(this)) return false;
 
             features = CheckedIndexes(list);
@@ -261,8 +266,8 @@ namespace NanumCsvViewer
                     $"Saved model ({report.BestName}) refit on all {report.BundleRows:N0} used rows, including the holdout. Test metrics above are from a separate fit on the training split only.",
                     $"저장 모형({report.BestName})은 홀드아웃을 포함한 사용 {report.BundleRows:N0}행 전체에 다시 적합했습니다. 위 시험 지표는 학습 분할만으로 다시 적합한 별도 모형입니다.");
             return LT(
-                $"Saved model ({report.BestName}) refit on a seeded sample of {report.BundleRows:N0} used rows (refit cap), not every used row. Test metrics above are from a separate fit on the training split only.",
-                $"저장 모형({report.BestName})은 사용 행 전체가 아니라 재적합 상한의 시드 고정 표본 {report.BundleRows:N0}행에 다시 적합했습니다. 위 시험 지표는 학습 분할만으로 다시 적합한 별도 모형입니다.");
+                $"Saved model ({report.BestName}) refit on a seeded sample of {report.BundleRows:N0} used rows (refit cap or, for SVM, its per-fit row cap), not every used row. Test metrics above are from a separate fit on the training split only.",
+                $"저장 모형({report.BestName})은 사용 행 전체가 아니라 재적합 상한(SVM은 적합당 행 상한)의 시드 고정 표본 {report.BundleRows:N0}행에 다시 적합했습니다. 위 시험 지표는 학습 분할만으로 다시 적합한 별도 모형입니다.");
         }
 
         private string FormatAdaClassification(FeatureMatrix matrix, AdaBoostClassificationResult run, AdaBoostOptions options)
@@ -338,8 +343,16 @@ namespace NanumCsvViewer
             if (!report.Regression && matrix.ClassNames != null)
                 sb.AppendLine(LT($"Classes: {FeatureList(matrix.ClassNames)}", $"클래스: {FeatureList(matrix.ClassNames)}"));
             sb.AppendLine(LT(
-                "Search: fixed grid (linear/logistic, naive Bayes, LDA, KNN 3 and 5, trees depth 2 and 4, random forest 12×depth 4, gradient boosting 20 iterations, AdaBoost, linear SVM when the search sample is small enough). Not a claim that the winner is optimal outside this grid.",
-                "탐색: 고정 격자(선형/로지스틱, 나이브 베이즈, LDA, KNN 3·5, 트리 깊이 2·4, 랜덤 포레스트 12×깊이 4, 그래디언트 부스팅 20회, AdaBoost, 탐색 표본이 작을 때만 선형 SVM). 이 격자 밖에서 최적이라는 뜻은 아닙니다."));
+                $"Candidate grid actually searched ({report.Grid.Count}): {string.Join(", ", report.Grid)}. Hyperparameters are fixed: trees depth 2 and 4, random forest 12×depth 4, gradient boosting 20 iterations, AdaBoost 12 stumps, KNN 3 and 5, multinomial logistic L2 C = 1 and 0.1 (3+ classes). Not a claim that the winner is optimal outside this grid.",
+                $"실제로 탐색한 후보 격자({report.Grid.Count}개): {string.Join(", ", report.Grid)}. 하이퍼파라미터는 고정입니다: 트리 깊이 2·4, 랜덤 포레스트 12×깊이 4, 그래디언트 부스팅 20회, AdaBoost 스텀프 12개, KNN 3·5, 다항 로지스틱 L2 C = 1·0.1(3클래스 이상). 이 격자 밖에서 최적이라는 뜻은 아닙니다."));
+            if (report.SvmMode == AutoMlSvmMode.ExactSmo)
+                sb.AppendLine(LT(
+                    $"SVM-linear: exact libsvm SMO (C = 1, one-vs-one) on all {report.SearchRows.Length:N0} search rows.",
+                    $"SVM-linear: 탐색 {report.SearchRows.Length:N0}행 전체에 정확한 libsvm SMO(C = 1, one-vs-one)."));
+            else if (report.SvmMode == AutoMlSvmMode.LinearDcd)
+                sb.AppendLine(LT(
+                    $"SVM-linear-dcd: dual coordinate-descent linear SVM (C = 1, 12 epochs, one-vs-rest, regularised intercept — not the same decision function as the exact SMO). Each fit uses at most {report.SvmFitRowCap:N0} rows (seeded stratified sample, seed {report.Seed}); the search sample has {report.SearchRows.Length:N0} rows" + (report.SvmFitRowCap is { } cap && report.SearchRows.Length > cap ? ", so folds, the test-metric fit, and the saved fit are sampled for SVM only." : ", so no SVM sampling was needed on the search rows."),
+                    $"SVM-linear-dcd: 쌍대 좌표 강하 선형 SVM(C = 1, 12 에폭, one-vs-rest, 정규화된 절편 — 정확한 SMO와 결정함수가 같지 않음). 한 번의 적합은 최대 {report.SvmFitRowCap:N0}행(시드 고정 층화 표본, 시드 {report.Seed})을 쓰며 탐색 표본은 {report.SearchRows.Length:N0}행입니다" + (report.SvmFitRowCap is { } cap2 && report.SearchRows.Length > cap2 ? ". 그래서 SVM에 한해 겹·시험 지표 모형·저장 모형 적합이 표본입니다." : ". 탐색 행에서는 SVM 표본추출이 필요 없었습니다.")));
             sb.AppendLine(LT(
                 $"Outer split: {(report.Regression ? "random" : "stratified")} holdout, test fraction {report.TestFraction.ToString("0.00", CultureInfo.InvariantCulture)}, seed {report.Seed}. Train {report.TrainRows.Length:N0} · test {report.TestRows.Length:N0}. The test rows were not used in search or in cross-validation.",
                 $"바깥 분할: {(report.Regression ? "무작위" : "층화")} 홀드아웃, 시험 비율 {report.TestFraction.ToString("0.00", CultureInfo.InvariantCulture)}, 시드 {report.Seed}. 학습 {report.TrainRows.Length:N0} · 시험 {report.TestRows.Length:N0}. 시험 행은 탐색과 교차검증에 쓰지 않았습니다."));
@@ -366,9 +379,9 @@ namespace NanumCsvViewer
             {
                 sb.AppendLine(skip switch
                 {
-                    AutoMlSkip.LogisticNeedsBinary => LT("Skipped logistic: the target is not binary.", "로지스틱 생략: 목표가 이진이 아닙니다."),
-                    _ => LT($"Skipped linear SVM: the search sample has more than {AutoMl.SvmSearchRowCap:N0} rows.",
-                        $"선형 SVM 생략: 탐색 표본이 {AutoMl.SvmSearchRowCap:N0}행을 넘습니다."),
+                    AutoMlSkip.LogisticNeedsBinary => LT("Binary logistic skipped: the target is not binary (multinomial logistic is in the grid instead).", "이진 로지스틱 생략: 목표가 이진이 아닙니다(대신 다항 로지스틱이 격자에 있습니다)."),
+                    _ => LT($"Skipped linear SVM: rows × features × classes cannot fit the per-epoch work cap ({AutoMl.SvmDcdWorkPerEpoch:N0}) even with {AutoMl.SvmDcdMinRows} rows.",
+                        $"선형 SVM 생략: {AutoMl.SvmDcdMinRows}행으로도 행×특성×클래스가 에폭당 작업 상한({AutoMl.SvmDcdWorkPerEpoch:N0})을 넘습니다."),
                 });
             }
             sb.AppendLine();
@@ -377,6 +390,10 @@ namespace NanumCsvViewer
             sb.AppendLine(LT(
                 $"Held-out test {MetricName(report.Metric)} {StatFormat.G(report.TestScore)}. Baseline (training-split {(report.Regression ? "mean" : "majority class")}, scored on the test rows) {StatFormat.G(report.BaselineScore)}.",
                 $"홀드아웃 시험 {MetricName(report.Metric)} {StatFormat.G(report.TestScore)}. 기준선(학습 분할의 {(report.Regression ? "평균" : "최다 클래스")}을 시험 행에 적용) {StatFormat.G(report.BaselineScore)}."));
+            if (report.BestConverged == false)
+                sb.AppendLine(LT(
+                    $"Warning: the multinomial logistic fit stopped at the L-BFGS iteration cap ({MultinomialLogistic.MaxIterations}) before reaching the gradient tolerance.",
+                    $"경고: 다항 로지스틱 적합이 기울기 허용오차에 닿기 전에 L-BFGS 반복 상한({MultinomialLogistic.MaxIterations})에서 멈췄습니다."));
             if (report.EvaluationSampled)
                 sb.AppendLine(LT(
                     $"The test-metric model was fit on a seeded sample of {report.EvaluationRows.Length:N0} training rows, not the full training split.",
