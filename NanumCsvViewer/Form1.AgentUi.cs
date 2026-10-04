@@ -89,19 +89,29 @@ namespace NanumCsvViewer
                 return;
             }
             EnsureAgentPanel();
-            _agentSplit.Panel2Collapsed = false;
+            _placingAgentSplitter = true;
+            try { _agentSplit.Panel2Collapsed = false; }
+            finally { _placingAgentSplitter = false; }
             // 최소 크기는 분할이 실제 크기를 가진 뒤에만 지정할 수 있다(생성 시 지정하면 SplitterDistance 범위 오류).
+            // 저장 폭은 96 DPI 기준 논리 단위. 고해상도 화면에서도 같은 체감 폭이 되도록 장치 픽셀로 바꾼다.
             int total = _agentSplit.Width;
-            int width = Math.Clamp(_settings.AgentPanelWidth, 320, Math.Max(320, total - 300));
+            int min = LogicalToDeviceUnits(320);
+            int width = Math.Clamp(LogicalToDeviceUnits(_settings.AgentPanelWidth), min, Math.Max(min, total - LogicalToDeviceUnits(300)));
             int distance = total - width - _agentSplit.SplitterWidth;
             if (distance > _agentSplit.Panel1MinSize)
             {
-                _agentSplit.SplitterDistance = distance;
-                if (_agentSplit.Panel2MinSize < 320 && total - _agentSplit.SplitterDistance - _agentSplit.SplitterWidth >= 320)
-                    _agentSplit.Panel2MinSize = 320;
+                _placingAgentSplitter = true;
+                try { _agentSplit.SplitterDistance = distance; }
+                finally { _placingAgentSplitter = false; }
+                if (_agentSplit.Panel2MinSize < min && total - _agentSplit.SplitterDistance - _agentSplit.SplitterWidth >= min)
+                    _agentSplit.Panel2MinSize = min;
             }
             _agentPanel!.FocusInput();
         }
+
+        /// <summary>폼에 직접 붙은 본문(Fill) 컨트롤. 에이전트 분할이 있으면 그것, 없으면 outerSplit. 띠·패널의 z-순서 기준.</summary>
+        private Control MainContent => _agentSplit ?? (Control)outerSplit;
+        private bool _placingAgentSplitter;
 
         private void EnsureAgentPanel()
         {
@@ -110,8 +120,10 @@ namespace NanumCsvViewer
             _agentSplit!.Panel2.Controls.Add(_agentPanel);
             _agentSplit.SplitterMoved += (_, _) =>
             {
-                if (!AgentPanelVisible) return;
-                _settings.AgentPanelWidth = _agentSplit.Panel2.Width;
+                if (!AgentPanelVisible || _placingAgentSplitter) return;
+                int logical = (int)Math.Round(_agentSplit.Panel2.Width * 96.0 / DeviceDpi);
+                if (logical < 320) return; // 접힘·배치 중간값은 저장하지 않는다
+                _settings.AgentPanelWidth = logical;
                 _settings.Save();
             };
             _agentPanel.ApplyTheme(_theme == AppTheme.Dark, Font);

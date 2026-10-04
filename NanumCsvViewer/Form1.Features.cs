@@ -1146,7 +1146,7 @@ namespace NanumCsvViewer
                 };
                 Controls.Add(_chipsBar);
                 // outerSplit(=Fill) 바로 앞에 두어, 메뉴·툴바 아래·콘텐츠 위의 띠가 되게 한다.
-                Controls.SetChildIndex(_chipsBar, Controls.GetChildIndex(outerSplit) + 1);
+                Controls.SetChildIndex(_chipsBar, Controls.GetChildIndex(MainContent) + 1);
             }
 
             _chipsBar.SuspendLayout();
@@ -2519,7 +2519,7 @@ namespace NanumCsvViewer
             _qualityPanel.CloseRequested += () => SetQualityPanelVisible(false);
             // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
             Controls.Add(_qualityPanel);
-            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(outerSplit) + 1);
+            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(MainContent) + 1);
         }
 
         private void SetQualityPanelVisible(bool visible)
