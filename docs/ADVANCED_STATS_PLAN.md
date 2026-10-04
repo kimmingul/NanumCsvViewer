@@ -81,14 +81,14 @@
 | AutoML — 고정 후보 격자(선형·로지스틱, NB, LDA, KNN, 트리, 포레스트, 부스팅, AdaBoost, 작을 때 SVM), 학습 분할 안 층화 k-겹, 시간·행 예산, 리더보드, 시험 분할은 탐색에 미사용 | `Stats/AutoMl.cs` | 결정성·누수 없음(시험 행 변조 테스트)·예산 |
 | 모형 저장·불러오기·적용 — 버전 JSON(`nanum-model` v1), 저장 후 예측 비트 동일, 이름으로 컬럼 연결, 학습에 없던 수준은 "채점 불가"로 보고, 예측 CSV(원본 행번호) 내보내기, 목표가 있으면 지표 | `Stats/ModelStore.cs`, "저장된 모형 적용…", 결과창 "모형 저장…" | 모형별 왕복 테스트; 신뢰할 수 없는 파일의 크기·개수 검증(checked 산술, 할당 상한), 백그라운드 로드 |
 | ONNX 내보내기 — protobuf 직접 작성(IR 8, ai.onnx 13, ai.onnx.ml 3). 선형/GLM(항등), 로지스틱, 트리·포레스트·부스팅(TreeEnsemble), AdaBoost SAMME(출력 `scores` = 결정 점수), AutoML 선형 점수 모형. 입력은 사이드카 JSON 순서의 float 특성 벡터 | `Stats/OnnxExport.cs`, 결과창 "ONNX 내보내기…" | onnxruntime 1.20.1 출력 기록과 1e-5 일치 |
-| 보고서 내보내기 — 템플릿(제목·파일·시각·앱 버전·분석 범위) + 본문, 캡처한 표를 실제 표로. HTML(자체 완결), Excel(.xlsx, SpreadsheetML 직접 작성, 표마다 시트), PDF(v1.20.0부터 직접 작성 — 아래 §7, 인쇄 드라이버 불필요) | `Stats/ReportExport.cs`, `Stats/PdfWriter.cs`, `Stats/ReportPdf.cs`, `AdvancedResultForm.cs` | openpyxl로 열기 확인, PDF는 pypdf(strict)·PyMuPDF로 열기·텍스트 추출·렌더 확인 |
+| 보고서 내보내기 — 템플릿(제목·파일·시각·앱 버전·분석 범위) + 본문, 캡처한 표를 실제 표로. HTML(자체 완결), Excel(.xlsx, SpreadsheetML 직접 작성, 표마다 시트), PDF(직접 작성 — 아래 §7, 인쇄 드라이버 불필요) | `Stats/ReportExport.cs`, `Stats/PdfWriter.cs`, `Stats/ReportPdf.cs`, `AdvancedResultForm.cs` | openpyxl로 열기 확인, PDF는 pypdf(strict)·PyMuPDF로 열기·텍스트 추출·렌더 확인 |
 | 변수 매핑 추천(OMOP/CDISC) — 사용자가 불러온 명세 CSV(OHDSI field-level 또는 CDISC 변수 메타데이터)에 대해 이름·라벨(SPSS/SAS)·타입·값 패턴·테이블 맥락으로 설명 가능한 점수, 필수 필드 누락, 추천 CSV·적합성 프로파일 뼈대 내보내기. 내장 명세 없음 | `Stats/VariableMapping.cs` | 두 레이아웃 합성 픽스처 |
 
 SVM·KNN·NB·LDA는 ONNX로 내보내지 않는다(명확한 메시지). AdaBoost 회귀는 가중 중앙값이라 TreeEnsemble로 재현할 수 없어 거부한다. 예측 CSV는 SVM·AdaBoost 분류에 확률 열을 만들지 않는다(클래스만).
 
 리뷰 수정: 신뢰할 수 없는 모형 파일의 정수 오버플로 할당(보안), PDF 표 셀 줄바꿈 누락, AdaBoost 회귀 잎 최소 표본 무시. 앱 실행 확인: AutoML → 모형 저장 → HTML·Excel·PDF 보고서 → 저장된 모형 적용(예측 CSV) → AdaBoost → 변수 매핑.
 
-## 7. v1.20.0 변경
+## 7. 다음 버전 변경(미출시)
 
 - **AdaBoost 분할 탐색 O(n²) 수정** — 임계값마다 오른쪽 가중 도수를 다시 합산하던 것을 큰 노드(2,048행 초과)에서 역방향 누적합으로 바꿈. 200만 행 합성 데이터: 적합 239 s → 2.1 s, 평가 236 s → 2.2 s, 회귀 평가 3.6 s. 작은 노드는 기존 합산 순서를 유지해 sklearn 참조 테스트가 그대로 통과한다. 예측은 행 범위 병렬.
 - **엔진 오류 메시지 한국어화** — `Stats/ErrorText.cs`가 알려진 영어 엔진 메시지(약 150종, 인자 보존)를 한국어 화면에서 한국어로 변환한다. 모르는 메시지는 원문 그대로. 식 편집기·고급 통계 실행기·모형 저장/적용·변수 매핑에 연결. (Mapping 근거 문장과 일부 데이터 품질 메시지는 아직 영어.)
