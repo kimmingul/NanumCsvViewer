@@ -18,7 +18,8 @@ namespace NanumCsvViewer.Csv
         AddedRow[] Added,
         string[]? AppendedColumns = null,
         int AppendBase = -1,
-        int[]? DeletedColumns = null);
+        int[]? DeletedColumns = null,
+        int[]? ColumnOrder = null);
 
     /// <summary>
     /// 편집 덮개(overlay). 원본 파일은 절대 바꾸지 않고 다음을 보관한다:
@@ -30,6 +31,8 @@ namespace NanumCsvViewer.Csv
     ///  - 컬럼 삭제: "물리 컬럼"(원본 + 추가, 삭제해도 번호가 밀리지 않는 공간)에 삭제 표시만 한다. 읽기 경로(ParseDataRow/헤더)가 삭제된 칸을 걷어내므로
     ///    문서·그리드·필터·분석·내보내기·저장은 모두 "보이는 컬럼"(삭제 제외)만 본다. 이 클래스의 공개 셀·헤더 API는 보이는 컬럼 번호를 받아
     ///    내부에서 물리 번호로 바꿔 기록하므로, 뒤에 컬럼을 삭제·복원해도 이력의 되돌리기가 어긋나지 않는다(LIFO).
+    ///  - 컬럼 표시 순서: 물리 컬럼 전체(삭제된 것 포함)의 순열 _order(비어 있으면 물리 순서 그대로). 컬럼 이동·중간 삽입은 이 순열만 바꾸므로 셀·이름 변경·삭제 기록(물리 번호)은 그대로다.
+    ///    읽기 경로(ToDisplayOrder/ApplyHeader)가 삭제 제외 후 표시 순서로 행·헤더를 내놓고, 공개 API의 "보이는 컬럼 번호"는 표시 순서의 위치다.
     /// 모든 변경은 되돌리기/다시 실행 이력에 단계(step)로 쌓인다 — 한 번의 커밋·붙여넣기·삭제 = 한 단계.
     /// </summary>
     public sealed class CellEdits
@@ -50,6 +53,8 @@ namespace NanumCsvViewer.Csv
         private readonly List<string> _appended = new(); // 추가 컬럼 이름(_gate로 보호)
         private int _appendBase = -1;                     // 첫 추가 컬럼이 놓이는 인덱스 = 원본 컬럼 수
         private volatile int[] _delCols = Array.Empty<int>(); // 삭제된 물리 컬럼(오름차순, 복사-후-교체라 락 없이 읽는다)
+        private volatile int[] _order = Array.Empty<int>();   // 표시 순서(물리 번호의 순열, 길이 = 물리 너비). 비어 있으면 항등. 변경은 _gate 안에서.
+        private volatile ColumnMap? _colMap;                   // _order가 있을 때만: 보이는 위치 ↔ 물리 번호 대응표(_order·_delCols에서 파생)
 
         private readonly List<EditStep> _undo = new();
         private readonly List<EditStep> _redo = new();
@@ -67,7 +72,7 @@ namespace NanumCsvViewer.Csv
         public int HeaderEditCount => _headers.Count;
         public int DeletedCount { get { lock (_gate) return _deleted.Count; } }
         public int AddedCount { get { lock (_gate) return _added.Count; } }
-        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits && !HasAppendedColumns && !HasDeletedColumns;
+        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits && !HasAppendedColumns && !HasDeletedColumns && !HasColumnOrder;
 
         /// <summary>행 삭제/추가가 있는가(행 구조가 원본과 다른가).</summary>
         public bool HasStructureEdits { get { lock (_gate) return _deleted.Count > 0 || _added.Count > 0; } }
@@ -83,9 +88,21 @@ namespace NanumCsvViewer.Csv
         /// <summary>삭제된 물리 컬럼 번호(오름차순). 저널·테스트용.</summary>
         public int[] DeletedColumns() => (int[])_delCols.Clone();
 
-        /// <summary>보이는 컬럼 번호 → 물리 컬럼 번호(삭제된 칸을 건너뜀).</summary>
+        /// <summary>컬럼 표시 순서가 물리(원본 + 추가) 순서와 다른가.</summary>
+        public bool HasColumnOrder => _order.Length > 0;
+
+        /// <summary>표시 순서(물리 컬럼 번호의 순열, 삭제된 컬럼 포함). 순서를 바꾸지 않았으면 빈 배열. 저널·테스트용.</summary>
+        public int[] ColumnOrder() => (int[])_order.Clone();
+
+        /// <summary>보이는 컬럼 번호(표시 순서 위치, 삭제 제외) → 물리 컬럼 번호.</summary>
         public int ToPhysical(int visibleColumn)
         {
+            var m = _colMap;
+            if (m is not null)
+            {
+                if ((uint)visibleColumn < (uint)m.Map.Length) return m.Map[visibleColumn];
+                return visibleColumn + m.DeletedCount; // 헤더보다 긴 행의 남는 필드(물리 너비 뒤)는 순서를 바꾸지 않는다
+            }
             int p = visibleColumn;
             foreach (int d in _delCols) { if (d <= p) p++; else break; }
             return p;
@@ -94,6 +111,9 @@ namespace NanumCsvViewer.Csv
         /// <summary>물리 컬럼 번호 → 보이는 컬럼 번호. 삭제된 컬럼이면 -1.</summary>
         public int ToVisible(int physicalColumn)
         {
+            var m = _colMap;
+            if (m is not null)
+                return (uint)physicalColumn < (uint)m.Inv.Length ? m.Inv[physicalColumn] : physicalColumn - m.DeletedCount;
             int n = 0;
             foreach (int d in _delCols)
             {
@@ -109,6 +129,7 @@ namespace NanumCsvViewer.Csv
         /// <summary>보이는 컬럼들의 물리 번호(왼쪽부터). 그리드 컬럼 동기화용.</summary>
         public int[] VisiblePhysicalColumns(int rawColumnCount)
         {
+            if (_colMap is { } m) return (int[])m.Map.Clone();
             int width = PhysicalWidth(rawColumnCount);
             var del = _delCols;
             var result = new List<int>(Math.Max(0, width - del.Length));
@@ -122,9 +143,22 @@ namespace NanumCsvViewer.Csv
             return result.ToArray();
         }
 
-        /// <summary>물리 번호의 행에서 삭제된 컬럼 칸을 걷어낸다. 삭제가 없으면 입력 그대로.</summary>
-        public string[] DropDeletedColumns(string[] fields)
+        /// <summary>물리 번호 순서의 행에서 삭제된 컬럼 칸을 걷어내고 표시 순서로 맞춘다. 삭제·이동이 없으면 입력 그대로.</summary>
+        public string[] ToDisplayOrder(string[] fields)
         {
+            if (_colMap is { } m)
+            {
+                int width = m.Inv.Length;
+                int extra = Math.Max(0, fields.Length - width);
+                var ordered = new string[m.Map.Length + extra];
+                for (int i = 0; i < m.Map.Length; i++)
+                {
+                    int p = m.Map[i];
+                    ordered[i] = p < fields.Length ? fields[p] : string.Empty;
+                }
+                for (int e = 0; e < extra; e++) ordered[m.Map.Length + e] = fields[width + e];
+                return ordered;
+            }
             var del = _delCols;
             if (del.Length == 0) return fields;
             int inRange = 0;
@@ -189,14 +223,14 @@ namespace NanumCsvViewer.Csv
         /// <summary>편집된 행이면 복사본에 덮어쓴 새 배열(컬럼이 모자라면 확장), 아니면 원본 그대로. 삭제한 컬럼 칸은 걷어낸다(보이는 컬럼 기준 행).</summary>
         public string[] Apply(int dataRow, string[] fields)
         {
-            if (_rows.IsEmpty || !_rows.TryGetValue(dataRow, out var cols)) return DropDeletedColumns(fields);
+            if (_rows.IsEmpty || !_rows.TryGetValue(dataRow, out var cols)) return ToDisplayOrder(fields);
             int width = fields.Length;
             foreach (var kv in cols) if (kv.Key >= width) width = kv.Key + 1;
             var copy = new string[width];
             Array.Copy(fields, copy, fields.Length);
             for (int i = fields.Length; i < width; i++) copy[i] = string.Empty;
             foreach (var kv in cols) copy[kv.Key] = kv.Value;
-            return DropDeletedColumns(copy);
+            return ToDisplayOrder(copy);
         }
 
         // ------------------------------------------------------------ 헤더
@@ -217,17 +251,17 @@ namespace NanumCsvViewer.Csv
             Record(new HeaderChange(p, old, name));
         }
 
-        /// <summary>원본 헤더에 추가 컬럼 이름과 이름 변경을 반영하고 삭제한 컬럼을 뺀 새 배열(변경이 없으면 원본 그대로).</summary>
+        /// <summary>원본 헤더에 추가 컬럼 이름과 이름 변경을 반영하고 삭제한 컬럼을 빼 표시 순서로 맞춘 새 배열(변경이 없으면 원본 그대로).</summary>
         public string[] ApplyHeader(string[] raw)
         {
             string[] appended;
             lock (_gate) appended = _appended.ToArray();
-            if (_headers.IsEmpty && appended.Length == 0 && _delCols.Length == 0) return raw;
+            if (_headers.IsEmpty && appended.Length == 0 && _delCols.Length == 0 && _order.Length == 0) return raw;
             var copy = new string[raw.Length + appended.Length];
             Array.Copy(raw, copy, raw.Length);
             Array.Copy(appended, 0, copy, raw.Length, appended.Length);
             foreach (var kv in _headers) if (kv.Key >= 0 && kv.Key < copy.Length) copy[kv.Key] = kv.Value;
-            return DropDeletedColumns(copy);
+            return ToDisplayOrder(copy);
         }
 
         /// <summary>
@@ -270,7 +304,7 @@ namespace NanumCsvViewer.Csv
                 index = rawColumnCount + _appended.Count;
             }
             using (BeginStep(description)) Record(new ColumnChange(name, rawColumnCount, true));
-            return index - _delCols.Length; // 보이는 컬럼 번호(삭제된 컬럼은 모두 새 컬럼보다 앞)
+            return ToVisible(index); // 보이는 컬럼 번호(표시 순서에서 새 컬럼은 항상 맨 끝)
         }
 
         /// <summary>
@@ -295,6 +329,63 @@ namespace NanumCsvViewer.Csv
                 Record(new ColumnDeleteChange(p, true));
             }
             return p;
+        }
+
+        /// <summary>
+        /// 컬럼을 보이는 위치 visiblePosition(0..visibleColumnCount, 같으면 맨 끝)에 삽입한다. 컬럼 추가와 위치 이동이 한 단계라 되돌리기 한 번에 사라진다.
+        /// 바깥 단계(BeginStep) 안에서 Set으로 값을 채우면 같은 단계에 묶인다. 새 컬럼의 보이는 번호(= visiblePosition)를 돌려준다.
+        /// </summary>
+        public int InsertColumn(string name, int visiblePosition, int visibleColumnCount, int rawColumnCount, string? description = null)
+        {
+            if (visiblePosition < 0 || visiblePosition > visibleColumnCount) throw new ArgumentOutOfRangeException(nameof(visiblePosition));
+            using (BeginStep(description))
+            {
+                int index = AppendColumn(name, rawColumnCount);
+                if (visiblePosition != index) MoveColumnCore(index, visiblePosition, rawColumnCount);
+            }
+            return visiblePosition;
+        }
+
+        /// <summary>
+        /// 보이는 컬럼 from을 이동해 결과 위치가 to가 되게 한다(나머지는 밀린다). 한 단계. from == to면 아무것도 하지 않는다(단계도 만들지 않음).
+        /// 삭제된 컬럼은 이전 위치 관계를 유지한다.
+        /// </summary>
+        public void MoveColumn(int from, int to, int visibleColumnCount, int rawColumnCount, string? description = null)
+        {
+            if (from < 0 || from >= visibleColumnCount) throw new ArgumentOutOfRangeException(nameof(from));
+            if (to < 0 || to >= visibleColumnCount) throw new ArgumentOutOfRangeException(nameof(to));
+            if (from == to) return;
+            lock (_gate)
+            {
+                if (_appended.Count > 0 && _appendBase != rawColumnCount) throw new InvalidOperationException("Raw column count changed.");
+            }
+            using (BeginStep(description)) MoveColumnCore(from, to, rawColumnCount);
+        }
+
+        private void MoveColumnCore(int from, int to, int rawColumnCount)
+        {
+            int[] old = _order;
+            int width;
+            lock (_gate) width = rawColumnCount + _appended.Count;
+            int[] full = old.Length > 0 ? old : Enumerable.Range(0, width).ToArray();
+            var del = _delCols;
+            var visible = full.Where(p => Array.BinarySearch(del, p) < 0).ToList();
+            int moved = visible[from];
+            visible.RemoveAt(from);
+            var list = full.ToList();
+            list.Remove(moved);
+            int at = to < visible.Count ? list.IndexOf(visible[to]) : list.IndexOf(visible[^1]) + 1;
+            list.Insert(at, moved);
+            int[] next = list.ToArray();
+            if (IsIdentity(next)) next = Array.Empty<int>();
+            if (next.AsSpan().SequenceEqual(old)) return;
+            Record(new OrderChange(old, next));
+        }
+
+        private static bool IsIdentity(int[] order)
+        {
+            for (int i = 0; i < order.Length; i++) if (order[i] != i) return false;
+            return true;
         }
 
         // ------------------------------------------------------------ 행 구조
@@ -505,6 +596,7 @@ namespace NanumCsvViewer.Csv
                 lock (_gate) { deleted = _deleted.ToArray(); added = _added.ToArray(); }
                 foreach (int id in deleted) Record(new DeleteChange(id, true, false));
                 for (int i = added.Length - 1; i >= 0; i--) Record(new RowChange(added[i], false)); // 뒤에서부터 제거
+                if (_order.Length > 0) Record(new OrderChange(_order, Array.Empty<int>())); // 추가 컬럼을 지우기 전에 순서를 항등으로
                 foreach (int d in _delCols) Record(new ColumnDeleteChange(d, false)); // 추가 컬럼을 지우기 전에 삭제 표시를 푼다
                 string[] columns;
                 int appendBase;
@@ -532,7 +624,8 @@ namespace NanumCsvViewer.Csv
                 return new EditSnapshot(_baseRows, cells, headers, deleted,
                     _added.Select(a => new AddedRow(a.Anchor, (string[])a.Values.Clone())).ToArray(),
                     _appended.Count > 0 ? _appended.ToArray() : null, _appended.Count > 0 ? _appendBase : -1,
-                    _delCols.Length > 0 ? (int[])_delCols.Clone() : null);
+                    _delCols.Length > 0 ? (int[])_delCols.Clone() : null,
+                    _order.Length > 0 ? (int[])_order.Clone() : null);
             }
         }
 
@@ -573,6 +666,14 @@ namespace NanumCsvViewer.Csv
                 if (d < 0 || d >= columnCount + appendedCount) throw new InvalidDataException("Recovery data has an invalid deleted column.");
             if (delCols.Length >= columnCount + appendedCount && delCols.Length > 0)
                 throw new InvalidDataException("Recovery data deletes every column.");
+            int[] order = Array.Empty<int>();
+            if (s.ColumnOrder is { Length: > 0 } co)
+            {
+                int width = columnCount + appendedCount;
+                if (co.Length != width || co.Any(x => x < 0 || x >= width) || co.Distinct().Count() != width)
+                    throw new InvalidDataException("Recovery data has an invalid column order.");
+                if (!IsIdentity(co)) order = (int[])co.Clone();
+            }
 
             lock (_gate)
             {
@@ -583,7 +684,8 @@ namespace NanumCsvViewer.Csv
                 if (appendedCount > 0) { _appendBase = columnCount; _appended.AddRange(s.AppendedColumns!); }
             }
             _delCols = delCols;
-            if (delCols.Length > 0) HeaderVersion++;
+            lock (_gate) { _order = order; RebuildColumnMap(); }
+            if (delCols.Length > 0 || order.Length > 0) HeaderVersion++;
             foreach (var (row, col, value) in s.Cells) RawCell(row, col, value);
             foreach (var (col, name) in s.Headers) RawHeader(col, name);
             if (s.Headers.Length > 0 || appendedCount > 0) HeaderVersion++;
@@ -651,6 +753,14 @@ namespace NanumCsvViewer.Csv
             {
                 if (_appended.Count == 0) _appendBase = rawColumnCount;
                 _appended.Add(name);
+                if (_order.Length > 0) // 새 컬럼은 표시 순서의 맨 끝
+                {
+                    var o = new int[_order.Length + 1];
+                    Array.Copy(_order, o, _order.Length);
+                    o[^1] = _appendBase + _appended.Count - 1;
+                    _order = o;
+                    RebuildColumnMap();
+                }
             }
             HeaderVersion++;
         }
@@ -661,6 +771,12 @@ namespace NanumCsvViewer.Csv
             {
                 if (_appended.Count == 0) throw new InvalidOperationException("No appended column to remove.");
                 _appended.RemoveAt(_appended.Count - 1);
+                if (_order.Length > 0)
+                {
+                    int removed = _appendBase + _appended.Count;
+                    _order = _order.Where(p => p != removed).ToArray();
+                    RebuildColumnMap();
+                }
             }
             HeaderVersion++;
         }
@@ -673,9 +789,36 @@ namespace NanumCsvViewer.Csv
                 if (deleted) { if (!list.Contains(physical)) list.Add(physical); } else list.Remove(physical);
                 list.Sort();
                 _delCols = list.ToArray();
+                RebuildColumnMap();
             }
             HeaderVersion++;
         }
+
+        private void RawSetOrder(int[] order)
+        {
+            lock (_gate)
+            {
+                _order = order;
+                RebuildColumnMap();
+            }
+            HeaderVersion++;
+        }
+
+        // _gate 안에서 호출. 표시 순서와 삭제 목록에서 대응표를 다시 만든다.
+        private void RebuildColumnMap()
+        {
+            var order = _order;
+            if (order.Length == 0) { _colMap = null; return; }
+            var del = _delCols;
+            var visible = new List<int>(order.Length);
+            foreach (int p in order) if (Array.BinarySearch(del, p) < 0) visible.Add(p);
+            var inverse = new int[order.Length];
+            Array.Fill(inverse, -1);
+            for (int i = 0; i < visible.Count; i++) inverse[visible[i]] = i;
+            _colMap = new ColumnMap(visible.ToArray(), inverse, del.Length);
+        }
+
+        private sealed record ColumnMap(int[] Map, int[] Inv, int DeletedCount);
 
         private abstract class EditChange
         {
@@ -720,6 +863,11 @@ namespace NanumCsvViewer.Csv
         private sealed class ColumnDeleteChange(int physical, bool deleted) : EditChange
         {
             public override void Apply(CellEdits e, bool forward) => e.RawSetColumnDeleted(physical, forward ? deleted : !deleted);
+        }
+
+        private sealed class OrderChange(int[] old, int[] @new) : EditChange
+        {
+            public override void Apply(CellEdits e, bool forward) => e.RawSetOrder(forward ? @new : old);
         }
 
         private sealed record EditStep(string? Description, List<EditChange> Changes);

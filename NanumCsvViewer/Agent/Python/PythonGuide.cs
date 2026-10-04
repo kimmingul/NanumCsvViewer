@@ -62,8 +62,8 @@ namespace NanumCsvViewer.Agent.Python
                 LspStatus.Preparing => "- **Code diagnostics**: the Python language servers are still being set up (one-time) and may not report in this conversation.",
                 _ => "- **Code diagnostics**: not available in this conversation (Python tools could not be prepared); check your code carefully.",
             });
-            sb.AppendLine("- **Approval**: the first `eval` of a conversation asks the user; later `eval` calls in the same conversation run without asking. " +
-                          "Other tools (`bash`, `write`, ...) still ask each time.");
+            sb.AppendLine("- **Approval** depends on the user's approval mode (chat footer): always-ask = the first Python `eval` of a conversation asks, " +
+                          "file writes and `bash` ask each time; write = only the first Python `eval` asks; yolo = nothing asks. Never rely on a prompt as a safety net.");
             sb.AppendLine("- Keep each cell focused and its printed output short (about 60 lines at most); save big tables to files instead of printing them.");
             sb.AppendLine();
             sb.AppendLine("### Privacy rule for Python output");

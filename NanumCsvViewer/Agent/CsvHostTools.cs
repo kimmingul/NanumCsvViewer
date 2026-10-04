@@ -114,11 +114,13 @@ namespace NanumCsvViewer.Agent
                 ToolDefinitions.InsertRows => await InsertRowsAsync(args, approvals, ct),
                 ToolDefinitions.DeleteRows => await DeleteRowsAsync(args, approvals, ct),
                 ToolDefinitions.AddColumn => await AddColumnAsync(args, approvals, ct),
+                ToolDefinitions.MoveColumn => await MoveColumnAsync(args, approvals, ct),
                 ToolDefinitions.DeleteColumn => await DeleteColumnAsync(args, approvals, ct),
                 ToolDefinitions.FormatAdd => await FormatAddAsync(args, ct),
                 ToolDefinitions.FormatList => FormatList(),
                 ToolDefinitions.FormatRemove => FormatRemove(args),
                 ToolDefinitions.FormatClear => FormatClear(),
+                ToolDefinitions.FormatUndo => FormatUndo(),
                 ToolDefinitions.ExportView => await ExportViewAsync(args, ct),
                 ToolDefinitions.ShowMarkdown => ShowMarkdown(args),
                 ToolDefinitions.ShowImage => ShowImage(args),
@@ -224,6 +226,7 @@ namespace NanumCsvViewer.Agent
             ["added_rows"] = e.AddedRows,
             ["added_columns"] = e.AddedColumns,
             ["deleted_columns"] = e.DeletedColumns,
+            ["columns_reordered"] = e.ColumnsReordered,
             ["unsaved"] = e.Unsaved,
             ["can_undo"] = e.CanUndo,
             ["agent_can_undo"] = e.AgentCanUndo,
@@ -258,7 +261,7 @@ namespace NanumCsvViewer.Agent
                     bool ok = await approvals.ApproveAsync(
                         L("Share most frequent values with the AI", "AI에게 최빈값 공유"),
                         L($"Up to {topN} most frequent values for {cols.Count} column(s) of the current view", $"현재 뷰 {cols.Count}개 컬럼의 상위 {topN}개 빈도 값"),
-                        lines, ct);
+                        lines, ct, ApprovalKind.RowSharing);
                     if (!ok) throw new AgentToolException("The user declined to share the most frequent values. Retry without top_values for aggregates only.");
                 }
             }
@@ -316,7 +319,7 @@ namespace NanumCsvViewer.Agent
                     L("Share rows with the AI", "AI에게 행 데이터 공유"),
                     L($"{n:N0} row(s) × {cols.Count} column(s): view rows {from:N0}–{from + n - 1:N0} of {info.ViewRows:N0}",
                       $"{n:N0}행 × {cols.Count}개 컬럼: 현재 뷰 {from:N0}–{from + n - 1:N0}행 (전체 {info.ViewRows:N0})"),
-                    lines, ct);
+                    lines, ct, ApprovalKind.RowSharing);
                 if (!ok) throw new AgentToolException("The user declined to share rows. Use aggregate tools (csv.column_stats, csv.run_analysis) instead.");
             }
 
@@ -582,7 +585,7 @@ namespace NanumCsvViewer.Agent
                 L($"Edit {changes.Count:N0} cell(s) in {info.FileName}", $"{info.FileName}의 셀 {changes.Count:N0}개 편집"),
                 L($"-{changes.Count:N0} +{changes.Count:N0} · rows {lo:N0}–{hi:N0} · one undo step (Ctrl+Z); the original file is not changed",
                   $"-{changes.Count:N0} +{changes.Count:N0} · {lo:N0}–{hi:N0}행 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음"),
-                EditCard.Lines(changes, Korean), ct);
+                EditCard.Lines(changes, Korean), ct, ApprovalKind.DataEdit);
             if (!approved) throw new AgentToolException("The user did not approve the edit. Nothing was changed.");
 
             RequireReady(); // 승인을 기다리는 동안 사용자가 다른 작업을 시작했을 수 있다
@@ -655,7 +658,7 @@ namespace NanumCsvViewer.Agent
                     includeValues = await approvals.ApproveAsync(
                         L("Share matching cell values with the AI", "AI에게 일치한 셀 값 공유"),
                         L($"{samples.Count} example value(s) matched by the regular expression (current view)", $"정규식에 일치한 예시 값 {samples.Count}개(현재 뷰)"),
-                        lines, ct);
+                        lines, ct, ApprovalKind.RowSharing);
                     if (!includeValues) notes.Add("The user declined to share the matching values; only counts and row numbers are included.");
                 }
                 else notes.Add("Sample values omitted: the data policy is SummaryOnly (raw cell values are not shared). Row numbers and counts are included.");
@@ -740,7 +743,7 @@ namespace NanumCsvViewer.Agent
                 L($"Regex replace in {changes.Count:N0} cell(s) of {info.FileName}", $"{info.FileName}의 셀 {changes.Count:N0}개 정규식 바꾸기"),
                 L($"-{changes.Count:N0} +{changes.Count:N0} · rows {lo:N0}–{hi:N0} · one undo step (Ctrl+Z); the original file is not changed",
                   $"-{changes.Count:N0} +{changes.Count:N0} · {lo:N0}–{hi:N0}행 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음"),
-                lines, ct);
+                lines, ct, ApprovalKind.DataEdit);
             if (!approved) throw new AgentToolException("The user did not approve the regex replace. Nothing was changed.");
 
             RequireReady(); // 승인을 기다리는 동안 사용자가 다른 작업을 시작했을 수 있다
@@ -823,7 +826,7 @@ namespace NanumCsvViewer.Agent
             bool approved = await approvals.ApproveAsync(
                 L($"Save edits to {Path.GetFileName(full)}", $"편집 내용을 {Path.GetFileName(full)}에 저장"),
                 L($"Write {summary} to a new file", $"{summary}을(를) 새 파일에 저장"),
-                lines, ct);
+                lines, ct, ApprovalKind.FileSave);
             if (!approved) throw new AgentToolException("The user did not approve saving. Nothing was written.");
 
             RequireReady();

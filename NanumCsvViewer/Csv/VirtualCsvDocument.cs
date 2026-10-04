@@ -61,9 +61,9 @@ namespace NanumCsvViewer.Csv
         /// <summary>현재 컬럼 이름(파일의 이름 + 사용자가 바꾼 이름). 분석·필터·그리드가 모두 이 이름을 본다.</summary>
         public string[] Header => _header;
 
-        /// <summary>원래 컬럼 이름: 파일의 이름 + 시트 편집으로 추가한 컬럼의 처음 이름(이름 변경 전). 이름 변경 되돌림의 기준.</summary>
-        public string[] OriginalHeader => Edits.HasAppendedColumns || Edits.HasDeletedColumns
-            ? Edits.DropDeletedColumns(Edits.HasAppendedColumns ? _rawHeader.Concat(Edits.AppendedColumnNames()).ToArray() : _rawHeader)
+        /// <summary>원래 컬럼 이름: 파일의 이름 + 시트 편집으로 추가한 컬럼의 처음 이름(이름 변경 전). 이름 변경 되돌림의 기준. 표시 순서·삭제를 반영한다.</summary>
+        public string[] OriginalHeader => Edits.HasAppendedColumns || Edits.HasDeletedColumns || Edits.HasColumnOrder
+            ? Edits.ToDisplayOrder(Edits.HasAppendedColumns ? _rawHeader.Concat(Edits.AppendedColumnNames()).ToArray() : _rawHeader)
             : _rawHeader;
 
         /// <summary>파일에 적힌 컬럼 수(시트 편집으로 추가한 컬럼 제외). 추가 컬럼 인덱스는 이 값부터 시작한다.</summary>
@@ -392,7 +392,7 @@ namespace NanumCsvViewer.Csv
         /// 편집 덮개의 셀 값을 적용하지 않은 행(편집 전 값 확인·되돌림 비교용). 추가 행은 빈 값 행.
         /// 시트 편집으로 추가한 컬럼이 있으면 그 칸(빈 값)까지 포함한 전체 너비다 — 추가 컬럼의 "원래 값"은 항상 빈 값.
         /// </summary>
-        public string[] GetOriginalRow(int rowId) => Edits.DropDeletedColumns(ParseRawDataRow(rowId));
+        public string[] GetOriginalRow(int rowId) => Edits.ToDisplayOrder(ParseRawDataRow(rowId));
 
         private string[] ParseRawDataRow(int rowId)
         {
@@ -488,7 +488,7 @@ namespace NanumCsvViewer.Csv
                     byte[] termBytes = _encoding.GetBytes(term);
 
                     bool pendingSeparator;
-                    bool widened = Edits.HasAppendedColumns || Edits.HasDeletedColumns; // 컬럼이 추가·삭제되면 모든 레코드가 새 너비로 다시 직렬화되어야 한다
+                    bool widened = Edits.HasAppendedColumns || Edits.HasDeletedColumns || Edits.HasColumnOrder; // 컬럼이 추가·삭제·이동되면 모든 레코드가 새 너비·순서로 다시 직렬화되어야 한다
                     if (Edits.HeaderEditCount > 0 || widened)
                     {
                         CopyRange(src, fs, 0, _headerStart, chunk, ct); // BOM

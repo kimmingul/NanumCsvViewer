@@ -831,6 +831,12 @@ namespace NanumCsvViewer
                 if (map[i] != i) shifted = true;
             }
 
+            // 컬럼 이동이면 그리드 컬럼 객체를 옮긴다(폭·숨김 유지). 옮기는 동안 잃기 쉬운 현재 셀·가로 스크롤 위치를 물리 번호로 기억해 되살린다.
+            int curRow = grid.CurrentCell is { RowIndex: >= 0 } at0 ? at0.RowIndex : -1;
+            int curPhys = grid.CurrentCell is { ColumnIndex: >= 0 } at1 && at1.ColumnIndex < cur.Length ? cur[at1.ColumnIndex] : -1;
+            int firstPhys = -1;
+            try { int fc = grid.FirstDisplayedScrollingColumnIndex; if (fc >= 0 && fc < cur.Length) firstPhys = cur[fc]; } catch { /* 레이아웃 중 일시 예외 무시 */ }
+            bool reordered = false;
             int oldComboCol = filterColumnCombo.SelectedIndex - 1;
             RemapColumnState(map, removedAny, shifted, oldComboCol);
 
@@ -852,6 +858,24 @@ namespace NanumCsvViewer
             for (int j = 0; j < desired.Length; j++)
             {
                 if (j < grid.Columns.Count && PhysicalIdOf(grid.Columns[j]) == desired[j]) continue;
+                int existing = -1;
+                for (int i = j + 1; i < grid.Columns.Count; i++)
+                    if (PhysicalIdOf(grid.Columns[i]) == desired[j]) { existing = i; break; }
+                if (existing >= 0)
+                {
+                    // 이미 있는 컬럼이 뒤에 있다 = 이동. 객체째 옮겨 폭·숨김 상태를 지킨다.
+                    var moving = grid.Columns[existing];
+                    grid.Columns.RemoveAt(existing);
+                    grid.Columns.Insert(j, moving);
+                    if (existing + 1 < filterColumnCombo.Items.Count)
+                    {
+                        object? item = filterColumnCombo.Items[existing + 1];
+                        filterColumnCombo.Items.RemoveAt(existing + 1);
+                        filterColumnCombo.Items.Insert(j + 1, item ?? "");
+                    }
+                    reordered = true;
+                    continue;
+                }
                 string name = string.IsNullOrEmpty(doc.Header[j]) ? $"Column{j + 1}" : doc.Header[j];
                 var col = new DataGridViewTextBoxColumn
                 {
@@ -864,6 +888,8 @@ namespace NanumCsvViewer
             while (filterColumnCombo.Items.Count > want + 1) filterColumnCombo.Items.RemoveAt(filterColumnCombo.Items.Count - 1);
             int newCombo = oldComboCol >= 0 && oldComboCol < map.Length && map[oldComboCol] >= 0 ? map[oldComboCol] + 1 : 0;
             if (filterColumnCombo.SelectedIndex != newCombo) filterColumnCombo.SelectedIndex = newCombo;
+            NormalizeGridDisplayOrder();
+            if (reordered) RestoreGridPositionAfterReorder(desired, curRow, curPhys, firstPhys);
 
             if (_sortDroppedByColumnEdit)
             {
@@ -943,7 +969,7 @@ namespace NanumCsvViewer
                                       $"컬럼 위치나 삭제된 컬럼에 의존하던 필터 {dropped}개를 해제했습니다.");
         }
 
-        // ---------------------------------------------------------------- 컬럼 삽입(맨 끝에 추가) / 삭제
+        // ---------------------------------------------------------------- 컬럼 삽입(원하는 위치) / 이동 / 삭제
 
         private const int MaxColumnFillRows = 1_000_000;  // 새 컬럼을 같은 값으로 채울 수 있는 행 수 상한(셀 편집 하나씩 기록)
         private const int MaxAgentInsertRows = 10_000;     // 에이전트가 한 번에 삽입할 수 있는 행 수
@@ -966,24 +992,38 @@ namespace NanumCsvViewer
             }
             CancelInlineEdit();
             string name = "", fill = "";
+            int count = _doc.ColumnCount;
+            int cur = grid.CurrentCell is { ColumnIndex: >= 0 } at && at.ColumnIndex < count ? at.ColumnIndex : -1;
+            var places = new List<(string Label, int Position)>();
+            if (cur >= 0)
+            {
+                string curName = grid.Columns[cur].HeaderText;
+                places.Add((LT($"Before '{curName}'", $"'{curName}' 앞"), cur));
+                places.Add((LT($"After '{curName}'", $"'{curName}' 뒤"), cur + 1));
+            }
+            places.Add((LT("At the left end", "맨 왼쪽"), 0));
+            places.Add((LT("At the right end", "맨 오른쪽"), count));
+            int place = cur >= 0 ? 1 : places.Count - 1; // 현재 컬럼 뒤가 기본, 현재 컬럼이 없으면 맨 오른쪽
             while (true)
             {
                 using var dlg = new ParamDialog(LT("Insert Column", "컬럼 삽입"), _palette);
                 var nameBox = dlg.AddText(LT("Column name", "컬럼 이름"), name);
+                var placeBox = dlg.AddCombo(LT("Position", "위치"), places.Select(p => p.Label), place);
                 var fillBox = dlg.AddText(LT("Value for every row (optional)", "모든 행의 값 (선택)"), fill);
-                dlg.AddNote(LT("The new column is added at the right end of the table, empty unless you give a value. Undo removes it; it is saved with the file.",
-                               "새 컬럼은 표의 맨 오른쪽에 추가되며 값을 적지 않으면 비어 있습니다. 되돌리기로 제거할 수 있고 저장 파일에 포함됩니다."));
+                dlg.AddNote(LT("The new column is empty unless you give a value. Undo removes it; it is saved with the file in this position.",
+                               "새 컬럼은 값을 적지 않으면 비어 있습니다. 되돌리기로 제거할 수 있고 저장 파일에 이 위치로 포함됩니다."));
                 if (!dlg.ShowOk(this)) return;
                 name = nameBox.Text.Trim();
                 fill = fillBox.Text;
+                place = Math.Clamp(placeBox.SelectedIndex, 0, places.Count - 1);
                 string? problem = ValidateColumnName(-1, name);
                 if (problem is not null) { MessageBox.Show(this, problem, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Information); continue; }
                 break;
             }
             try
             {
-                int col = AddColumnCore(name, fill, LT($"Insert column '{name}'", $"컬럼 '{name}' 삽입"));
-                statusLabel.Text = LT($"Added column '{name}' at the right end. Ctrl+Z removes it.", $"컬럼 '{name}'을(를) 맨 오른쪽에 추가했습니다. Ctrl+Z로 제거합니다.");
+                int col = AddColumnCore(name, fill, LT($"Insert column '{name}'", $"컬럼 '{name}' 삽입"), places[place].Position);
+                statusLabel.Text = LT($"Inserted column '{name}' at position {col + 1}. Ctrl+Z removes it.", $"컬럼 '{name}'을(를) {col + 1}번째 위치에 삽입했습니다. Ctrl+Z로 제거합니다.");
                 SelectColumnInCurrentRow(col);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1007,16 +1047,18 @@ namespace NanumCsvViewer
         }
 
         /// <summary>
-        /// 컬럼을 맨 뒤에 추가한다(한 단계). fill이 비어 있지 않으면 모든 행(삭제 제외·추가 행 포함)에 그 값을 넣는다.
-        /// 새 컬럼의 0-based 번호를 돌려준다. 이름 규칙은 컬럼 이름 변경과 같다(비어 있지 않음·한 줄·중복 불가).
+        /// 컬럼을 position(0..ColumnCount, 생략하거나 ColumnCount면 맨 뒤)에 삽입한다(한 단계). fill이 비어 있지 않으면 모든 행(삭제 제외·추가 행 포함)에 그 값을 넣는다.
+        /// 새 컬럼의 0-based 번호(= position)를 돌려준다. 이름 규칙은 컬럼 이름 변경과 같다(비어 있지 않음·한 줄·중복 불가).
         /// </summary>
-        private int AddColumnCore(string name, string? fill, string description)
+        private int AddColumnCore(string name, string? fill, string description, int? position = null)
         {
             EnsureEditable();
             var doc = _doc!;
             name = (name ?? "").Trim();
             string? problem = ValidateColumnName(-1, name);
             if (problem is not null) throw new ArgumentException(problem);
+            int at = position ?? doc.ColumnCount;
+            if (at < 0 || at > doc.ColumnCount) throw new ArgumentException($"position must be 0..{doc.ColumnCount} (0 = before the first column, {doc.ColumnCount} = at the end).");
             fill ??= "";
             if (fill.Length > 0 && doc.DataRowsAvailable > MaxColumnFillRows)
                 throw new ArgumentException($"A fill value can be set for at most {MaxColumnFillRows:N0} rows; this table has {doc.DataRowsAvailable:N0}. Add the column empty and fill part of it with a regex extract or csv.edit_cells.");
@@ -1024,7 +1066,7 @@ namespace NanumCsvViewer
             int col;
             using (edits.BeginStep(description))
             {
-                col = edits.AppendColumn(name, doc.RawColumnCount);
+                col = edits.InsertColumn(name, at, doc.ColumnCount, doc.RawColumnCount);
                 if (fill.Length > 0)
                     foreach (long id in AllRowIds(doc)) edits.Set((int)id, col, fill, "");
             }
@@ -1065,6 +1107,239 @@ namespace NanumCsvViewer
             doc.Edits.DeleteColumn(col, doc.ColumnCount, doc.RawColumnCount,
                 description ?? LT($"Delete column '{name}'", $"컬럼 '{name}' 삭제"));
             return name;
+        }
+
+        // ---- 컬럼 이동
+
+        /// <summary>col의 왼쪽(dir &lt; 0)·오른쪽(dir &gt; 0)에서 가장 가까운 보이는(숨기지 않은) 컬럼. 없으면 -1.</summary>
+        private int AdjacentVisibleColumn(int col, int dir)
+        {
+            for (int c = col + Math.Sign(dir); c >= 0 && c < grid.Columns.Count; c += Math.Sign(dir))
+                if (grid.Columns[c].Visible) return c;
+            return -1;
+        }
+
+        private void MoveCurrentColumn(int dir)
+        {
+            if (!_sheetEditing || _doc is null || grid.CurrentCell is not { ColumnIndex: >= 0 } cell) return;
+            int target = AdjacentVisibleColumn(cell.ColumnIndex, dir);
+            if (target >= 0) MoveColumnFromUi(cell.ColumnIndex, target);
+        }
+
+        /// <summary>메뉴·드래그가 부르는 컬럼 이동(한 단계). 이동한 컬럼의 현재 행 셀을 선택한다.</summary>
+        private void MoveColumnFromUi(int from, int to)
+        {
+            if (!_sheetEditing || _doc is null) return;
+            if (!EditsReady)
+            {
+                statusLabel.Text = LT("Wait for the current operation to finish, then move the column.", "진행 중인 작업이 끝난 뒤 컬럼을 이동하세요.");
+                return;
+            }
+            CancelInlineEdit();
+            try
+            {
+                string name = MoveColumnCore(from, to, null);
+                SelectColumnInCurrentRow(to);
+                statusLabel.Text = LT($"Moved column '{name}' to position {to + 1}. Ctrl+Z moves it back; saved files use the new order.",
+                                      $"컬럼 '{name}'을(를) {to + 1}번째로 옮겼습니다. Ctrl+Z로 되돌리며 저장 파일에 새 순서가 반영됩니다.");
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                statusLabel.Text = ex.Message;
+            }
+            UpdateFeatureState();
+        }
+
+        /// <summary>보이는 컬럼 from을 결과 위치 to(0-based)로 옮긴다(한 단계). 옮긴 컬럼의 표시 이름을 돌려준다.</summary>
+        private string MoveColumnCore(int from, int to, string? description)
+        {
+            EnsureEditable();
+            var doc = _doc!;
+            int n = doc.ColumnCount;
+            if (from < 0 || from >= n) throw new ArgumentException($"Column index {from} is out of range (0..{n - 1}).");
+            if (to < 0 || to >= n) throw new ArgumentException($"Target position {to} is out of range (0..{n - 1}).");
+            if (from == to) throw new ArgumentException($"Column {from} is already at position {to}; nothing to move.");
+            string name = string.IsNullOrEmpty(doc.Header[from]) ? $"Column{from + 1}" : doc.Header[from];
+            doc.Edits.MoveColumn(from, to, n, doc.RawColumnCount,
+                description ?? LT($"Move column '{name}' to position {to + 1}", $"컬럼 '{name}'을(를) {to + 1}번째로 이동"));
+            return name;
+        }
+
+        // 그리드는 컬럼을 DisplayIndex 순서로 그린다. 컬럼 객체를 옮기거나 중간에 끼워 넣으면 DisplayIndex가 예전 값으로 남아
+        // 컬렉션 순서(= 문서 컬럼 번호)와 화면 순서가 어긋나므로, 항상 둘을 같게 맞춘다. 앱 전체가 "컬럼 번호 = 화면 위치"를 전제한다.
+        private void NormalizeGridDisplayOrder()
+        {
+            for (int i = 0; i < grid.Columns.Count; i++)
+                if (grid.Columns[i].DisplayIndex != i) grid.Columns[i].DisplayIndex = i;
+        }
+
+        // 이동 직후 그리드가 잃기 쉬운 현재 셀(이동한 컬럼을 따라감)·가로 스크롤 위치를 되살린다.
+        private void RestoreGridPositionAfterReorder(int[] desired, int curRow, int curPhys, int firstPhys)
+        {
+            try
+            {
+                int c = curPhys >= 0 ? Array.IndexOf(desired, curPhys) : -1;
+                if (c >= 0 && curRow >= 0 && curRow < grid.RowCount && c < grid.ColumnCount && grid.Columns[c].Visible
+                    && (grid.CurrentCell is null || PhysicalIdOf(grid.Columns[grid.CurrentCell.ColumnIndex]) != curPhys))
+                    grid.CurrentCell = grid[c, curRow];
+                int f = firstPhys >= 0 ? Array.IndexOf(desired, firstPhys) : -1;
+                if (f >= 0 && f < grid.ColumnCount && grid.Columns[f].Visible && grid.FirstDisplayedScrollingColumnIndex != f)
+                    grid.FirstDisplayedScrollingColumnIndex = f;
+            }
+            catch { /* 레이아웃 중 일시 예외 무시 */ }
+        }
+
+        /// <summary>표시 컬럼 번호 → 파일의 원본 컬럼 번호(시트 편집으로 추가한 컬럼이면 -1). 선언 타입·변수 라벨처럼 파일 기준 메타데이터를 표시 컬럼에 맞추는 데 쓴다.</summary>
+        internal int SourceColumnOf(int displayColumn)
+        {
+            var doc = _doc;
+            if (doc is null) return displayColumn;
+            int p = doc.Edits.ToPhysical(displayColumn);
+            return p >= 0 && p < doc.RawColumnCount ? p : -1;
+        }
+
+        /// <summary>파일의 원본 컬럼 순서 목록을 지금 표시 컬럼 순서(이동·삭제·삽입 반영)로 다시 늘어놓는다. 편집이 컬럼을 바꾸지 않았으면 그대로.</summary>
+        internal IReadOnlyList<T?>? AlignToDisplayColumns<T>(IReadOnlyList<T?>? bySource) where T : class
+        {
+            var doc = _doc;
+            if (bySource is null || doc is null) return bySource;
+            var e = doc.Edits;
+            if (!e.HasColumnOrder && !e.HasDeletedColumns && !e.HasAppendedColumns) return bySource;
+            var result = new T?[doc.ColumnCount];
+            for (int i = 0; i < result.Length; i++)
+            {
+                int s = SourceColumnOf(i);
+                result[i] = s >= 0 && s < bySource.Count ? bySource[s] : null;
+            }
+            return result;
+        }
+
+        // ---- 헤더 드래그로 컬럼 이동(시트 편집 모드). 그리드 자체의 AllowUserToOrderColumns는 쓰지 않는다 —
+        //      그리드 컬럼 번호 = 문서 컬럼 번호라는 전제가 깨지지 않도록, 놓는 순간 덮개에 한 단계로 기록하고 그리드는 그 결과를 따라간다.
+
+        private int _colDragFrom = -1, _colDragTo = -1;
+        private Point _colDragStart;
+        private bool _colDragActive, _colDragCancelled, _colDragSuppressClick;
+
+        private void OnColumnDragMouseDown(object? sender, MouseEventArgs e)
+        {
+            _colDragFrom = -1;
+            _colDragActive = _colDragCancelled = false;
+            if (e.Button != MouseButtons.Left || !_sheetEditing || !EditsReady) return;
+            var hit = grid.HitTest(e.X, e.Y);
+            if (hit.Type != DataGridViewHitTestType.ColumnHeader || hit.ColumnIndex < 0) return;
+            var rect = grid.GetColumnDisplayRectangle(hit.ColumnIndex, false);
+            if (e.X >= rect.Right - 5 || e.X <= rect.Left + 4) return; // 폭 조절 경계는 그리드가 처리한다
+            if (IsFilterableColumn(hit.ColumnIndex) && e.X - rect.Left >= grid.Columns[hit.ColumnIndex].Width - 18) return; // 깔때기 영역 = 필터 팝오버
+            _colDragFrom = hit.ColumnIndex;
+            _colDragStart = e.Location;
+        }
+
+        private void OnColumnDragMouseMove(object? sender, MouseEventArgs e)
+        {
+            if (_colDragFrom < 0) return;
+            if (e.Button != MouseButtons.Left || !_sheetEditing) { EndColumnDrag(); return; }
+            if (!_colDragActive)
+            {
+                var drag = SystemInformation.DragSize;
+                if (Math.Abs(e.X - _colDragStart.X) < drag.Width && Math.Abs(e.Y - _colDragStart.Y) < drag.Height) return;
+                _colDragActive = true;
+                grid.Cursor = Cursors.SizeAll;
+            }
+            if (_colDragCancelled) return;
+            AutoScrollForColumnDrag(e.X);
+            int to = ColumnDropTarget(e.X);
+            if (to != _colDragTo) { _colDragTo = to; grid.Invalidate(); }
+        }
+
+        private void OnColumnDragMouseUp(object? sender, MouseEventArgs e)
+        {
+            if (_colDragFrom < 0) return;
+            int from = _colDragFrom, to = _colDragTo;
+            bool active = _colDragActive, cancelled = _colDragCancelled;
+            if (active) _colDragSuppressClick = true; // 같은 헤더에 놓았을 때 그리드가 클릭(정렬)으로 처리하지 않게
+            EndColumnDrag();
+            if (!active) return;
+            // 클릭 이벤트가 같은 메시지 안에서 끝난 뒤에 이동한다(그리드 안에서 컬럼을 바꾸지 않으려고).
+            BeginInvoke(new Action(() =>
+            {
+                _colDragSuppressClick = false;
+                if (!cancelled && !IsDisposed && to >= 0 && to != from) MoveColumnFromUi(from, to);
+            }));
+        }
+
+        private void OnColumnDragKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Escape || !_colDragActive) return;
+            _colDragCancelled = true;
+            _colDragTo = -1;
+            grid.Cursor = Cursors.Default;
+            grid.Invalidate();
+            e.Handled = true;
+        }
+
+        private void EndColumnDrag()
+        {
+            bool repaint = _colDragActive;
+            _colDragFrom = _colDragTo = -1;
+            _colDragActive = _colDragCancelled = false;
+            grid.Cursor = Cursors.Default;
+            if (repaint) grid.Invalidate();
+        }
+
+        // 놓을 위치 = 마우스 아래 컬럼의 자리(이동 뒤 그 번호가 된다). 숨긴 컬럼은 건너뛴다.
+        private int ColumnDropTarget(int x)
+        {
+            int last = -1;
+            for (int c = 0; c < grid.ColumnCount; c++)
+            {
+                if (!grid.Columns[c].Visible) continue;
+                var r = grid.GetColumnDisplayRectangle(c, false);
+                if (r.Width <= 0) continue;
+                last = c;
+                if (x < r.Right) return c;
+            }
+            return last >= 0 ? last : _colDragFrom;
+        }
+
+        private void AutoScrollForColumnDrag(int x)
+        {
+            try
+            {
+                int first = grid.FirstDisplayedScrollingColumnIndex;
+                if (first < 0) return;
+                if (x < grid.RowHeadersWidth + 24)
+                {
+                    int prev = AdjacentVisibleColumn(first, -1);
+                    if (prev >= 0) grid.FirstDisplayedScrollingColumnIndex = prev;
+                }
+                else if (x > grid.ClientSize.Width - 24)
+                {
+                    int lastCol = grid.Columns.GetLastColumn(DataGridViewElementStates.Visible, DataGridViewElementStates.None)?.Index ?? -1;
+                    var lastRect = lastCol >= 0 ? grid.GetColumnDisplayRectangle(lastCol, false) : Rectangle.Empty;
+                    int next = AdjacentVisibleColumn(first, +1);
+                    if (next >= 0 && !(lastRect.Width > 0 && lastRect.Right <= grid.ClientSize.Width)) grid.FirstDisplayedScrollingColumnIndex = next;
+                }
+            }
+            catch { /* 레이아웃 중 일시 예외 무시 */ }
+        }
+
+        // 놓을 자리 표시: 끌고 있는 헤더를 옅게 칠하고, 놓일 경계에 굵은 선을 긋는다(오른쪽으로 옮기면 대상 컬럼의 오른쪽, 왼쪽이면 왼쪽).
+        private void OnColumnDragPaint(object? sender, PaintEventArgs e)
+        {
+            if (!_colDragActive || _colDragCancelled || _colDragTo < 0 || _colDragTo >= grid.ColumnCount || _colDragFrom >= grid.ColumnCount) return;
+            var src = grid.GetColumnDisplayRectangle(_colDragFrom, false);
+            if (src.Width > 0)
+            {
+                using var tint = new SolidBrush(Color.FromArgb(70, SystemColors.Highlight));
+                e.Graphics.FillRectangle(tint, src.Left, 0, src.Width, grid.ColumnHeadersHeight);
+            }
+            if (_colDragTo == _colDragFrom) return;
+            var dst = grid.GetColumnDisplayRectangle(_colDragTo, false);
+            if (dst.Width <= 0) return;
+            int x = _colDragTo > _colDragFrom ? dst.Right - 1 : dst.Left;
+            using var bar = new Pen(SystemColors.Highlight, 3);
+            e.Graphics.DrawLine(bar, x, 0, x, grid.ClientSize.Height);
         }
 
         // ---------------------------------------------------------------- 에이전트용 편집 진입점 (UI 스레드, 시트 편집 모드와 무관)
@@ -1127,13 +1402,38 @@ namespace NanumCsvViewer
             return deleted;
         }
 
-        /// <summary>컬럼을 표의 맨 끝에 추가한다(중간 삽입은 지원하지 않는다). fill = 모든 행에 넣을 값(null/빈 값 = 빈 컬럼, 행 수 100만 이하). 새 컬럼의 0-based 번호.</summary>
+        /// <summary>컬럼을 표의 맨 끝에 추가한다(원하는 위치는 AgentInsertColumn). fill = 모든 행에 넣을 값(null/빈 값 = 빈 컬럼, 행 수 100만 이하). 새 컬럼의 0-based 번호.</summary>
         internal int AgentAddColumn(string name, string? fill, string description)
         {
             int col = AddColumnCore(name, fill, description);
             SelectColumnInCurrentRow(col);
             statusLabel.Text = LT($"Added column '{name.Trim()}' at the right end. Ctrl+Z removes it.", $"컬럼 '{name.Trim()}'을(를) 맨 오른쪽에 추가했습니다. Ctrl+Z로 제거합니다.");
             return col;
+        }
+
+        /// <summary>
+        /// 컬럼을 position(삽입 후 새 컬럼의 0-based 번호, 0..ColumnCount — ColumnCount = 맨 끝)에 삽입한다. 한 단계.
+        /// fill = 모든 행에 넣을 값(null/빈 값 = 빈 컬럼, 행 수 100만 이하). 삽입한 컬럼의 0-based 번호(= position)를 돌려준다.
+        /// </summary>
+        internal int AgentInsertColumn(string name, int position, string? fill, string description)
+        {
+            int col = AddColumnCore(name, fill, description, position);
+            SelectColumnInCurrentRow(col);
+            statusLabel.Text = LT($"Inserted column '{name.Trim()}' at position {col + 1}. Ctrl+Z removes it.", $"컬럼 '{name.Trim()}'을(를) {col + 1}번째 위치에 삽입했습니다. Ctrl+Z로 제거합니다.");
+            return col;
+        }
+
+        /// <summary>
+        /// 보이는 컬럼 from(현재 표시 순서의 0-based 번호)을 이동해 결과 번호가 to가 되게 한다(나머지는 밀린다). 한 단계.
+        /// from == to나 범위 밖이면 ArgumentException. 옮긴 컬럼 이름을 돌려준다.
+        /// </summary>
+        internal string AgentMoveColumn(int from, int to, string description)
+        {
+            string name = MoveColumnCore(from, to, description);
+            SelectColumnInCurrentRow(to);
+            statusLabel.Text = LT($"Moved column '{name}' to position {to + 1}. Ctrl+Z moves it back; saved files use the new order.",
+                                  $"컬럼 '{name}'을(를) {to + 1}번째로 옮겼습니다. Ctrl+Z로 되돌리며 저장 파일에 새 순서가 반영됩니다.");
+            return name;
         }
 
         /// <summary>보이는 컬럼(원본·추가 모두)을 삭제 표시한다. 뒤 컬럼 번호가 1씩 당겨진다. 삭제한 컬럼 이름을 돌려준다.</summary>

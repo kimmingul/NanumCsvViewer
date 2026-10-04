@@ -103,8 +103,8 @@ namespace NanumCsvViewer
             var types = new ColumnValueType[headers.Length];
             var variableNames = new string?[headers.Length];
             var variableLabels = new string?[headers.Length];
-            var names = _workbook?.VariableNames(_currentSheetIndex);
-            var labels = _workbook?.VariableLabels(_currentSheetIndex);
+            var names = AlignToDisplayColumns(_workbook?.VariableNames(_currentSheetIndex));
+            var labels = AlignToDisplayColumns(_workbook?.VariableLabels(_currentSheetIndex));
             for (int c = 0; c < headers.Length; c++)
             {
                 types[c] = c < _columnSummaries.Length ? _columnSummaries[c].InferredType : ColumnValueType.Empty;

@@ -71,7 +71,9 @@ namespace NanumCsvViewer
             DataPolicy: Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) ? p : AgentDataPolicy.SummaryOnly,
             MaxRowsPerRequest: Math.Clamp(_settings.AgentMaxRows, 1, 5000),
             AppVersion: AppInfo.Version,
-            AllowLocalPython: _settings.AgentAllowLocalPython);
+            AllowLocalPython: _settings.AgentAllowLocalPython,
+            ApprovalMode: AgentApprovalPolicy.Parse(_settings.AgentApprovalMode),
+            ApprovalNoticePending: !_settings.AgentApprovalNoticeShown);
 
         private void SetAgentPanelVisible(bool visible)
         {
@@ -134,6 +136,8 @@ namespace NanumCsvViewer
             _agentController = new ChatController(_agentPanel, new CsvHostTools(this, AgentOptions), options);
             _agentController.PageMessageUnhandled += OnAgentPageMessage;
             _agentController.StatusChanged += _ => { };
+            _agentController.ApprovalModeChanged += mode => SaveAgentApprovalMode(mode);
+            _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.SetDataFile(_currentPath);
             _ = _agentController.StartAsync(AgentWorkingDirectory());
             PostAgentContext();
@@ -179,7 +183,7 @@ namespace NanumCsvViewer
                     string path = msg.TryGetProperty("path", out var pv) && pv.ValueKind == JsonValueKind.String ? pv.GetString() ?? "" : "";
                     OpenFileFromAgent(path);
                     break;
-                // setApproval·context 등은 이 호스트에서 쓰지 않는다(승인 선택은 숨김).
+                // setApproval는 컨트롤러가 처리한다(yolo 확인·재시작). context 등은 이 호스트에서 쓰지 않는다.
             }
         }
 
@@ -242,6 +246,28 @@ namespace NanumCsvViewer
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
         }
 
+        /// <summary>승인 모드를 설정에 저장한다. 직접 고른 것이므로 기본 모드 안내는 더 보이지 않는다.</summary>
+        private void SaveAgentApprovalMode(AgentApprovalMode mode)
+        {
+            _settings.AgentApprovalMode = AgentApprovalPolicy.ToOmp(mode);
+            _settings.AgentApprovalNoticeShown = true;
+            _settings.Save();
+        }
+
+        /// <summary>
+        /// 설정 대화 상자에서 고른 승인 모드를 적용한다. 바뀌었고 모두 허용(yolo)이면 확인 대화 상자를 먼저 띄우고 취소하면 이전 모드를 유지한다.
+        /// 에이전트가 떠 있으면 컨트롤러가(확인·재시작·저장) 맡고, 없으면 설정만 저장한다.
+        /// </summary>
+        private void ApplyApprovalChoice(AgentApprovalMode mode)
+        {
+            if (mode == AgentApprovalPolicy.Parse(_settings.AgentApprovalMode)) return;
+            if (_agentController is not null) { _agentController.TrySetApprovalMode(mode); return; }
+            bool ko = Loc.CurrentLanguage == "ko";
+            if (mode == AgentApprovalMode.Yolo && MessageBox.Show(this, ApprovalTexts.YoloConfirm(ko), ApprovalTexts.YoloTitle(ko),
+                    MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+            SaveAgentApprovalMode(mode);
+        }
+
         private void ShowAgentSettings()
         {
             using var dlg = new ParamDialog(LT("AI Agent Settings", "AI 에이전트 설정"), _palette);
@@ -254,6 +280,10 @@ namespace NanumCsvViewer
             var maxRows = dlg.AddNumeric(LT("Row limit per request", "요청당 행 상한"), 1, 5000, Math.Clamp(_settings.AgentMaxRows, 1, 5000));
             var ompPath = dlg.AddText(LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"), _settings.AgentOmpPath ?? "");
             var extra = dlg.AddText(LT("Extra omp arguments", "omp 추가 인자"), _settings.AgentExtraArgs ?? "");
+            bool ko = Loc.CurrentLanguage == "ko";
+            var approval = dlg.AddCombo(LT("Approval mode", "승인 모드"),
+                Enum.GetValues<AgentApprovalMode>().Select(m => ApprovalTexts.Label(m, ko)).ToArray(),
+                (int)AgentApprovalPolicy.Parse(_settings.AgentApprovalMode));
             var localPython = dlg.AddCheckedList(LT("Local Python analysis", "로컬 Python 분석"),
                 new[] { LT("Allow local Python analysis", "로컬 Python 분석 허용") }, 1);
             localPython.CheckOnClick = true;
@@ -262,12 +292,16 @@ namespace NanumCsvViewer
                 "When on, the agent may export the current view to a file in the analysis folder (<file name>_분석결과, next to the data file) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
                 "켜면 에이전트가 현재 보기를 분석 폴더(데이터 파일 옆의 <파일 이름>_분석결과)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
             dlg.AddNote(LT(
-                "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits and saves always ask for approval in the chat.",
-                "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집과 저장은 항상 채팅에서 승인을 받습니다."));
+                "Approval mode: 'Always ask' asks for every write or run, in the app and in omp. 'Auto-approve edits' lets undoable data edits run without a card and lets omp write files, but still asks for Python/shell runs, saving to a new file and sharing raw rows. 'Allow everything' also skips those (raw-row sharing still follows the data sharing setting). Changing it restarts the agent on the same conversation.",
+                "승인 모드: '항상 묻기'는 앱과 omp 모두 쓰기·실행마다 묻습니다. '편집 자동 승인'은 되돌릴 수 있는 데이터 편집을 카드 없이 실행하고 omp의 파일 쓰기도 허용하지만 Python·셸 실행, 새 파일 저장, 원시 행 공유는 묻습니다. '모두 허용'은 그것들도 묻지 않습니다(원시 행 공유는 데이터 공유 설정을 따름). 바꾸면 같은 대화로 에이전트를 다시 시작합니다."));
+            dlg.AddNote(LT(
+                "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits are stored in an undoable overlay; the original file is never written.",
+                "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집은 되돌릴 수 있는 덮개에 쌓이고 원본 파일은 쓰지 않습니다."));
             if (!dlg.ShowOk(this)) return;
 
             bool wantPython = localPython.GetItemChecked(0);
             if (wantPython && !_settings.AgentAllowLocalPython && !ConfirmLocalPython()) wantPython = false;
+            ApplyApprovalChoice((AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2));
 
             string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
             _settings.AgentDataPolicy = ((AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2)).ToString();

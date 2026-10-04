@@ -14,7 +14,9 @@ namespace NanumCsvViewer.Csv
     /// <summary>
     /// 조건부 서식 규칙 하나. 목록의 앞 규칙이 우선한다 — 한 셀에 여러 규칙이 맞으면 배경·글자색·굵게를 각각 "처음 맞은 규칙"의 값으로 정한다.
     /// 컬럼은 이름으로 가리킨다(컬럼을 삭제·이름 변경하면 그 규칙은 "컬럼 없음" 문제로 표시되고 적용되지 않는다).
-    /// 색은 "#RRGGBB"(또는 #RGB)나 HTML 색 이름. 저장 뷰(JSON)에 그대로 들어간다.
+    /// 색은 이름 토큰(red·orange·yellow·green·blue·purple·gray — 라이트/다크 테마마다 짝 색으로 해석) 또는 "#RRGGBB"(#RGB)·HTML 색 이름(직접 지정).
+    /// 직접 지정한 색은 <see cref="AdaptTheme"/>이 켜져 있으면 다크 테마에서 명도를 조정한다. 저장 뷰(JSON)에 그대로 들어간다 —
+    /// AdaptTheme이 없는 이전 저장본은 켜짐(true)으로 읽히므로 이전 규칙의 색은 "직접 지정(테마 맞춤 켜짐)"이 된다.
     /// </summary>
     public sealed record ConditionalFormatRule(
         string Id,
@@ -29,7 +31,8 @@ namespace NanumCsvViewer.Csv
         bool Bold,
         string? ScaleMinColor,
         string? ScaleMidColor,
-        string? ScaleMaxColor)
+        string? ScaleMaxColor,
+        bool AdaptTheme = true)
     {
         /// <summary>한 파일에 둘 수 있는 규칙 수(행 캐시가 규칙당 한 칸을 쓴다).</summary>
         public const int MaxRules = 32;

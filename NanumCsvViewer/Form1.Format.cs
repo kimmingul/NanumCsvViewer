@@ -20,7 +20,9 @@ namespace NanumCsvViewer
         private (int Count, int First, int Last) _cfViewKey = (-1, -1, -1);
         private CancellationTokenSource? _cfScaleCts;
         private Font? _cfBoldFont, _cfBoldBase;
-        private ToolStripMenuItem? _cfMenu;
+        private ToolStripMenuItem? _cfMenu, _cfUndoMenu, _cfRedoMenu;
+        private ToolStripButton? _cfUndoButton;
+        private readonly ConditionalFormatHistory _cfHistory = new();
         private System.Windows.Forms.Timer? _cfReportTimer;
         private int _cfReportedTimeouts;
         private int _cfFailureShown;
@@ -30,6 +32,17 @@ namespace NanumCsvViewer
             viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
             _cfMenu = MakeItem("Conditional Formatting…", "조건부 서식…", (_, _) => ShowConditionalFormatManager());
             viewToolStripMenuItem.DropDownItems.Add(_cfMenu);
+            _cfUndoMenu = MakeItem("Undo Conditional Format", "조건부 서식 되돌리기", (_, _) => OnFormatHistoryStep(undo: true));
+            _cfRedoMenu = MakeItem("Redo Conditional Format", "조건부 서식 다시 실행", (_, _) => OnFormatHistoryStep(undo: false));
+            viewToolStripMenuItem.DropDownItems.Add(_cfUndoMenu);
+            viewToolStripMenuItem.DropDownItems.Add(_cfRedoMenu);
+            _cfUndoButton = new ToolStripButton
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "cfUndoButton",
+                Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never, Enabled = false,
+            };
+            _cfUndoButton.Click += (_, _) => OnFormatHistoryStep(undo: true);
+            toolStrip1.Items.Add(_cfUndoButton);
             gridContextMenu.Items.Add(new ToolStripSeparator());
             gridContextMenu.Items.Add(MakeItem("Conditional Formatting…", "조건부 서식…", (_, _) => ShowConditionalFormatManager()));
             _cfReportTimer = new System.Windows.Forms.Timer { Interval = 700 };
@@ -38,7 +51,26 @@ namespace NanumCsvViewer
 
         private void UpdateFormatState()
         {
+            bool open = _doc is not null && ReferenceEquals(_cfDoc, _doc); // 아직 이 문서의 규칙을 읽기 전이면 이력도 비어 있다
+            bool undo = open && _cfHistory.CanUndo, redo = open && _cfHistory.CanRedo;
             if (_cfMenu is not null) _cfMenu.Enabled = _doc is not null;
+            if (_cfUndoMenu is not null) _cfUndoMenu.Enabled = undo;
+            if (_cfRedoMenu is not null) _cfRedoMenu.Enabled = redo;
+            if (_cfUndoButton is not null)
+            {
+                _cfUndoButton.Enabled = undo;
+                _cfUndoButton.Text = LT("↶ Format", "↶ 서식");
+                _cfUndoButton.ToolTipText = LT("Undo conditional format — undoes the last conditional-formatting change (separate from Ctrl+Z)",
+                                               "조건부 서식 되돌리기 — 마지막 조건부 서식 변경을 되돌립니다(Ctrl+Z와 별개)");
+            }
+        }
+
+        // 다크/라이트 전환은 컴파일된 규칙이 두 테마의 색을 모두 들고 있으므로 플래그만 맞추면 된다(다시 그릴 때 호출).
+        private void SyncFormatTheme()
+        {
+            var set = _cfStyler.Set;
+            bool dark = _theme == AppTheme.Dark;
+            if (!set.IsEmpty && set.IsDark != dark) set.IsDark = dark;
         }
 
         // ---------------------------------------------------------------- 규칙 보관 · 컴파일
@@ -50,6 +82,7 @@ namespace NanumCsvViewer
             if (!ReferenceEquals(_cfDoc, doc))
             {
                 _cfScaleCts?.Cancel();
+                _cfHistory.Clear(); // 이력은 파일마다 따로: 다른 파일의 규칙으로 되돌리지 않는다
                 _cfDoc = doc;
                 _cfRules.Clear();
                 if (_currentPath is { } path)
@@ -65,7 +98,8 @@ namespace NanumCsvViewer
                 _cfSeenHeaderVersion = doc.Edits.HeaderVersion; // 이름 변경·컬럼 추가/삭제: 이름 → 번호를 다시 푼다
                 recompile = true;
             }
-            if (recompile) CompileFormatRules(doc);
+            if (recompile) { CompileFormatRules(doc); UpdateFormatState(); }
+            SyncFormatTheme();
 
             bool dataChanged = _cfSeenEditsVersion != doc.Edits.Version;
             if (dataChanged)
@@ -95,6 +129,7 @@ namespace NanumCsvViewer
                     statusLabel.Text = LT("Conditional formatting rules could not be applied: ", "조건부 서식 규칙을 적용하지 못했습니다: ") + ex.Message;
             }
             _cfStyler = new ConditionalFormatStyler(set);
+            SyncFormatTheme();
             _cfReportedTimeouts = 0;
             _cfViewKey = (-1, -1, -1);
             _cfScaleCts?.Cancel();
@@ -124,9 +159,13 @@ namespace NanumCsvViewer
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
-        /// <summary>적용 중인 규칙 목록과 저장. 규칙이 바뀔 때마다 불린다.</summary>
-        private void SetFormatRules(IEnumerable<ConditionalFormatRule> rules, bool persist = true)
+        /// <summary>
+        /// 적용 중인 규칙 목록과 저장. 규칙이 바뀔 때마다 불린다. historyLabel이 있으면 변경 전/후를 서식 이력에 기록한다
+        /// (이력에서 되돌리기·다시 실행으로 부를 때는 null — 이력을 건드리지 않는다).
+        /// </summary>
+        private void SetFormatRules(IEnumerable<ConditionalFormatRule> rules, bool persist = true, string? historyLabel = null)
         {
+            var before = historyLabel is null ? null : _cfRules.ToList();
             var copy = rules.Take(ConditionalFormatRule.MaxRules).ToList(); // rules가 _cfRules를 가리킬 수 있으므로 비우기 전에 복사
             _cfRules.Clear();
             _cfRules.AddRange(copy);
@@ -136,9 +175,30 @@ namespace NanumCsvViewer
                 CompileFormatRules(_doc);
                 _cfSeenHeaderVersion = _doc.Edits.HeaderVersion;
                 _cfSeenEditsVersion = _doc.Edits.Version;
+                if (before is not null) _cfHistory.Record(historyLabel!, before, copy);
             }
             if (persist && _currentPath is { } path) SavedViewStore.SaveConditionalFormats(path, _cfRules);
+            UpdateFormatState();
             grid.Invalidate();
+        }
+
+        private ConditionalFormatUndoResult? StepFormatHistory(bool undo)
+        {
+            RequireFormatDoc();
+            var entry = undo ? _cfHistory.Undo() : _cfHistory.Redo();
+            if (entry is null) return null;
+            SetFormatRules(undo ? entry.Before : entry.After);
+            return new ConditionalFormatUndoResult(entry.Description, _cfRules.Count);
+        }
+
+        private void OnFormatHistoryStep(bool undo)
+        {
+            if (_doc is null) return;
+            var result = StepFormatHistory(undo);
+            if (result is null) return;
+            statusLabel.Text = undo
+                ? LT($"Undid the last conditional-format change; {result.RuleCount:N0} rule(s).", $"조건부 서식 변경을 되돌렸습니다. 규칙 {result.RuleCount:N0}개.")
+                : LT($"Redid the conditional-format change; {result.RuleCount:N0} rule(s).", $"조건부 서식 변경을 다시 실행했습니다. 규칙 {result.RuleCount:N0}개.");
         }
 
         // ---------------------------------------------------------------- 그리기
@@ -197,7 +257,7 @@ namespace NanumCsvViewer
             using var dlg = new ConditionalFormatDialog(_cfRules.ToList(), headers, doc.Header, sample, _palette);
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             if (!ReferenceEquals(doc, _doc)) return;
-            SetFormatRules(dlg.Rules);
+            SetFormatRules(dlg.Rules, historyLabel: "edit rules in dialog");
             var set = _cfStyler.Set;
             statusLabel.Text = LT($"Conditional formatting: {dlg.Rules.Count:N0} rule(s), {set.ActiveCount:N0} active.",
                                   $"조건부 서식: 규칙 {dlg.Rules.Count:N0}개, 적용 중 {set.ActiveCount:N0}개.");
@@ -207,7 +267,8 @@ namespace NanumCsvViewer
         }
 
         // ---------------------------------------------------------------- 에이전트용 진입점 (UI 스레드)
-        // 실패는 ArgumentException(인자 문제) / InvalidOperationException(상태 문제). 규칙은 되돌리기(Ctrl+Z) 대상이 아니며 파일별 저장 뷰에 자동 저장된다.
+        // 실패는 ArgumentException(인자 문제) / InvalidOperationException(상태 문제). 규칙은 셀 되돌리기(Ctrl+Z) 대상이 아니라 별도 서식 이력(최대 20개)으로
+        // 되돌린다(AgentUndoConditionalFormat). 규칙은 파일별 저장 뷰에 자동 저장된다.
 
         private VirtualCsvDocument RequireFormatDoc()
         {
@@ -236,7 +297,7 @@ namespace NanumCsvViewer
             string id = ConditionalFormatRules.NextId(_cfRules);
             string name = string.IsNullOrWhiteSpace(draft.Name) ? id : draft.Name.Trim();
             var rule = draft with { Id = id, Name = name, Column = column };
-            SetFormatRules(_cfRules.Append(rule));
+            SetFormatRules(_cfRules.Append(rule), historyLabel: $"add {id}");
             statusLabel.Text = LT($"Added conditional format {id}.", $"조건부 서식 {id}을(를) 추가했습니다.");
             return rule;
         }
@@ -262,9 +323,10 @@ namespace NanumCsvViewer
             RequireFormatDoc();
             int idx = _cfRules.FindIndex(r => string.Equals(r.Id, id?.Trim(), StringComparison.OrdinalIgnoreCase));
             if (idx < 0) return false;
+            string removedId = _cfRules[idx].Id;
             var rest = _cfRules.ToList();
             rest.RemoveAt(idx);
-            SetFormatRules(rest);
+            SetFormatRules(rest, historyLabel: $"remove {removedId}");
             return true;
         }
 
@@ -272,9 +334,18 @@ namespace NanumCsvViewer
         {
             RequireFormatDoc();
             int n = _cfRules.Count;
-            if (n > 0) SetFormatRules(Array.Empty<ConditionalFormatRule>());
+            if (n > 0) SetFormatRules(Array.Empty<ConditionalFormatRule>(), historyLabel: "clear all rules");
             return n;
         }
+
+        /// <summary>
+        /// 마지막 서식 변경(대화상자 확인·에이전트 추가/삭제/전체 삭제)을 되돌린다. 규칙을 변경 전으로 되돌리고 저장 파일도 갱신한다.
+        /// 이력이 없으면 null. 셀 편집 되돌리기(Ctrl+Z)와 별개다.
+        /// </summary>
+        internal ConditionalFormatUndoResult? AgentUndoConditionalFormat() => StepFormatHistory(undo: true);
+
+        /// <summary>되돌린 서식 변경을 다시 적용한다. 이력이 없으면 null.</summary>
+        internal ConditionalFormatUndoResult? AgentRedoConditionalFormat() => StepFormatHistory(undo: false);
 
         /// <summary>
         /// 현재 뷰에서 규칙(id) 또는 초안의 조건에 맞는 행 수. 뷰 전체를 훑으며 취소할 수 있다. 색상 눈금 규칙은 조건이 없어 ArgumentException.

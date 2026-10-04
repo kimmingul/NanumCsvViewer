@@ -1031,6 +1031,7 @@ namespace NanumCsvViewer.Tests
                     return style;
                 }
                 var red = System.Drawing.Color.FromArgb(255, 255, 0, 0);
+                typeof(Form1).GetMethod("ApplyTheme", Inst)!.Invoke(form, new object[] { AppTheme.Light });   // 직접 지정한 색은 다크에서 조정되므로(테마 맞춤) 시스템 테마와 무관하게 라이트로 고정
 
                 var rule = form.AgentAddConditionalFormat(new ConditionalFormatRule("", "high", true, ConditionalFormatKind.Expression,
                     "score >= 20", ConditionalFormatTarget.Row, null, "#FF0000", "#FFFFFF", true, null, null, null));

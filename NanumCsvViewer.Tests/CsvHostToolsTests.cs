@@ -33,10 +33,10 @@ namespace NanumCsvViewer.Tests
 
         private sealed class FakeApprovals(bool answer) : IAgentApprovals
         {
-            public readonly List<(string Target, string Summary, IReadOnlyList<string> Lines)> Calls = new();
-            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation)
+            public readonly List<(string Target, string Summary, IReadOnlyList<string> Lines, ApprovalKind Kind)> Calls = new();
+            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation, ApprovalKind kind = ApprovalKind.RowSharing)
             {
-                Calls.Add((target, summary, lines));
+                Calls.Add((target, summary, lines, kind));
                 return Task.FromResult(answer);
             }
         }
@@ -62,6 +62,9 @@ namespace NanumCsvViewer.Tests
             public virtual AgentStructureResult InsertRows(long rowNumber, int count, string description) => throw new NotSupportedException();
             public virtual AgentStructureResult DeleteRows(IReadOnlyList<long> rowNumbers, string description) => throw new NotSupportedException();
             public virtual AgentColumnChange AddColumn(string name, string? fill, string description) => throw new NotSupportedException();
+            public virtual AgentColumnChange InsertColumn(string name, int position, string? fill, string description) => throw new NotSupportedException();
+            public virtual AgentColumnChange MoveColumn(int from, int to, string description) => throw new NotSupportedException();
+            public virtual ConditionalFormatUndoResult? UndoConditionalFormat() => throw new NotSupportedException();
             public virtual AgentColumnChange DeleteColumn(int column, string description) => throw new NotSupportedException();
             public virtual IReadOnlyDictionary<string, string> ConditionalFormatProblems() => throw new NotSupportedException();
             public virtual IReadOnlyList<ConditionalFormatRule> ListConditionalFormats() => throw new NotSupportedException();
@@ -120,7 +123,7 @@ namespace NanumCsvViewer.Tests
             {
                 string? top = Steps.Count > 0 ? Steps[^1].Description : null;
                 return new AgentEditState(Overlay.Count, 0, DeletedRowCount, AddedRowCount, Steps.Count > 0, Steps.Count > 0, top,
-                    top is not null && top.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal), SheetMode, AddedColumnCount, DeletedColumnCount);
+                    top is not null && top.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal), SheetMode, AddedColumnCount, DeletedColumnCount, ColumnsReordered);
             }
 
             public override AgentDocumentInfo? GetInfo()
@@ -313,6 +316,39 @@ namespace NanumCsvViewer.Tests
                 return new AgentColumnChange(Headers.Length - 1, name, Headers.Length, State());
             }
 
+            public bool ColumnsReordered;
+
+            public override AgentColumnChange InsertColumn(string name, int position, string? fill, string description)
+            {
+                Calls.Add($"inscol:{name}:{position}:{fill}");
+                Step(description);
+                Headers = Headers.Take(position).Append(name).Concat(Headers.Skip(position)).ToArray();
+                Types = Types.Take(position).Append(ColumnValueType.String).Concat(Types.Skip(position)).ToArray();
+                for (int i = 0; i < Rows.Count; i++) Rows[i] = Rows[i].Take(position).Append(fill ?? "").Concat(Rows[i].Skip(position)).ToArray();
+                AddedColumnCount++;
+                return new AgentColumnChange(position, name, Headers.Length, State());
+            }
+
+            public override AgentColumnChange MoveColumn(int from, int to, string description)
+            {
+                Calls.Add($"movecol:{from}:{to}");
+                Step(description);
+                string name = Headers[from];
+                var type = Types[from];
+                Headers = Headers.Where((_, i) => i != from).ToArray();
+                Types = Types.Where((_, i) => i != from).ToArray();
+                var h = Headers.ToList(); h.Insert(to, name); Headers = h.ToArray();
+                var t = Types.ToList(); t.Insert(to, type); Types = t.ToArray();
+                for (int i = 0; i < Rows.Count; i++)
+                {
+                    var cells = Rows[i].ToList();
+                    string v = cells[from]; cells.RemoveAt(from); cells.Insert(to, v);
+                    Rows[i] = cells.ToArray();
+                }
+                ColumnsReordered = true;
+                return new AgentColumnChange(to, name, Headers.Length, State());
+            }
+
             public override AgentColumnChange DeleteColumn(int column, string description)
             {
                 Calls.Add($"delcol:{column}");
@@ -337,13 +373,38 @@ namespace NanumCsvViewer.Tests
             public override ConditionalFormatRule AddConditionalFormat(ConditionalFormatRule draft)
             {
                 var rule = draft with { Id = "cf" + _nextRule++ };
+                RuleHistory.Add(("add " + rule.Id, Rules.ToList()));
                 Rules.Add(rule);
                 return rule;
             }
 
-            public override bool RemoveConditionalFormat(string id) => Rules.RemoveAll(r => r.Id == id) > 0;
+            public override bool RemoveConditionalFormat(string id)
+            {
+                var before = Rules.ToList();
+                bool removed = Rules.RemoveAll(r => r.Id == id) > 0;
+                if (removed) RuleHistory.Add(("remove " + id, before));
+                return removed;
+            }
 
-            public override int ClearConditionalFormats() { int n = Rules.Count; Rules.Clear(); return n; }
+            public override int ClearConditionalFormats()
+            {
+                int n = Rules.Count;
+                if (n > 0) RuleHistory.Add(("clear", Rules.ToList()));
+                Rules.Clear();
+                return n;
+            }
+
+            // 서식 되돌리기: 변경 직전 규칙 집합을 쌓는다(Add/Remove/Clear는 아래 훅에서 기록).
+            public readonly List<(string Description, List<ConditionalFormatRule> Before)> RuleHistory = new();
+            public override ConditionalFormatUndoResult? UndoConditionalFormat()
+            {
+                if (RuleHistory.Count == 0) return null;
+                var (desc, before) = RuleHistory[^1];
+                RuleHistory.RemoveAt(RuleHistory.Count - 1);
+                Rules.Clear();
+                Rules.AddRange(before);
+                return new ConditionalFormatUndoResult(desc, Rules.Count);
+            }
 
             public override Task<ConditionalFormatCount> CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken c)
             {
@@ -413,8 +474,8 @@ namespace NanumCsvViewer.Tests
             {
                 "csv.info", "csv.column_stats", "csv.get_rows", "csv.set_filter", "csv.clear_filter", "csv.sort", "csv.goto",
                 "csv.run_analysis", "csv.quality_scan", "csv.edit_cells", "csv.undo", "csv.save_edits_as", "csv.regex_count", "csv.regex_replace",
-                "csv.insert_rows", "csv.delete_rows", "csv.add_column", "csv.delete_column",
-                "csv.format_add", "csv.format_list", "csv.format_remove", "csv.format_clear",
+                "csv.insert_rows", "csv.delete_rows", "csv.add_column", "csv.move_column", "csv.delete_column",
+                "csv.format_add", "csv.format_list", "csv.format_remove", "csv.format_clear", "csv.format_undo",
                 "csv.export_view", "csv.show_markdown", "csv.show_image",
             };
             Assert.Equal(expected.OrderBy(x => x), defs.Select(d => d.Name).OrderBy(x => x));
@@ -524,6 +585,7 @@ namespace NanumCsvViewer.Tests
             Assert.Empty(host.Calls);
             var card = Assert.Single(denied.Calls);
             Assert.Contains("3 row(s) × 2 column(s)", card.Summary);
+            Assert.Equal(ApprovalKind.RowSharing, card.Kind);
             Assert.Contains("  · city", card.Lines);
 
             var ok = await Call(Tools(host, AgentDataPolicy.RowsWithApproval), "csv.get_rows", """{"count":3,"columns":["id","city"]}""", new FakeApprovals(true));
@@ -687,7 +749,7 @@ namespace NanumCsvViewer.Tests
 
         private sealed class CallbackApprovals(Action onAsk) : IAgentApprovals
         {
-            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation)
+            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation, ApprovalKind kind = ApprovalKind.RowSharing)
             {
                 onAsk();
                 return Task.FromResult(true);
@@ -749,6 +811,7 @@ namespace NanumCsvViewer.Tests
             var shared = await Call(tools, "csv.regex_count", """{"pattern":"^S","columns":["city"]}""", yes);
             var card = Assert.Single(yes.Calls);
             Assert.Contains("+ 3 · city: SECRET_TOWN", card.Lines);
+            Assert.Equal(ApprovalKind.RowSharing, card.Kind);
             Assert.Equal("SECRET_TOWN", (string?)Payload(shared)["examples"]![1]!["value"]);
 
             var no = new FakeApprovals(false);
@@ -1080,6 +1143,7 @@ namespace NanumCsvViewer.Tests
             Assert.False(r.IsError);
 
             var card = Assert.Single(approvals.Calls);
+            Assert.Equal(ApprovalKind.DataEdit, card.Kind);
             Assert.Contains("- Busan", card.Lines);
             Assert.Contains("+ Daegu", card.Lines);
             Assert.Contains("- 52", card.Lines);
@@ -1198,6 +1262,7 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(expected, host.SavedPath);
             var card = Assert.Single(approvals.Calls);
             Assert.Contains("+ " + expected, card.Lines);
+            Assert.Equal(ApprovalKind.FileSave, card.Kind);
         }
 
         [Fact]

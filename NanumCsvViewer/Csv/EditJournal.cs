@@ -51,6 +51,7 @@ namespace NanumCsvViewer.Csv
                 AppendBase = snapshot.AppendBase,
                 AppendedColumns = snapshot.AppendedColumns?.ToList(),
                 DeletedColumns = snapshot.DeletedColumns is { Length: > 0 } dc ? dc.ToList() : null,
+                ColumnOrder = snapshot.ColumnOrder is { Length: > 0 } co ? co.ToList() : null,
             };
             string path = FilePath(directory, key);
             string tmp = path + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -94,7 +95,8 @@ namespace NanumCsvViewer.Csv
                 dto.AppendedColumns is { Count: > 0 } appended
                     ? appended.Select(n => n ?? throw new InvalidDataException("Null appended column name.")).ToArray() : null,
                 dto.AppendedColumns is { Count: > 0 } ? dto.AppendBase : -1,
-                dto.DeletedColumns is { Count: > 0 } delCols ? delCols.ToArray() : null);
+                dto.DeletedColumns is { Count: > 0 } delCols ? delCols.ToArray() : null,
+                dto.ColumnOrder is { Count: > 0 } order ? order.ToArray() : null);
         }
 
         public static void Delete(string directory, string key)
@@ -134,6 +136,7 @@ namespace NanumCsvViewer.Csv
             public int AppendBase { get; set; } = -1;
             public List<string>? AppendedColumns { get; set; }
             public List<int>? DeletedColumns { get; set; } // 없으면(이전 버전 저널) 삭제한 컬럼 없음
+            public List<int>? ColumnOrder { get; set; }    // 없으면(이전 버전 저널) 표시 순서 = 물리 순서
         }
 
         private sealed class CellDto { public int Row { get; set; } public int Col { get; set; } public string? Value { get; set; } }

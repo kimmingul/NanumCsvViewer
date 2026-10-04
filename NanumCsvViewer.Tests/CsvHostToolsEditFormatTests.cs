@@ -154,6 +154,190 @@ namespace NanumCsvViewer.Tests
 
         // ------------------------------------------------------------------ 컬럼 추가·삭제
 
+        [Theory]
+        [InlineData("""{"name":"flag","position":"city"}""", 2)]       // 이름 앞
+        [InlineData("""{"name":"flag","position":"CITY"}""", 2)]       // 대소문자 무시
+        [InlineData("""{"name":"flag","position":1}""", 0)]            // 숫자(JSON 정수) = 새 컬럼 번호
+        [InlineData("""{"name":"flag","position":"3"}""", 2)]          // 숫자 문자열
+        [InlineData("""{"name":"flag","position":"start"}""", 0)]
+        [InlineData("""{"name":"flag","position":6}""", 5)]            // 컬럼 수 + 1 = 끝
+        [InlineData("""{"name":"flag","position":"end"}""", 5)]
+        [InlineData("""{"name":"flag"}""", 5)]
+        public async Task AddColumn_Position_InsertsAtTheResolvedIndex(string args, int expected)
+        {
+            var host = new FakeHost();
+            var approvals = new FakeApprovals(true);
+            var r = await Call(Tools(host), "csv.add_column", args, approvals);
+            Assert.False(r.IsError, r.Text);
+            Assert.Equal("flag", host.Headers[expected]);
+            Assert.Equal(6, host.Headers.Length);
+            Assert.Equal(expected, (int)Payload(r)["column_index"]!);
+            Assert.Equal(expected == 5 ? "addcol" : "inscol", host.Calls[^1].Split(':')[0]);
+            if (expected != 5) Assert.Contains(approvals.Calls[0].Lines, l => l.Contains("shift right"));
+            Assert.Single(host.Steps);
+        }
+
+        [Fact]
+        public async Task AddColumn_BadPosition_IsErrorAndAsksNothing()
+        {
+            var host = new FakeHost();
+            var approvals = new FakeApprovals(true);
+            foreach (string pos in new[] { "\"nope\"", "0", "7", "-1" })
+            {
+                var r = await Call(Tools(host), "csv.add_column", $$"""{"name":"flag","position":{{pos}}}""", approvals);
+                Assert.True(r.IsError, pos);
+            }
+            Assert.Empty(approvals.Calls);
+            Assert.Equal(5, host.Headers.Length);
+        }
+
+        [Fact]
+        public async Task MoveColumn_ByNameAndNumber_ComputesFinalIndex_OneUndoStep()
+        {
+            var host = new FakeHost();   // id, age, city, group, score
+            var approvals = new FakeApprovals(true);
+            var tools = Tools(host);
+
+            // 이름 앞으로: city(2)를 id(0) 앞으로 → 0
+            var r = await Call(tools, "csv.move_column", """{"column":"city","to":"id"}""", approvals);
+            Assert.False(r.IsError, r.Text);
+            Assert.Contains("movecol:2:0", host.Calls);
+            Assert.Equal(new[] { "city", "id", "age", "group", "score" }, host.Headers);
+            Assert.Equal("Seoul", host.Rows[0][0]);
+            Assert.Equal(0, (int)Payload(r)["column_index"]!);
+            Assert.True((bool)Payload(r)["edits"]!["columns_reordered"]!);
+            Assert.StartsWith(AgentEditTag.Prefix, host.Steps[^1].Description);
+            Assert.Contains(approvals.Calls[0].Lines, l => l.StartsWith("- ") && l.Contains("id | age | city"));
+            Assert.Contains(approvals.Calls[0].Lines, l => l.StartsWith("+ ") && l.Contains("city | id | age"));
+
+            // 뒤쪽 컬럼의 "앞"으로 이동하면 자기 자신이 빠지므로 한 칸 덜: city(0) → group 앞 = 최종 인덱스 2
+            await Call(tools, "csv.move_column", """{"column":"city","to":"group"}""");
+            Assert.Contains("movecol:0:2", host.Calls);
+            Assert.Equal(new[] { "id", "age", "city", "group", "score" }, host.Headers);
+
+            await Call(tools, "csv.move_column", """{"column":"id","to":5}""");
+            Assert.Equal("id", host.Headers[^1]);
+            await Call(tools, "csv.move_column", """{"column":"id","to":"start"}""");
+            Assert.Equal("id", host.Headers[0]);
+            await Call(tools, "csv.move_column", """{"column":"id","to":"end"}""");
+            Assert.Equal("id", host.Headers[^1]);
+            Assert.Equal(5, host.Steps.Count);
+
+            var undo = await Call(tools, "csv.undo", "{}");
+            Assert.False(undo.IsError, undo.Text);
+            Assert.Equal("id", host.Headers[0]);   // 마지막 단계(start→end)가 되돌려짐
+        }
+
+        [Fact]
+        public async Task MoveColumn_Refusals_DenialAndNoOp_ChangeNothing()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            var approvals = new FakeApprovals(true);
+
+            Assert.False((await Call(tools, "csv.move_column", """{"column":"city","to":4}""", approvals)).IsError);   // 정상: 한 번 이동
+            int calls = approvals.Calls.Count;
+
+            foreach (string args in new[]
+            {
+                """{"column":"nope","to":1}""",                // 없는 컬럼
+                """{"column":"id","to":0}""",                  // 범위 밖
+                """{"column":"id","to":6}""",
+                """{"column":"id","to":"nowhere"}""",
+                """{"column":"id","to":1}""",                  // 이미 그 자리
+                """{"column":"id","to":"id"}""",               // 자기 자신 앞 = 제자리
+                """{"column":"id"}""",                         // to 누락
+            })
+            {
+                var r = await Call(tools, "csv.move_column", args, approvals);
+                Assert.True(r.IsError, args);
+            }
+            Assert.Equal(calls, approvals.Calls.Count);   // 승인 카드 없이 거절
+            Assert.Single(host.Steps);
+
+            var before = host.Headers.ToArray();
+            var denied = await Call(tools, "csv.move_column", """{"column":"id","to":"end"}""", new FakeApprovals(false));
+            Assert.True(denied.IsError);
+            Assert.Equal(before, host.Headers);
+            Assert.Single(host.Steps);
+        }
+
+        [Fact]
+        public async Task MoveColumn_SingleColumnTable_IsRefused()
+        {
+            var host = new FakeHost
+            {
+                Headers = new[] { "only" }, Types = new[] { ColumnValueType.String },
+                Rows = new List<string[]> { new[] { "a" } },
+            };
+            host.View = new List<int> { 0 };
+            var r = await Call(Tools(host), "csv.move_column", """{"column":"only","to":1}""");
+            Assert.True(r.IsError);
+            Assert.Empty(host.Calls);
+        }
+
+        [Fact]
+        public async Task EditStateWithOnlyAReorder_CountsAsEditsToSave()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            await Call(tools, "csv.move_column", """{"column":"score","to":1}""");
+            Assert.True(host.GetInfo()!.Edits.HasAny);
+            var info = await Call(tools, "csv.info", "{}");
+            Assert.True((bool)Payload(info)["edits"]!["columns_reordered"]!);
+        }
+
+        [Fact]
+        public async Task FormatAdd_ThemeColorNames_PassThroughUnchanged_AndUnknownSyntaxIsRejected()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            foreach (string c in new[] { "red", "orange", "yellow", "green", "blue", "purple", "gray" })
+            {
+                var r = await Call(tools, "csv.format_add", $$"""{"expression":"age > 40","back_color":"{{c}}","fore_color":"gray"}""");
+                Assert.False(r.IsError, r.Text);
+            }
+            Assert.Equal(new[] { "red", "orange", "yellow", "green", "blue", "purple", "gray" }, host.Rules.Select(x => x.BackColor));
+            Assert.All(host.Rules, x => Assert.Equal("gray", x.ForeColor));
+
+            var bad = await Call(tools, "csv.format_add", """{"expression":"age > 40","back_color":"re d"}""");
+            Assert.True(bad.IsError);
+            Assert.Contains("theme colour", bad.Text);
+            Assert.Equal(7, host.Rules.Count);
+        }
+
+        [Fact]
+        public async Task FormatUndo_RestoresEarlierRules_RepeatsAndErrorsWhenEmpty()
+        {
+            var host = new FakeHost();
+            var tools = Tools(host);
+            var approvals = new FakeApprovals(true);
+
+            var none = await Call(tools, "csv.format_undo", "{}", approvals);
+            Assert.True(none.IsError);
+            Assert.Contains("no format change", none.Text);
+
+            await Call(tools, "csv.format_add", """{"expression":"age > 40","back_color":"red"}""");
+            await Call(tools, "csv.format_add", """{"expression":"age > 30","back_color":"blue"}""");
+            await Call(tools, "csv.format_clear", "{}");
+            Assert.Empty(host.Rules);
+
+            var r = await Call(tools, "csv.format_undo", "{}", approvals);
+            Assert.False(r.IsError, r.Text);
+            Assert.Equal(2, host.Rules.Count);
+            var p = Payload(r);
+            Assert.Equal("clear", (string?)p["undone"]);
+            Assert.Equal(2, (int)p["rule_count"]!);
+            Assert.Equal(2, p["rules"]!.AsArray().Count);
+
+            await Call(tools, "csv.format_undo", "{}");
+            Assert.Single(host.Rules);
+            Assert.Empty(approvals.Calls);   // 보기 전용: 승인 카드 없음
+
+            host.NoDoc = true;
+            Assert.True((await Call(tools, "csv.format_undo", "{}")).IsError);
+        }
+
         [Fact]
         public async Task AddColumn_CardResultAndUndo_RejectsDuplicatesAndEmptyNames()
         {

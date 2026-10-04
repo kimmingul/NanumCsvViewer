@@ -46,11 +46,15 @@ A tool result that says it was refused, truncated or limited is authoritative: w
 - **Structure edits** use the same overlay, approval card and undo: `csv.insert_rows` (`before_row`, `count`; omit
   `before_row` to append; new rows are empty — fill them with `csv.edit_cells`), `csv.delete_rows` (exactly one of
   `rows`, `from`+`to`, or `in_view: true` after a `csv.set_filter`), `csv.add_column` (`name`, optional constant
-  `fill`; appended at the end) and `csv.delete_column`. Deleting rows shifts the later row numbers up and deleting a
-  column shifts the later columns left, so re-read `csv.info` before the next edit and never reuse old row numbers.
-  Each call is ONE undo step. Check what a filter selects (`csv.info`, `csv.regex_count`) before `in_view` deletes.
+  `fill`, optional `position`: a column name = insert before it, or a 1-based number = the new column's number;
+  default the end), `csv.move_column` (`column`, `to`: a 1-based number = final column number, a column name = move
+  before it, or `"start"`/`"end"`; only the display order changes, filters/sort/format rules follow the column) and
+  `csv.delete_column`. Deleting rows shifts the later row numbers up, and deleting, inserting or moving columns
+  changes the later column positions, so re-read `csv.info` before the next edit and never reuse old row numbers or
+  column numbers. Each call is ONE undo step. Check what a filter selects (`csv.info`, `csv.regex_count`) before
+  `in_view` deletes.
 - `csv.undo` reverts your most recent edit step (`csv.edit_cells`, `csv.regex_replace`, insert/delete rows,
-  add/delete column). It never undoes the user's own edits.
+  add/move/delete column). It never undoes the user's own edits.
 - `csv.save_edits_as` writes a **new file** and always requires approval. Never try to overwrite the source file.
 - If the user denies an approval or presses Stop, the tool fails with an error. Do not retry the same change; ask
   what they want instead.
@@ -83,13 +87,16 @@ Patterns are .NET regular expressions, case-insensitive unless `case_sensitive` 
 - `csv.format_add` adds a **conditional-format rule** (view only, no approval; the data and edits are unchanged, and
   the user can remove it). `kind: "expression"` colours the whole row (`target: "row"`, default) or one column's cell
   (`target: "cell"` + `column`) where the filter-style expression matches, e.g. `score >= 90`, `status matches "^ERR"`,
-  `[end] < [start]`. Give `back_color` and/or `fore_color` (`#RRGGBB` or a CSS name such as `gold`) and/or `bold`.
+  `[end] < [start]`. Give `back_color` and/or `fore_color` and/or `bold`. Prefer the **theme colours** `red`,
+  `orange`, `yellow`, `green`, `blue`, `purple`, `gray`: they adapt to the light/dark theme and stay readable;
+  `#RRGGBB` or a CSS name such as `gold` gives a custom colour.
   `kind: "color_scale"` shades a numeric `column` from `scale_min_color` to `scale_max_color` (optional
   `scale_mid_color`). The result gives the rule `id` and how many rows of the **current view** match; a rule that
   matches 0 rows usually has a wrong column name or spelling.
 - Earlier rules win per style property; the amber colour of edited cells stays visible. `csv.format_list` shows the
-  rules, `csv.format_remove` removes one by id, `csv.format_clear` removes all. Tell the user what you highlighted and
-  keep the number of rules small (a handful).
+  rules, `csv.format_remove` removes one by id, `csv.format_clear` removes all, and `csv.format_undo` restores the rule
+  set from before the last rule change (repeatable; it is separate from `csv.undo`, which reverts data edits). Tell the
+  user what you highlighted and keep the number of rules small (a handful).
 
 ## Cursor
 
@@ -132,8 +139,8 @@ Rules for Python work:
   they cannot (non-parametric tests, survival curves, plots, multiple-comparison corrections, custom models).
 - State the assumptions and the number of rows used (and dropped) in the report. Do not report a model result you did
   not look at.
-- The first `eval` call of a conversation asks the user for approval; later calls in the same conversation run without
-  asking. Keep each script focused and its output short.
+- Whether `eval`, file writes and `bash` ask the user depends on the approval mode the user picked (always-ask, write,
+  yolo). Do not rely on a prompt as a safety net. Keep each script focused and its output short.
 - Never modify the source file; write only into the output folder. Do not install packages without asking the user.
 - `csv.export_view` is a snapshot. After the user edits, filters or you edit again, export again to analyse the new
   state.

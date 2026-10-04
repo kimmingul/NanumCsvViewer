@@ -15,7 +15,7 @@ namespace NanumCsvViewer
         private ToolStripMenuItem? _editCellMenu, _editSheetMenu, _saveEditsMenu, _revertCellMenu, _discardEditsMenu;
         private ToolStripMenuItem? _undoMenu, _redoMenu, _pasteMenu, _clearCellsMenu, _renameColumnMenu,
             _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, _regexReplaceMenu, _extractColumnMenu,
-            _insertColumnMenu, _deleteColumnMenu;
+            _insertColumnMenu, _deleteColumnMenu, _moveColumnLeftMenu, _moveColumnRightMenu;
         private readonly List<ToolStripItem> _editContextItems = new();
         private ToolStripButton? _editCellButton, _editSheetButton;
         private bool _sheetEditing;
@@ -49,6 +49,8 @@ namespace NanumCsvViewer
             _renameColumnMenu = MakeItem("Rename Column…", "컬럼 이름 변경…", (_, _) => RenameCurrentColumn());
             _insertColumnMenu = MakeItem("Insert Column…", "컬럼 삽입…", (_, _) => InsertColumnFromUi());
             _deleteColumnMenu = MakeItem("Delete Column", "컬럼 삭제", (_, _) => { if (grid.CurrentCell is { ColumnIndex: >= 0 } c) DeleteColumnFromUi(c.ColumnIndex); });
+            _moveColumnLeftMenu = MakeItem("Move Column Left", "컬럼 왼쪽으로 이동", (_, _) => MoveCurrentColumn(-1));
+            _moveColumnRightMenu = MakeItem("Move Column Right", "컬럼 오른쪽으로 이동", (_, _) => MoveCurrentColumn(+1));
             _insertAboveMenu = MakeItem("Insert Row Above", "위에 행 삽입", (_, _) => InsertRow(above: true));
             _insertBelowMenu = MakeItem("Insert Row Below", "아래에 행 삽입", (_, _) => InsertRow(above: false));
             _deleteRowsMenu = MakeItem("Delete Selected Rows", "선택한 행 삭제", (_, _) => DeleteSelectedRows());
@@ -59,7 +61,7 @@ namespace NanumCsvViewer
                      {
                          _undoMenu, _redoMenu, new ToolStripSeparator(),
                          _editCellMenu, _editSheetMenu, _pasteMenu, _clearCellsMenu, _regexReplaceMenu, _extractColumnMenu, _renameColumnMenu,
-                         _insertColumnMenu, _deleteColumnMenu,
+                         _insertColumnMenu, _moveColumnLeftMenu, _moveColumnRightMenu, _deleteColumnMenu,
                          _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, new ToolStripSeparator(),
                          _revertCellMenu, _saveEditsMenu, _discardEditsMenu,
                      })
@@ -78,6 +80,8 @@ namespace NanumCsvViewer
                          ("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", () => _ = RegexReplaceAsync()),
                          ("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", () => _ = ExtractColumnAsync()),
                          ("Insert Column…", "컬럼 삽입…", InsertColumnFromUi),
+                         ("Move Column Left", "컬럼 왼쪽으로 이동", () => MoveCurrentColumn(-1)),
+                         ("Move Column Right", "컬럼 오른쪽으로 이동", () => MoveCurrentColumn(+1)),
                          ("Delete Column", "컬럼 삭제", () => { if (grid.CurrentCell is { ColumnIndex: >= 0 } c) DeleteColumnFromUi(c.ColumnIndex); }),
                      })
             {
@@ -116,6 +120,11 @@ namespace NanumCsvViewer
             grid.EditingControlShowing += OnEditControlShowing;
             grid.CellDoubleClick += OnEditCellDoubleClick;
             grid.ColumnHeaderMouseDoubleClick += OnEditHeaderDoubleClick;
+            grid.MouseDown += OnColumnDragMouseDown;
+            grid.MouseMove += OnColumnDragMouseMove;
+            grid.MouseUp += OnColumnDragMouseUp;
+            grid.KeyDown += OnColumnDragKeyDown;
+            grid.Paint += OnColumnDragPaint;
         }
 
         private void LocalizeEditButtons()
@@ -153,6 +162,9 @@ namespace NanumCsvViewer
             if (_extractColumnMenu is not null) _extractColumnMenu.Enabled = ready;
             if (_renameColumnMenu is not null) _renameColumnMenu.Enabled = sheet && hasCell;
             if (_insertColumnMenu is not null) _insertColumnMenu.Enabled = sheet;
+            int curCol = hasCell ? grid.CurrentCell!.ColumnIndex : -1;
+            if (_moveColumnLeftMenu is not null) _moveColumnLeftMenu.Enabled = sheet && hasCell && AdjacentVisibleColumn(curCol, -1) >= 0;
+            if (_moveColumnRightMenu is not null) _moveColumnRightMenu.Enabled = sheet && hasCell && AdjacentVisibleColumn(curCol, +1) >= 0;
             if (_deleteColumnMenu is not null) _deleteColumnMenu.Enabled = sheet && hasCell && _doc!.ColumnCount > 1;
             UpdateFormatState();
             if (_insertAboveMenu is not null) _insertAboveMenu.Enabled = structure;
@@ -251,6 +263,7 @@ namespace NanumCsvViewer
             if (e.AddedCount > 0) parts.Add(LT($"{e.AddedCount:N0} added row(s)", $"추가 행 {e.AddedCount:N0}개"));
             if (e.AppendedColumnCount > 0) parts.Add(LT($"{e.AppendedColumnCount:N0} new column(s)", $"새 컬럼 {e.AppendedColumnCount:N0}개"));
             if (e.DeletedColumnCount > 0) parts.Add(LT($"{e.DeletedColumnCount:N0} deleted column(s)", $"삭제 컬럼 {e.DeletedColumnCount:N0}개"));
+            if (e.HasColumnOrder) parts.Add(LT("columns reordered", "컬럼 순서 변경"));
             return string.Join(LT(", ", ", "), parts);
         }
 
@@ -471,6 +484,9 @@ namespace NanumCsvViewer
             menu.Items.Add(LT("Rename Column…", "컬럼 이름 변경…"), null, (_, _) => RenameColumn(col));
             menu.Items.Add(LT("Insert Column…", "컬럼 삽입…"), null, (_, _) => InsertColumnFromUi());
             var del = menu.Items.Add(LT("Delete Column", "컬럼 삭제"), null, (_, _) => DeleteColumnFromUi(col));
+            int left = AdjacentVisibleColumn(col, -1), right = AdjacentVisibleColumn(col, +1);
+            menu.Items.Add(LT("Move Column Left", "컬럼 왼쪽으로 이동"), null, (_, _) => MoveColumnFromUi(col, left)).Enabled = left >= 0;
+            menu.Items.Add(LT("Move Column Right", "컬럼 오른쪽으로 이동"), null, (_, _) => MoveColumnFromUi(col, right)).Enabled = right >= 0;
             del.Enabled = _doc.ColumnCount > 1;
         }
 

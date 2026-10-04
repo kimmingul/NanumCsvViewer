@@ -32,6 +32,10 @@ namespace NanumCsvViewer
         public int AgentPanelWidth { get; set; } = 460;
         /// <summary>로컬 Python 분석 허용(기본 꺼짐). 켜면 에이전트가 현재 뷰를 로컬 파일로 내보내 Python(omp eval)으로 분석할 수 있다.</summary>
         public bool AgentAllowLocalPython { get; set; } = false;
+        /// <summary>승인 모드(always-ask | write | yolo). 기본 yolo. host.yml tools.approvalMode와 앱 승인 카드 정책.</summary>
+        public string AgentApprovalMode { get; set; } = "yolo";
+        /// <summary>승인 모드를 사용자가 직접 골랐거나 기본 모드 안내를 이미 보였으면 true(안내는 한 번만).</summary>
+        public bool AgentApprovalNoticeShown { get; set; } = false;
 
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");

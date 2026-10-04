@@ -521,13 +521,16 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(new[] { "--mode", "rpc-ui", "--cwd", "X" }, OmpLaunch.BuildArguments("X", null, null, "  "));
         }
 
-        [Fact]
-        public void Host_config_inlines_csv_devices_and_asks_before_omp_runs_writes_or_commands()
+        [Theory]
+        [InlineData(AgentApprovalMode.AlwaysAsk, "always-ask")]
+        [InlineData(AgentApprovalMode.Write, "write")]
+        [InlineData(AgentApprovalMode.Yolo, "yolo")]
+        public void Host_config_inlines_csv_devices_and_carries_the_approval_mode(AgentApprovalMode mode, string expected)
         {
-            using var doc = JsonDocument.Parse(OmpLaunch.HostConfigJson);
+            using var doc = JsonDocument.Parse(OmpLaunch.HostConfigJson(mode));
             var tools = doc.RootElement.Child("tools");
             Assert.Equal(new[] { "csv.*" }, tools.Child("xdevInlineDevices").Strings());
-            Assert.Equal("always-ask", tools.Str("approvalMode"));
+            Assert.Equal(expected, tools.Str("approvalMode"));
         }
     }
 
@@ -1013,7 +1016,7 @@ namespace NanumCsvViewer.Tests
 
         private sealed class NoApprovals : IAgentApprovals
         {
-            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation) => Task.FromResult(true);
+            public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation, ApprovalKind kind = ApprovalKind.RowSharing) => Task.FromResult(true);
         }
 
         private static (HostToolDispatcher D, FakeTools T, List<string> Sent) Make(int maxFrame = RpcProtocol.MaxFrameBytes)

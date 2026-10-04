@@ -20,9 +20,17 @@ namespace NanumCsvViewer.Agent
 
         // ---- IAgentApprovals -----------------------------------------------------------------------------------
 
-        /// <summary>채팅에 승인 카드를 띄우고 사용자의 답을 기다린다. 거부·중지·자식 종료·취소·창 닫힘이면 false.</summary>
-        public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation) =>
-            ApproveCore(target, summary, lines, cancellation, null);
+        /// <summary>
+        /// 앱 승인 카드. 현재 승인 모드가 이 종류(kind)를 통과시키면 카드 없이 알림만 남기고 true(RowSharing은 항상 묻는다).
+        /// 아니면 채팅에 승인 카드를 띄우고 사용자의 답을 기다린다. 거부·중지·자식 종료·취소·창 닫힘이면 false.
+        /// </summary>
+        public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation,
+            ApprovalKind kind = ApprovalKind.RowSharing)
+        {
+            if (_disposed || _client == null || cancellation.IsCancellationRequested) return Task.FromResult(false);
+            if (TryAutoApprove(target, kind)) return Task.FromResult(true);
+            return ApproveCore(target, summary, lines, cancellation, null);
+        }
 
         private async Task<bool> ApproveCore(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation, string? ompUiId)
         {

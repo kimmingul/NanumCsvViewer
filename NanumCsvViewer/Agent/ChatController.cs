@@ -212,7 +212,8 @@ namespace NanumCsvViewer.Agent
 
                 string? pythonSection = await PreparePythonAsync(exe, launch, cancellation);
                 if (launch != _launchId || _disposed) return;
-                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, pythonSection);
+                _launchedApproval = _options.ApprovalMode;
+                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, pythonSection, _launchedApproval);
                 // 작업 폴더가 바뀐 재시작은 omp가 RPC switch_session을 거절한다(다른 cwd의 세션). 명령줄 --resume은 폴더가 달라도 이어 간다.
                 string? cliResume = resumeViaCli && !string.IsNullOrEmpty(resumeSession) ? resumeSession : null;
                 if (cliResume != null) resumeSession = null;
@@ -275,6 +276,7 @@ namespace NanumCsvViewer.Agent
             _connected = true;
             SetStatus("", false);
             RefreshStatus(force: true);
+            PostApprovalNoticeOnce();
             RunPendingWorkspaceRestart();
         }
 
@@ -442,6 +444,7 @@ namespace NanumCsvViewer.Agent
                 Project = ProjectName,
                 Cwd = _workDir,
                 Pid = _client?.ProcessId ?? 0,
+                Approval = AgentApprovalPolicy.ToOmp(_options.ApprovalMode),
             };
             if (!force && s == _lastStatus) return;
             _lastStatus = s;
@@ -501,8 +504,9 @@ namespace NanumCsvViewer.Agent
     /// <summary>임시 폴더의 host.yml·가이드 파일 관리.</summary>
     internal static class SupportFiles
     {
-        public static (string HostConfig, string? Guide) Write(string tag, string? guide, string language, string? extraSection = null) =>
-            OmpLaunch.WriteSupportFiles(tag, guide, language, extraSection);
+        public static (string HostConfig, string? Guide) Write(string tag, string? guide, string language, string? extraSection = null,
+            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default) =>
+            OmpLaunch.WriteSupportFiles(tag, guide, language, extraSection, approvalMode);
 
         public static void Cleanup(string tag)
         {

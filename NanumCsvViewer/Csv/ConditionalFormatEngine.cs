@@ -29,16 +29,17 @@ namespace NanumCsvViewer.Csv
             public int Column = -1;                       // 대상 컬럼 번호(Row 대상 식 규칙은 -1)
             public Func<string[], bool>? Predicate;
             public RegexTimeoutCounter? Timeouts;
-            public Color? Back, Fore;
+            public ThemedColor? Back, Fore;
             public bool Bold;
-            public Color ScaleMin, ScaleMax;
-            public Color? ScaleMid;
+            public ThemedColor ScaleMin, ScaleMax;
+            public ThemedColor? ScaleMid;
             public volatile ScaleBox? Range;              // 색상 눈금 범위(null = 아직 계산 전/숫자 없음)
         }
 
         internal sealed class ScaleBox(ScaleRange range) { public readonly ScaleRange Range = range; }
 
         private readonly Item[] _items;
+        private volatile bool _dark;
 
         private ConditionalFormatSet(Item[] items, IReadOnlyList<(string Id, string Problem)> problems)
         {
@@ -55,6 +56,12 @@ namespace NanumCsvViewer.Csv
         public int ActiveCount => _items.Length;
 
         public bool IsEmpty => _items.Length == 0;
+
+        /// <summary>
+        /// 다크 테마 색으로 해석할지. 테마가 바뀌면 바꿔 주면 된다(규칙을 다시 컴파일하거나 색상 눈금 범위를 다시 구할 필요 없음).
+        /// 빈 집합에는 아무 효과가 없다.
+        /// </summary>
+        public bool IsDark { get => _dark; set => _dark = value; }
 
         /// <summary>식 규칙이 하나라도 있는가(행마다 평가가 필요한가).</summary>
         public bool HasExpressionRules { get; }
@@ -87,16 +94,16 @@ namespace NanumCsvViewer.Csv
                     item.Predicate = compiled.Predicate;
                     item.Timeouts = compiled.Timeouts;
                     item.Column = rule.Target == ConditionalFormatTarget.Cell ? ConditionalFormatRules.ResolveColumn(headers, rule.Column) : -1;
-                    item.Back = ConditionalFormatRule.ParseColor(rule.BackColor);
-                    item.Fore = ConditionalFormatRule.ParseColor(rule.ForeColor);
+                    item.Back = ThemeColors.Make(rule.BackColor, ThemeColorRole.Back, rule.AdaptTheme);
+                    item.Fore = ThemeColors.Make(rule.ForeColor, ThemeColorRole.Fore, rule.AdaptTheme);
                     item.Bold = rule.Bold;
                 }
                 else
                 {
                     item.Column = ConditionalFormatRules.ResolveColumn(headers, rule.Column);
-                    item.ScaleMin = ConditionalFormatRule.ParseColor(rule.ScaleMinColor)!.Value;
-                    item.ScaleMax = ConditionalFormatRule.ParseColor(rule.ScaleMaxColor)!.Value;
-                    item.ScaleMid = ConditionalFormatRule.ParseColor(rule.ScaleMidColor);
+                    item.ScaleMin = ThemeColors.Make(rule.ScaleMinColor, ThemeColorRole.Scale, rule.AdaptTheme)!.Value;
+                    item.ScaleMax = ThemeColors.Make(rule.ScaleMaxColor, ThemeColorRole.Scale, rule.AdaptTheme)!.Value;
+                    item.ScaleMid = ThemeColors.Make(rule.ScaleMidColor, ThemeColorRole.Scale, rule.AdaptTheme);
                 }
                 items.Add(item);
             }
@@ -133,11 +140,15 @@ namespace NanumCsvViewer.Csv
 
         /// <summary>
         /// column 셀의 스타일. matched = <see cref="Evaluate"/> 결과. 규칙 순서대로 보며 속성마다 처음 정해진 값을 쓴다.
-        /// 배경이 정해졌는데 글자색을 정한 규칙이 없으면 글자색은 대비가 되도록 검정/흰색으로 자동 지정한다.
+        /// 색은 <see cref="IsDark"/>에 맞는 테마 색으로 풀린다. 배경이 정해졌는데 글자색을 정한 규칙이 없으면 글자색은 자동으로 정한다 —
+        /// 이름 색 배경이면 그 짝 글자색, 아니면 대비가 되도록 검정/흰색. 다크 테마에서 직접 지정(테마 맞춤 켜짐)한 글자색은
+        /// 배경(규칙 배경, 없으면 격자 배경) 위에서 대비 4.5 이상이 되도록 명도를 올린다.
         /// </summary>
         public CellFormatResult Resolve(string[] row, bool[]? matched, int column)
         {
-            Color? back = null, fore = null;
+            bool dark = _dark;
+            Color? back = null;
+            ThemedColor? backSource = null, foreSource = null;
             bool bold = false;
             for (int i = 0; i < _items.Length; i++)
             {
@@ -146,29 +157,44 @@ namespace NanumCsvViewer.Csv
                 {
                     if (matched is null || !matched[i]) continue;
                     if (item.Column >= 0 && item.Column != column) continue;
-                    if (back is null && item.Back is { } b) back = b;
-                    if (fore is null && item.Fore is { } f) fore = f;
+                    if (back is null && item.Back is { } b) { back = b.Get(dark); backSource = b; }
+                    if (foreSource is null && item.Fore is { } f) foreSource = f;
                     if (item.Bold) bold = true;
                 }
                 else
                 {
                     if (back is not null || item.Column != column || item.Range is not { } box) continue;
                     if ((uint)column >= (uint)row.Length || !TryNumber(row[column], out double v)) continue;
-                    back = Interpolate(item, box.Range, v);
+                    back = Interpolate(item, box.Range, v, dark);
                 }
             }
+            Color? fore = null;
             bool auto = false;
-            if (fore is null && back is { } shown) { fore = Contrast(shown); auto = true; }
+            if (foreSource is { } fs)
+            {
+                var c = fs.Get(dark);
+                if (dark && !fs.IsToken && fs.Adapt) c = ThemeColors.EnsureContrast(c, back ?? ThemeColors.GridBackground(true));
+                fore = c;
+            }
+            else if (back is { } shown)
+            {
+                fore = backSource?.TextFor(dark) ?? Contrast(shown);
+                auto = true;
+            }
             return new CellFormatResult(back, fore, bold, auto);
         }
 
-        private static Color Interpolate(Item item, ScaleRange range, double v)
+        private static Color Interpolate(Item item, ScaleRange range, double v, bool dark)
         {
             double t = range.Max > range.Min ? (v - range.Min) / (range.Max - range.Min) : 0.5;
             t = Math.Clamp(t, 0, 1);
+            Color min = item.ScaleMin.Get(dark), max = item.ScaleMax.Get(dark);
             if (item.ScaleMid is { } mid)
-                return t < 0.5 ? Lerp(item.ScaleMin, mid, t * 2) : Lerp(mid, item.ScaleMax, (t - 0.5) * 2);
-            return Lerp(item.ScaleMin, item.ScaleMax, t);
+            {
+                Color m = mid.Get(dark);
+                return t < 0.5 ? Lerp(min, m, t * 2) : Lerp(m, max, (t - 0.5) * 2);
+            }
+            return Lerp(min, max, t);
         }
 
         private static Color Lerp(Color a, Color b, double t)

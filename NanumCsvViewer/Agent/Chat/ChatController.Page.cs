@@ -41,6 +41,11 @@ namespace NanumCsvViewer.Agent
                 case "setThinking":
                     SetThinking(msg.Str("value"));
                     break;
+                case "setApproval":
+                    // 알 수 없는 값은 무시하고 선택을 현재 모드로 되돌린다(기본 모드로 조용히 넘어가지 않는다).
+                    if (AgentApprovalPolicy.TryParse(msg.Str("value"), out var wanted)) TrySetApprovalMode(wanted);
+                    else RefreshStatus(force: true);
+                    break;
                 case "cancelQueued":
                     CancelQueued(msg.Str("sent"), msg.Str("queue"));
                     break;

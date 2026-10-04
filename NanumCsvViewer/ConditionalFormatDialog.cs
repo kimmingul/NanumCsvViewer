@@ -25,7 +25,7 @@ namespace NanumCsvViewer
         private readonly ComboBox _kind = new(), _target = new(), _column = new();
         private readonly TextBox _expression = new();
         private readonly ColorField _back, _fore, _min, _mid, _max;
-        private readonly CheckBox _bold = new();
+        private readonly CheckBox _bold = new(), _adapt = new();
         private readonly Label _preview = new();
         private readonly Panel _editor = new();
         private readonly Label _targetLabel = new(), _columnLabel = new(), _exprLabel = new(), _backLabel = new(), _foreLabel = new(),
@@ -44,8 +44,8 @@ namespace NanumCsvViewer
             _headers = headers;
             _sample = sample;
             _palette = palette;
-            _back = new ColorField(palette); _fore = new ColorField(palette);
-            _min = new ColorField(palette); _mid = new ColorField(palette); _max = new ColorField(palette);
+            _back = new ColorField(palette, ThemeColorRole.Back); _fore = new ColorField(palette, ThemeColorRole.Fore);
+            _min = new ColorField(palette, ThemeColorRole.Scale); _mid = new ColorField(palette, ThemeColorRole.Scale); _max = new ColorField(palette, ThemeColorRole.Scale);
 
             Text = LT("Conditional Formatting", "조건부 서식");
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -163,6 +163,10 @@ namespace NanumCsvViewer
             _expression.ScrollBars = ScrollBars.Vertical;
             _bold.Text = LT("Bold", "굵게");
             _bold.ForeColor = _palette.Text;
+            _adapt.Text = LT("Adapt custom colors to the theme (lighter text / darker fills in dark mode). Named colors always adapt.",
+                             "직접 지정한 색을 테마에 맞춤(다크에서 글자는 밝게·배경은 어둡게). 이름 색은 항상 테마에 맞습니다.");
+            _adapt.AutoSize = false;
+            _adapt.ForeColor = _palette.Text;
             _preview.AutoSize = false;
             _preview.Dock = DockStyle.Fill;
             _hint.AutoSize = false;
@@ -182,6 +186,7 @@ namespace NanumCsvViewer
             Row(_minLabel, LT("Minimum color", "최소값 색"), _min);
             Row(_midLabel, LT("Middle color (optional)", "중간 색(선택)"), _mid);
             Row(_maxLabel, LT("Maximum color", "최대값 색"), _max);
+            Row(new Label(), "", _adapt, 44);
             Row(new Label(), "", _preview, 60);
 
             _editor.Controls.Add(table);
@@ -197,9 +202,14 @@ namespace NanumCsvViewer
             _min.ValueChanged += (_, _) => Edit(r => r with { ScaleMinColor = NullIfEmpty(_min.Value) });
             _mid.ValueChanged += (_, _) => Edit(r => r with { ScaleMidColor = NullIfEmpty(_mid.Value) });
             _max.ValueChanged += (_, _) => Edit(r => r with { ScaleMaxColor = NullIfEmpty(_max.Value) });
+            _adapt.CheckedChanged += (_, _) =>
+            {
+                _back.Adapt = _fore.Adapt = _min.Adapt = _mid.Adapt = _max.Adapt = _adapt.Checked;
+                Edit(r => r with { AdaptTheme = _adapt.Checked });
+            };
         }
 
-        private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : ThemeColors.Normalize(s);
 
         private int Selected => _list.SelectedIndex;
 
@@ -261,7 +271,7 @@ namespace NanumCsvViewer
             string id = ConditionalFormatRules.NextId(_rules);
             _rules.Add(new ConditionalFormatRule(id, LT("New rule", "새 규칙"), true, ConditionalFormatKind.Expression, "",
                 ConditionalFormatTarget.Cell, _columnNames.Length > 0 ? _columnNames[0] : null,
-                "#FFE699", null, false, "#FFFFFF", null, "#F8696B"));
+                "yellow", null, false, "#FFFFFF", null, "red"));
             RefreshList(_rules.Count - 1);
             _expression.Focus();
         }
@@ -298,6 +308,8 @@ namespace NanumCsvViewer
                 _column.SelectedIndex = ci >= 0 && ci < _column.Items.Count ? ci : -1;
                 _expression.Text = r.Expression;
                 _bold.Checked = r.Bold;
+                _back.Adapt = _fore.Adapt = _min.Adapt = _mid.Adapt = _max.Adapt = r.AdaptTheme;
+                _adapt.Checked = r.AdaptTheme;
                 _back.Value = r.BackColor ?? "";
                 _fore.Value = r.ForeColor ?? "";
                 _min.Value = r.ScaleMinColor ?? "";
@@ -405,12 +417,17 @@ namespace NanumCsvViewer
             base.Dispose(disposing);
         }
 
-        /// <summary>16진 색 입력 + 색 선택 단추. 비워 두면 "정하지 않음".</summary>
+        /// <summary>
+        /// 색 입력 + 색 선택 단추. 값은 이름 색 토큰(red…gray: 테마마다 짝 색) 또는 "#RRGGBB". 비워 두면 "정하지 않음".
+        /// 단추를 누르면 이름 색 견본이 먼저 나오고 마지막에 "직접 지정…"(색 선택 대화상자)이 있다. 견본 색은 현재 테마(와 테마 맞춤 설정)로 풀어 보여 준다.
+        /// </summary>
         private sealed class ColorField : Panel
         {
             private readonly TextBox _text = new();
             private readonly Button _swatch = new();
-            private bool _setting;
+            private readonly ThemeColorRole _role;
+            private readonly bool _dark;
+            private bool _setting, _adapt = true;
 
             public event EventHandler? ValueChanged;
 
@@ -428,8 +445,19 @@ namespace NanumCsvViewer
                 }
             }
 
-            public ColorField(ThemePalette p)
+            /// <summary>직접 지정한 색을 다크 테마에서 조정하는가(규칙의 AdaptTheme). 견본 표시에만 쓴다.</summary>
+            [System.ComponentModel.Browsable(false)]
+            [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+            public bool Adapt
             {
+                get => _adapt;
+                set { _adapt = value; UpdateSwatch(); }
+            }
+
+            public ColorField(ThemePalette p, ThemeColorRole role)
+            {
+                _role = role;
+                _dark = ReferenceEquals(p, ThemePalette.Dark);
                 Height = 28;
                 _text.Dock = DockStyle.Left;
                 _text.Width = 110;
@@ -438,23 +466,68 @@ namespace NanumCsvViewer
                 _text.BorderStyle = BorderStyle.FixedSingle;
                 _swatch.Dock = DockStyle.Left;
                 _swatch.Width = 60;
-                _swatch.Text = "…";
+                _swatch.Text = "▾";
                 var clear = new Button { Dock = DockStyle.Left, Width = 60, Text = LT("None", "없음") };
                 Controls.Add(clear);
                 Controls.Add(_swatch);
                 Controls.Add(_text);
                 _text.TextChanged += (_, _) => { UpdateSwatch(); if (!_setting) ValueChanged?.Invoke(this, EventArgs.Empty); };
-                _swatch.Click += (_, _) =>
+                _swatch.Click += (_, _) => ShowPicker();
+                clear.Click += (_, _) => _text.Text = "";
+            }
+
+            private static string NameLabel(string name) => name switch
+            {
+                "red" => LT("Red", "빨강"),
+                "orange" => LT("Orange", "주황"),
+                "yellow" => LT("Yellow", "노랑"),
+                "green" => LT("Green", "초록"),
+                "blue" => LT("Blue", "파랑"),
+                "purple" => LT("Purple", "보라"),
+                _ => LT("Gray", "회색"),
+            };
+
+            private Color Shown(string? text)
+            {
+                var c = ThemeColors.Resolve(text, _role, _dark, _adapt) ?? Color.White;
+                if (_role == ThemeColorRole.Fore && _dark && _adapt && !ThemeColors.IsToken(text))
+                    c = ThemeColors.EnsureContrast(c, ThemeColors.GridBackground(true));
+                return c;
+            }
+
+            private void ShowPicker()
+            {
+                var menu = new ContextMenuStrip { ShowImageMargin = true };
+                foreach (string name in ThemeColors.Names)
+                {
+                    var bmp = new Bitmap(16, 16);
+                    using (var g = Graphics.FromImage(bmp))
+                    {
+                        g.Clear(Color.Gray);
+                        using var br = new SolidBrush(Shown(name));
+                        g.FillRectangle(br, 1, 1, 14, 14);
+                    }
+                    string captured = name;
+                    menu.Items.Add(new ToolStripMenuItem(NameLabel(name), bmp, (_, _) => _text.Text = captured));
+                }
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add(new ToolStripMenuItem(LT("Custom color…", "직접 지정…"), null, (_, _) =>
                 {
                     using var dlg = new ColorDialog { FullOpen = true, Color = ConditionalFormatRule.ParseColor(_text.Text) ?? Color.White };
                     if (dlg.ShowDialog(FindForm()) == DialogResult.OK) _text.Text = ConditionalFormatRule.ToHex(dlg.Color);
-                };
-                clear.Click += (_, _) => _text.Text = "";
+                }));
+                menu.Closed += (_, _) => BeginInvoke(() =>
+                {
+                    foreach (ToolStripItem it in menu.Items) it.Image?.Dispose();
+                    menu.Dispose();
+                });
+                menu.Show(_swatch, new Point(0, _swatch.Height));
             }
 
             private void UpdateSwatch()
             {
-                var c = ConditionalFormatRule.ParseColor(_text.Text);
+                bool has = ConditionalFormatRule.ParseColor(_text.Text) is not null;
+                var c = has ? Shown(_text.Text) : (Color?)null;
                 _swatch.BackColor = c ?? SystemColors.Control;
                 _swatch.ForeColor = c is { } cc ? ConditionalFormatSet.Contrast(cc) : SystemColors.ControlText;
                 _swatch.UseVisualStyleBackColor = c is null;

@@ -378,9 +378,11 @@ namespace NanumCsvViewer
             var hints = _workbook?.ColumnHints(_currentSheetIndex);
             if (hints is not null)
             {
-                for (int c = 0; c < _columnSummaries.Length && c < hints.Count; c++)
+                for (int c = 0; c < _columnSummaries.Length; c++)
                 {
-                    var hint = hints[c];
+                    int source = SourceColumnOf(c); // 컬럼을 옮기거나 삭제·삽입했어도 파일의 그 컬럼의 선언 타입을 쓴다
+                    if (source < 0 || source >= hints.Count) continue;
+                    var hint = hints[source];
                     if (hint is null) continue;
                     _columnSummaries[c] = _columnSummaries[c] with
                     {
@@ -2615,7 +2617,7 @@ namespace NanumCsvViewer
                 RowCount = doc.DataRowsAvailable,
                 CoversAllRows = !doc.RowCountTruncated,
                 ColumnTypes = types,
-                AllowedCodes = withTypes ? _workbook?.AllowedCodes(_currentSheetIndex) : null,
+                AllowedCodes = withTypes ? AlignToDisplayColumns(_workbook?.AllowedCodes(_currentSheetIndex)) : null,
                 SourceName = Path.GetFileName(_workbook?.SourcePath ?? _currentPath ?? ""),
                 SourceBytes = doc.FileLength,
             };

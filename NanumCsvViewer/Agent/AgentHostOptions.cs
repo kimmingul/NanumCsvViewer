@@ -13,6 +13,8 @@ namespace NanumCsvViewer.Agent
     /// <param name="AppVersion">앱 버전(가이드·rpc.log 머리말·/version 표시용).</param>
     /// <param name="AllowLocalPython">로컬 Python 분석 허용(기본 꺼짐). 켜면 omp 작업 폴더가 분석 결과 폴더가 되고, 에이전트가
     /// 현재 뷰를 로컬 파일로 내보내 omp eval(Python)로 분석하며 가이드에 Python 절이 추가된다.</param>
+    /// <param name="ApprovalMode">승인 모드. host.yml의 tools.approvalMode와 앱 승인 카드 정책을 정한다. 바뀌면 같은 대화로 omp를 다시 시작한다.</param>
+    /// <param name="ApprovalNoticePending">true면 다음 연결 때 기본 모드(yolo) 안내를 채팅에 한 번 보이고 ApprovalNoticeShown을 올린다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
@@ -20,7 +22,9 @@ namespace NanumCsvViewer.Agent
         AgentDataPolicy DataPolicy = AgentDataPolicy.SummaryOnly,
         int MaxRowsPerRequest = 200,
         string AppVersion = "",
-        bool AllowLocalPython = false)
+        bool AllowLocalPython = false,
+        AgentApprovalMode ApprovalMode = AgentApprovalPolicy.Default,
+        bool ApprovalNoticePending = false)
     {
         public bool IsKorean => !string.Equals(Language, "en", StringComparison.OrdinalIgnoreCase);
     }

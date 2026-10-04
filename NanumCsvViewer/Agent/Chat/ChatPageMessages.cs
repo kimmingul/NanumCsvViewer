@@ -118,6 +118,7 @@ namespace NanumCsvViewer.Agent.Chat
                 o["project"] = s.Project;
                 o["cwd"] = s.Cwd;
                 o["pid"] = s.Pid;
+                o["approval"] = s.Approval;
             });
 
         public static string Catalog(IReadOnlyList<string> models, IReadOnlyList<string> levels, IReadOnlyDictionary<string, string> providers) =>
@@ -240,5 +241,7 @@ namespace NanumCsvViewer.Agent.Chat
         public string Project { get; init; } = "";
         public string Cwd { get; init; } = "";
         public int Pid { get; init; }
+        /// <summary>승인 모드 omp 값(always-ask | write | yolo). 페이지의 승인 선택이 이 값을 보여 준다(빈 값이면 선택을 숨긴다).</summary>
+        public string Approval { get; init; } = "";
     }
 }

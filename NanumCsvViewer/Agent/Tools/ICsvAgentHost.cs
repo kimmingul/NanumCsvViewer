@@ -29,12 +29,12 @@ namespace NanumCsvViewer.Agent.Tools
     public sealed record AgentEditState(
         int Cells, int RenamedColumns, int DeletedRows, int AddedRows,
         bool Unsaved, bool CanUndo, string? UndoDescription, bool AgentCanUndo, bool SheetEditMode,
-        int AddedColumns = 0, int DeletedColumns = 0)
+        int AddedColumns = 0, int DeletedColumns = 0, bool ColumnsReordered = false)
     {
         public static readonly AgentEditState None = new(0, 0, 0, 0, false, false, null, false, false);
 
         /// <summary>저장할 편집이 하나라도 있는가(셀·컬럼 이름·행·컬럼 구조).</summary>
-        public bool HasAny => Cells + RenamedColumns + DeletedRows + AddedRows + AddedColumns + DeletedColumns > 0;
+        public bool HasAny => Cells + RenamedColumns + DeletedRows + AddedRows + AddedColumns + DeletedColumns > 0 || ColumnsReordered;
     }
 
     public sealed record AgentCursor(long? SourceRow, string? Column);
@@ -170,6 +170,12 @@ namespace NanumCsvViewer.Agent.Tools
         /// <summary>맨 끝에 컬럼을 추가한다. fill이 비어 있지 않으면 모든 행에 그 문자열을 채운다.</summary>
         AgentColumnChange AddColumn(string name, string? fill, string description);
 
+        /// <summary>컬럼을 position(0..ColumnCount, 변경 후 0-based 인덱스)에 추가한다. ColumnCount면 맨 끝. 한 단계.</summary>
+        AgentColumnChange InsertColumn(string name, int position, string? fill, string description);
+
+        /// <summary>컬럼을 from에서 to(이동 후 인덱스, 둘 다 현재 표시 순서 기준 0-based)로 옮긴다. 한 단계. 반환 Column = to.</summary>
+        AgentColumnChange MoveColumn(int from, int to, string description);
+
         /// <summary>컬럼 삭제(원본·추가 컬럼 모두). 뒤 컬럼 인덱스가 하나씩 당겨진다.</summary>
         AgentColumnChange DeleteColumn(int column, string description);
 
@@ -181,6 +187,9 @@ namespace NanumCsvViewer.Agent.Tools
         ConditionalFormatRule AddConditionalFormat(ConditionalFormatRule draft);
         bool RemoveConditionalFormat(string id);
         int ClearConditionalFormats();
+
+        /// <summary>조건부 서식 규칙 집합을 직전 변경 전으로 되돌린다. 되돌릴 기록이 없으면 null.</summary>
+        ConditionalFormatUndoResult? UndoConditionalFormat();
 
         /// <summary>현재 뷰에서 규칙(id) 또는 초안이 일치하는 행 수.</summary>
         Task<ConditionalFormatCount> CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken cancellation);

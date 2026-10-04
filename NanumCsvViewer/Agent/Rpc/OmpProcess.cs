@@ -126,11 +126,12 @@ namespace NanumCsvViewer.Agent.Rpc
         public static string TempDirectory => Path.Combine(Path.GetTempPath(), "NanumCsvViewer");
 
         /// <summary>
-        /// 호스트 도구를 시스템 프롬프트에 인라인 문서화하고(csv.* → xd://csv.*), omp 자체 도구(bash·write 등)의 승인을 켠다.
-        /// omp 기본값(yolo)은 아무것도 묻지 않는다. always-ask는 읽기 외 호출을 extension_ui_request로 묻고, 앱은 그것을 채팅 승인 카드로 보여 준다.
-        /// 사용자가 ExtraArgs에 --approval-mode를 주면 실행 인자가 이 설정보다 우선한다.
+        /// 호스트 도구를 시스템 프롬프트에 인라인 문서화하고(csv.* → xd://csv.*), omp 자체 도구(bash·write 등)의 승인 모드를 정한다.
+        /// always-ask는 쓰기·실행을, write는 실행(bash·Python)만, yolo는 아무것도 묻지 않는다. 묻는 경우 omp가 extension_ui_request를 보내고
+        /// 앱은 그것을 채팅 승인 카드로 보여 준다. 사용자가 ExtraArgs에 --approval-mode를 주면 실행 인자가 이 설정보다 우선한다.
         /// </summary>
-        public const string HostConfigJson = "{\"tools\":{\"xdevInlineDevices\":[\"csv.*\"],\"approvalMode\":\"always-ask\"}}";
+        public static string HostConfigJson(AgentApprovalMode mode) =>
+            "{\"tools\":{\"xdevInlineDevices\":[\"csv.*\"],\"approvalMode\":\"" + AgentApprovalPolicy.ToOmp(mode) + "\"}}";
 
         public static string StderrLogPath(string tag) => Path.Combine(TempDirectory, $"omp.stderr-p{tag}.log");
         public static string HostConfigPath(string tag) => Path.Combine(TempDirectory, $"omp-host-p{tag}.yml");
@@ -180,12 +181,13 @@ namespace NanumCsvViewer.Agent.Rpc
         }
 
         /// <summary>임시 폴더에 host.yml과 가이드를 쓰고 경로를 돌려준다(가이드 없으면 null).</summary>
-        public static (string HostConfig, string? Guide) WriteSupportFiles(string tag, string? guideText, string language, string? extraSection = null)
+        public static (string HostConfig, string? Guide) WriteSupportFiles(string tag, string? guideText, string language, string? extraSection = null,
+            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default)
         {
             Directory.CreateDirectory(TempDirectory);
             PruneStaleFiles();
             string host = HostConfigPath(tag);
-            File.WriteAllText(host, HostConfigJson, new UTF8Encoding(false));
+            File.WriteAllText(host, HostConfigJson(approvalMode), new UTF8Encoding(false));
             string? guide = null;
             if (!string.IsNullOrEmpty(guideText))
             {

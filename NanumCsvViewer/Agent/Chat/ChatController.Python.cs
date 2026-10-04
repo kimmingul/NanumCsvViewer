@@ -53,21 +53,24 @@ namespace NanumCsvViewer.Agent
         private bool FolderStale() =>
             !string.Equals(DesiredWorkDir(), _launchedDesired, StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>실행 중인 omp의 작업 폴더·Python 가이드·진단 설정이 지금 설정과 다른가.</summary>
+        /// <summary>실행 중인 omp의 작업 폴더·Python 가이드·진단 설정·승인 모드(host.yml)가 지금 설정과 다른가.</summary>
         private bool WorkspaceStale() =>
-            FolderStale() || (_options.AllowLocalPython && (_options.DataPolicy != _launchedPolicy || _lspRestartPending));
+            FolderStale() || ApprovalStale() || (_options.AllowLocalPython && (_options.DataPolicy != _launchedPolicy || _lspRestartPending));
 
         /// <summary>쉬는 중(연결됨, 작업 없음)이고 작업 공간이 낡았으면 같은 대화로 다시 시작한다. 작업 중이면 EndTurn이 다시 부른다.</summary>
         private void RunPendingWorkspaceRestart()
         {
             if (_disposed || !_connected || IsBusy || _client == null || !WorkspaceStale()) return;
-            string text = !_options.AllowLocalPython
-                ? T("Restarting the agent on the same conversation…", "같은 대화로 에이전트를 다시 시작합니다…")
-                : FolderStale()
-                    ? T("Switching the analysis folder; restarting the agent on the same conversation…", "분석 결과 폴더를 바꾸기 위해 같은 대화로 에이전트를 다시 시작합니다…")
-                    : _lspRestartPending
-                        ? T("Restarting the agent on the same conversation so it picks up the Python code diagnostics…", "Python 코드 진단을 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…")
-                        : T("Restarting the agent on the same conversation to apply the new data policy…", "새 데이터 정책을 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…");
+            string text = FolderStale() && _options.AllowLocalPython
+                ? T("Switching the analysis folder; restarting the agent on the same conversation…", "분석 결과 폴더를 바꾸기 위해 같은 대화로 에이전트를 다시 시작합니다…")
+                : ApprovalStale()
+                    ? T($"Applying the new approval mode ({AgentApprovalPolicy.ToOmp(_options.ApprovalMode)}); restarting the agent on the same conversation…",
+                        $"새 승인 모드({AgentApprovalPolicy.ToOmp(_options.ApprovalMode)})를 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…")
+                    : !_options.AllowLocalPython
+                        ? T("Restarting the agent on the same conversation…", "같은 대화로 에이전트를 다시 시작합니다…")
+                        : _lspRestartPending
+                            ? T("Restarting the agent on the same conversation so it picks up the Python code diagnostics…", "Python 코드 진단을 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…")
+                            : T("Restarting the agent on the same conversation to apply the new data policy…", "새 데이터 정책을 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…");
             _stream.Emit(ChatPageMessages.Notice("info", text));
             _ = RestartSessionAsync();
         }

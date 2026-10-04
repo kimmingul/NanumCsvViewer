@@ -9,11 +9,13 @@ namespace NanumCsvViewer.Agent.Tools
         public const string InsertRows = "csv.insert_rows";
         public const string DeleteRows = "csv.delete_rows";
         public const string AddColumn = "csv.add_column";
+        public const string MoveColumn = "csv.move_column";
         public const string DeleteColumn = "csv.delete_column";
         public const string FormatAdd = "csv.format_add";
         public const string FormatList = "csv.format_list";
         public const string FormatRemove = "csv.format_remove";
         public const string FormatClear = "csv.format_clear";
+        public const string FormatUndo = "csv.format_undo";
         public const string ExportView = "csv.export_view";
         public const string ShowMarkdown = "csv.show_markdown";
         public const string ShowImage = "csv.show_image";
@@ -181,12 +183,22 @@ namespace NanumCsvViewer.Agent.Tools
                 """),
 
             new HostToolDefinition(AddColumn,
-                "Append a new column at the end after the user approves. Optionally fill every row with one constant text; set individual cells later with csv.edit_cells. ONE undo step; the original file is untouched; the column is included when the user saves edits.",
+                "Add a new column after the user approves: at the end by default, or before an existing column via 'position'. Optionally fill every row with one constant text; set individual cells later with csv.edit_cells. ONE undo step; the original file is untouched; the column is included when the user saves edits.",
                 """
                 {"type":"object","properties":{
                 "name":{"type":"string","description":"Unique, non-empty column name."},
-                "fill":{"type":"string","description":"Constant text for every row (default: empty cells)."}
+                "fill":{"type":"string","description":"Constant text for every row (default: empty cells)."},
+                "position":{"type":["string","integer"],"description":"Where to insert: a column name (new column goes BEFORE it) or a 1-based number (the new column becomes that column number; use column count + 1 or omit for the end). Default: end."}
                 },"required":["name"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(MoveColumn,
+                "Move an existing column to another position after the user approves (display order only; data, names and the original file are unchanged; filters, sort, formatting rules and later edits keep following the column). ONE undo step (csv.undo). Later column positions change, so re-read csv.info afterwards.",
+                """
+                {"type":"object","properties":{
+                "column":{"type":"string","description":"Column to move (name)."},
+                "to":{"type":["string","integer"],"description":"Target: a 1-based number (the column ends up as that column number), a column name (moved BEFORE it), or \"end\" / \"start\"."}
+                },"required":["column","to"],"additionalProperties":false}
                 """),
 
             new HostToolDefinition(DeleteColumn,
@@ -206,7 +218,7 @@ namespace NanumCsvViewer.Agent.Tools
                 "expression":{"type":"string","description":"expression kind: filter syntax as csv.set_filter, e.g. score > 90 or status matches \"^ERR\"."},
                 "target":{"type":"string","enum":["row","cell"],"description":"expression kind: color the whole row (default) or only the cell of 'column'."},
                 "column":{"type":"string","description":"Required for target cell and for color_scale (numeric column)."},
-                "back_color":{"type":"string","description":"#RRGGBB or CSS colour name, e.g. #FFE0E0, gold."},
+                "back_color":{"type":"string","description":"Theme colour red|orange|yellow|green|blue|purple|gray (adapts to light/dark theme; preferred), or #RRGGBB / CSS name for a custom colour."},
                 "fore_color":{"type":"string","description":"Text colour, same format."},
                 "bold":{"type":"boolean"},
                 "scale_min_color":{"type":"string","description":"color_scale: colour of the minimum (default #63BE7B)."},
@@ -229,6 +241,10 @@ namespace NanumCsvViewer.Agent.Tools
 
             new HostToolDefinition(FormatClear,
                 "Remove all conditional-format rules.",
+                NoArgs),
+
+            new HostToolDefinition(FormatUndo,
+                "Undo the most recent change to the conditional-format rule set (a rule added, removed or cleared, by you or the user's dialog) and restore the earlier rules. View only; separate from csv.undo (which reverts data edits). Repeatable (up to 20 steps).",
                 NoArgs),
 
             new HostToolDefinition(ExportView,
@@ -259,7 +275,7 @@ namespace NanumCsvViewer.Agent.Tools
                 """),
 
             new HostToolDefinition(Undo,
-                "Undo the latest edit step if it was made by the agent (csv.edit_cells, csv.regex_replace, insert/delete rows, add/delete column); the user's own edits are never undone by the agent.",
+                "Undo the latest edit step if it was made by the agent (csv.edit_cells, csv.regex_replace, insert/delete rows, add/move/delete column); the user's own edits are never undone by the agent.",
                 NoArgs),
 
             new HostToolDefinition(SaveEditsAs,

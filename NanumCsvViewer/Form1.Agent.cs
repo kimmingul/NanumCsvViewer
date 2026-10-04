@@ -44,7 +44,7 @@ namespace NanumCsvViewer
             string? what = e.UndoDescription;
             bool agentCanUndo = e.CanUndo && what is not null && what.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal);
             return new AgentEditState(e.Count, e.HeaderEditCount, e.DeletedCount, e.AddedCount,
-                HasUnsavedEdits, e.CanUndo, what, agentCanUndo, _sheetEditing, e.AppendedColumnCount, e.DeletedColumnCount);
+                HasUnsavedEdits, e.CanUndo, what, agentCanUndo, _sheetEditing, e.AppendedColumnCount, e.DeletedColumnCount, e.HasColumnOrder);
         }
 
         // ------------------------------------------------------------------ 상태
@@ -676,6 +676,22 @@ namespace NanumCsvViewer
             return new AgentColumnChange(index, AdvHeaders()[index], doc.ColumnCount, AgentEditStateNow());
         }
 
+        AgentColumnChange ICsvAgentHost.InsertColumn(string name, int position, string? fill, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            int index = AgentGuard(() => AgentInsertColumn(name, position, fill, description));
+            return new AgentColumnChange(index, AdvHeaders()[index], _doc!.ColumnCount, AgentEditStateNow());
+        }
+
+        AgentColumnChange ICsvAgentHost.MoveColumn(int from, int to, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            string moved = AgentGuard(() => AgentMoveColumn(from, to, description));
+            return new AgentColumnChange(to, moved, _doc!.ColumnCount, AgentEditStateNow());
+        }
+
         AgentColumnChange ICsvAgentHost.DeleteColumn(int column, string description)
         {
             AgentRequireReady();
@@ -714,6 +730,12 @@ namespace NanumCsvViewer
         {
             AgentAssertUi();
             return AgentClearConditionalFormats();
+        }
+
+        ConditionalFormatUndoResult? ICsvAgentHost.UndoConditionalFormat()
+        {
+            AgentAssertUi();
+            return AgentUndoConditionalFormat();
         }
 
         async Task<ConditionalFormatCount> ICsvAgentHost.CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken cancellation)

@@ -21,7 +21,7 @@ namespace NanumCsvViewer.Agent
             string? c = args.OptString(name)?.Trim();
             if (string.IsNullOrEmpty(c)) return null;
             if (!ColorSyntax.IsMatch(c))
-                throw new AgentToolException($"'{name}' must be #RRGGBB (e.g. #FFE0E0) or a CSS colour name (e.g. gold); got '{c}'.");
+                throw new AgentToolException($"'{name}' must be a theme colour (red, orange, yellow, green, blue, purple, gray), #RRGGBB (e.g. #FFE0E0) or a CSS colour name (e.g. gold); got '{c}'.");
             return c;
         }
 
@@ -144,6 +144,15 @@ namespace NanumCsvViewer.Agent
             RequireOpen();
             int n = _host.ClearConditionalFormats();
             return Reply($"Removed {n:N0} format rule(s).", new JsonObject { ["removed"] = n });
+        }
+
+        private HostToolResult FormatUndo()
+        {
+            RequireOpen();
+            var r = _host.UndoConditionalFormat()
+                ?? throw new AgentToolException("There is no format change to undo.");
+            return Reply($"Undid the last format change ({r.Description}); {r.RuleCount:N0} rule(s) now.",
+                new JsonObject { ["undone"] = r.Description, ["rule_count"] = r.RuleCount, ["rules"] = new JsonArray(_host.ListConditionalFormats().Select(x => (JsonNode)RuleJson(x)).ToArray()) });
         }
 
         private static JsonObject RuleJson(ConditionalFormatRule r)

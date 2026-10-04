@@ -111,7 +111,7 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(new[] { "--mode", "rpc-ui", "--cwd", rig.WorkDir }, args.Take(4));
             int cfg = args.ToList().IndexOf("--config");
             Assert.True(File.Exists(args[cfg + 1]));
-            Assert.Equal(OmpLaunch.HostConfigJson, File.ReadAllText(args[cfg + 1]));
+            Assert.Equal(OmpLaunch.HostConfigJson(AgentApprovalPolicy.Default), File.ReadAllText(args[cfg + 1]));
             int guide = args.ToList().IndexOf("--append-system-prompt");
             Assert.Contains("# guide", File.ReadAllText(args[guide + 1]));
             Assert.Equal(new[] { "--model", "a/b" }, args.Skip(args.Count - 2));

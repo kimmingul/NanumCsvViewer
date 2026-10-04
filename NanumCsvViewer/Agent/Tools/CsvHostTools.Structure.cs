@@ -41,7 +41,7 @@ namespace NanumCsvViewer.Agent
                 L($"Insert {count:N0} row(s) in {info.FileName}", $"{info.FileName}에 행 {count:N0}개 삽입"),
                 L($"+{count:N0} row(s) {where} · one undo step (Ctrl+Z); the original file is not changed",
                   $"+{count:N0}행 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음"),
-                lines, ct);
+                lines, ct, ApprovalKind.DataEdit);
             if (!ok) throw new AgentToolException("The user did not approve inserting rows. Nothing was changed.");
 
             RequireReady(); // 승인 대기 중 사용자가 다른 작업을 했을 수 있다
@@ -120,7 +120,7 @@ namespace NanumCsvViewer.Agent
                 L($"Delete {rows.Count:N0} row(s) in {info.FileName}", $"{info.FileName}의 행 {rows.Count:N0}개 삭제"),
                 L($"-{rows.Count:N0} row(s) · one undo step (Ctrl+Z); the original file is not changed; saved files omit them",
                   $"-{rows.Count:N0}행 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음, 저장 파일에서 빠짐"),
-                lines, ct);
+                lines, ct, ApprovalKind.DataEdit);
             if (!ok) throw new AgentToolException("The user did not approve deleting rows. Nothing was changed.");
 
             RequireReady();
@@ -179,12 +179,32 @@ namespace NanumCsvViewer.Agent
             return sb.ToString();
         }
 
+        /// <summary>"position"/"to" 인자 해석 보조: 정수(1-based) 또는 컬럼 이름 또는 키워드. 이름이 정수·키워드보다 우선한다.</summary>
+        private static (int? Number, int? NameIndex, string? Keyword) ParsePlace(string[] names, string text, string argument, params string[] keywords)
+        {
+            string key = text.Trim();
+            if (key.Length == 0) throw new AgentToolException($"'{argument}' must not be empty.");
+            int byName = Array.FindIndex(names, n => string.Equals(n, key, StringComparison.Ordinal));
+            if (byName < 0)
+            {
+                int ci = Array.FindAll(names, n => string.Equals(n.Trim(), key, StringComparison.OrdinalIgnoreCase)).Length;
+                if (ci == 1) byName = Array.FindIndex(names, n => string.Equals(n.Trim(), key, StringComparison.OrdinalIgnoreCase));
+            }
+            if (byName >= 0) return (null, byName, null);
+            foreach (string k in keywords)
+                if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) return (null, null, k);
+            if (int.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n)) return (n, null, null);
+            string kw = keywords.Length > 0 ? ", " + string.Join(" / ", keywords.Select(k => "\"" + k + "\"")) : "";
+            throw new AgentToolException($"Unknown position '{text}' for '{argument}': give a column name{kw} or a 1-based column number. Columns: {string.Join(", ", names.Take(30))}{(names.Length > 30 ? ", …" : "")}");
+        }
+
         // ------------------------------------------------------------------ csv.add_column
 
         private async Task<HostToolResult> AddColumnAsync(ToolArgs args, IAgentApprovals approvals, CancellationToken ct)
         {
             string name = args.ReqString("name").Trim();
             string? fill = args.OptString("fill");
+            string? positionArg = args.OptScalarAsString("position");
             if (name.Length == 0) throw new AgentToolException("'name' must not be empty.");
             if (name.Length > MaxColumnNameChars) throw new AgentToolException($"The column name is too long (max {MaxColumnNameChars} characters).");
             if (fill is { Length: > MaxEditValueChars }) throw new AgentToolException($"'fill' is too long (max {MaxEditValueChars:N0} characters).");
@@ -197,22 +217,48 @@ namespace NanumCsvViewer.Agent
             if (hasFill && info.TotalRows > FillRowLimit)
                 throw new AgentToolException($"Refused: 'fill' works up to {FillRowLimit:N0} rows (the table has {info.TotalRows:N0}). Add the column without fill.");
 
+            // position: 0-based index the new column has afterwards (names.Length = end).
+            int position = names.Length;
+            if (!string.IsNullOrWhiteSpace(positionArg))
+            {
+                var place = ParsePlace(names, positionArg, "position", "end", "start");
+                if (place.NameIndex is int ni) position = ni;
+                else if (place.Keyword is not null) position = string.Equals(place.Keyword, "start", StringComparison.Ordinal) ? 0 : names.Length;
+                else
+                {
+                    int n = place.Number!.Value;
+                    if (n < 1 || n > names.Length + 1)
+                        throw new AgentToolException($"'position' {n} is out of range: the table has {names.Length} column(s), so use 1..{names.Length + 1} (or a column name).");
+                    position = n - 1;
+                }
+            }
+            bool atEnd = position == names.Length;
+            string whereEn = atEnd ? $"at the end (column {position + 1})" : $"before '{names[position].Trim()}' as column {position + 1}";
+            string whereKo = atEnd ? $"맨 끝(컬럼 {position + 1})에" : $"'{names[position].Trim()}' 앞 컬럼 {position + 1}번 자리에";
+
             var lines = new List<string>
             {
-                "+ " + L($"column '{name}' at the end (column {names.Length + 1})", $"컬럼 '{name}'을(를) 맨 끝(컬럼 {names.Length + 1})에 추가"),
+                "+ " + L($"column '{name}' {whereEn}", $"컬럼 '{name}'을(를) {whereKo} 추가"),
                 hasFill
                     ? "+ " + L($"every row filled with: {ToolJson.OneLine(fill!, EditCard.ValueWidth)}", $"모든 행 값: {ToolJson.OneLine(fill!, EditCard.ValueWidth)}")
                     : "  " + L("cells start empty", "셀은 비어 있음"),
             };
+            if (!atEnd) lines.Add("  " + L($"Columns {position + 1}–{names.Length} shift right.", $"컬럼 {position + 1}–{names.Length}번은 오른쪽으로 밀립니다."));
             bool ok = await approvals.ApproveAsync(
                 L($"Add column '{name}' to {info.FileName}", $"{info.FileName}에 컬럼 '{name}' 추가"),
                 L("+1 column · one undo step (Ctrl+Z); the original file is not changed; included when edits are saved",
                   "+1컬럼 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음, 편집 저장 시 포함"),
-                lines, ct);
+                lines, ct, ApprovalKind.DataEdit);
             if (!ok) throw new AgentToolException("The user did not approve adding the column. Nothing was changed.");
 
-            RequireReady();
-            var result = _host.AddColumn(name, hasFill ? fill : null, AgentEditTag.Prefix + L($"add column '{name}'", $"컬럼 '{name}' 추가"));
+            var fresh = Names(RequireReady());
+            if (!fresh.SequenceEqual(names, StringComparer.Ordinal))
+                throw new AgentToolException("The columns changed while waiting for approval. Nothing was changed; re-read csv.info and retry.");
+
+            string description = AgentEditTag.Prefix + L($"add column '{name}'", $"컬럼 '{name}' 추가");
+            var result = atEnd
+                ? _host.AddColumn(name, hasFill ? fill : null, description)
+                : _host.InsertColumn(name, position, hasFill ? fill : null, description);
             var json = new JsonObject
             {
                 ["column"] = result.Name,
@@ -221,9 +267,74 @@ namespace NanumCsvViewer.Agent
                 ["filled_with_constant"] = hasFill,
                 ["undo_steps_added"] = 1,
                 ["edits"] = EditStateJson(result.State),
-                ["note"] = "Appended at the end; set individual cells with csv.edit_cells (column name as given). csv.undo reverts this step.",
+                ["note"] = (atEnd ? "Appended at the end" : $"Inserted as column {result.Column + 1}; later columns shifted right (re-read csv.info)")
+                    + "; set individual cells with csv.edit_cells (column name as given). csv.undo reverts this step.",
             };
-            return Reply($"Added column '{result.Name}' ({result.ColumnCount} columns now), one undo step.", json);
+            return Reply($"Added column '{result.Name}' as column {result.Column + 1} ({result.ColumnCount} columns now), one undo step.", json);
+        }
+
+        // ------------------------------------------------------------------ csv.move_column
+
+        private async Task<HostToolResult> MoveColumnAsync(ToolArgs args, IAgentApprovals approvals, CancellationToken ct)
+        {
+            string columnArg = args.ReqString("column");
+            string toArg = args.OptScalarAsString("to") ?? throw new AgentToolException("'to' is required.");
+            var info = RequireReady();
+            var names = Names(info);
+            int from = ColumnNames.Resolve(names, columnArg, "column");
+            if (names.Length < 2) throw new AgentToolException("Refused: the table has only one column; there is nothing to reorder.");
+
+            // to: 이동 후 0-based 인덱스.
+            int to;
+            var place = ParsePlace(names, toArg, "to", "end", "start");
+            if (place.NameIndex is int ni) to = ni > from ? ni - 1 : ni;   // 그 컬럼 "앞"으로
+            else if (place.Keyword is not null) to = string.Equals(place.Keyword, "start", StringComparison.Ordinal) ? 0 : names.Length - 1;
+            else
+            {
+                int n = place.Number!.Value;
+                if (n < 1 || n > names.Length)
+                    throw new AgentToolException($"'to' {n} is out of range: the table has {names.Length} column(s), so use 1..{names.Length} (or a column name / \"end\" / \"start\").");
+                to = n - 1;
+            }
+            string name = names[from];
+            if (to == from)
+                throw new AgentToolException($"Column '{name.Trim()}' is already at column {from + 1}; nothing to move.");
+
+            var after = names.ToList();
+            after.RemoveAt(from);
+            after.Insert(to, name);
+            string Order(IEnumerable<string> l) => string.Join(" | ", l.Take(12).Select(h => h.Trim().Length == 0 ? "(blank)" : h.Trim())) + (names.Length > 12 ? " | …" : "");
+            var lines = new List<string>
+            {
+                "  " + L($"column '{name.Trim()}': {from + 1} → {to + 1}", $"컬럼 '{name.Trim()}': {from + 1}번 → {to + 1}번"),
+                "- " + Order(names),
+                "+ " + Order(after),
+                "  " + L("Only the display order changes (no data is edited); filters, sort and formatting rules follow the column.",
+                         "표시 순서만 바뀝니다(데이터 편집 아님). 필터·정렬·서식 규칙은 컬럼을 따라갑니다."),
+            };
+            bool ok = await approvals.ApproveAsync(
+                L($"Move column '{name.Trim()}' in {info.FileName}", $"{info.FileName}의 컬럼 '{name.Trim()}' 이동"),
+                L("column order · one undo step (Ctrl+Z); the original file is not changed; saved files use the new order",
+                  "컬럼 순서 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음, 저장 파일에 새 순서 반영"),
+                lines, ct, ApprovalKind.DataEdit);
+            if (!ok) throw new AgentToolException("The user did not approve moving the column. Nothing was changed.");
+
+            var fresh = Names(RequireReady());
+            if (!fresh.SequenceEqual(names, StringComparer.Ordinal))
+                throw new AgentToolException("The columns changed while waiting for approval. Nothing was changed; re-read csv.info and retry.");
+
+            var result = _host.MoveColumn(from, to, AgentEditTag.Prefix + L($"move column '{name.Trim()}'", $"컬럼 '{name.Trim()}' 이동"));
+            var json = new JsonObject
+            {
+                ["column"] = result.Name,
+                ["from_index"] = from,
+                ["column_index"] = result.Column,
+                ["column_count"] = result.ColumnCount,
+                ["undo_steps_added"] = 1,
+                ["edits"] = EditStateJson(result.State),
+                ["note"] = "Display order changed only; positions of the columns between the old and new place shifted (re-read csv.info). csv.undo reverts this step.",
+            };
+            return Reply($"Moved column '{result.Name}' from {from + 1} to {to + 1}, one undo step.", json);
         }
 
         // ------------------------------------------------------------------ csv.delete_column
@@ -247,7 +358,7 @@ namespace NanumCsvViewer.Agent
                 L($"Delete column '{name}' in {info.FileName}", $"{info.FileName}의 컬럼 '{name}' 삭제"),
                 L("-1 column · one undo step (Ctrl+Z); the original file is not changed; saved files omit it",
                   "-1컬럼 · 되돌리기 1단계(Ctrl+Z), 원본 파일은 바뀌지 않음, 저장 파일에서 빠짐"),
-                lines, ct);
+                lines, ct, ApprovalKind.DataEdit);
             if (!ok) throw new AgentToolException("The user did not approve deleting the column. Nothing was changed.");
 
             RequireReady();

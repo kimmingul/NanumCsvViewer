@@ -18,13 +18,26 @@ namespace NanumCsvViewer.Agent
         public static HostToolResult Error(string text) => new(text, true);
     }
 
+    /// <summary>앱 승인 카드의 종류. 승인 모드(AgentApprovalMode)가 어떤 종류를 묻지 않고 통과시킬지 정한다.</summary>
+    public enum ApprovalKind
+    {
+        /// <summary>편집 덮개 안의 되돌릴 수 있는 데이터 편집(셀·행·열·정규식 바꾸기). write·yolo에서 자동 승인.</summary>
+        DataEdit,
+        /// <summary>파일 쓰기(새 파일로 저장). yolo에서만 자동 승인.</summary>
+        FileSave,
+        /// <summary>원시 행 값이 모델로 가는 승인(데이터 정책이 정한다). 모드와 무관하게 항상 묻는다.</summary>
+        RowSharing,
+    }
+
     /// <summary>앱이 사용자에게 묻는 승인(채팅 창의 승인 카드로 표시). 거부·중지·창 닫힘이면 false.</summary>
     public interface IAgentApprovals
     {
         /// <param name="target">무엇을 바꾸는지(예: "셀 편집 12개", "파일 저장: C:\a.csv").</param>
         /// <param name="summary">한 줄 요약.</param>
         /// <param name="lines">카드 본문 행. 접두 "+ "/"- "/"  "는 추가/삭제/문맥으로 색칠된다.</param>
-        Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation);
+        /// <param name="kind">승인 모드 정책이 쓰는 종류. 기본값(RowSharing)은 가장 엄격해서 항상 묻는다.</param>
+        Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation,
+            ApprovalKind kind = ApprovalKind.RowSharing);
     }
 
     /// <summary>csv.* host tool 실행기. 모든 호출은 UI 스레드에서 들어온다(구현이 필요하면 내부에서 백그라운드로 넘긴다).</summary>
