@@ -449,6 +449,24 @@
             <p data-i18n="f9.p">전수 스캔으로 결측·위장결측·타입/코드북 위반·이상치·미래날짜·중복을 한 번에 찾습니다. 발견을 클릭하면 위반 행만 필터로 격리해 바로 확인하고, 규칙은 JSON으로 저장·재사용하며 결과를 보고서로 내보냅니다.</p>
             <div class="tags"><b data-i18n="f9.t1">전수 프로파일</b><b data-i18n="f9.t2">발견 → 필터</b><b data-i18n="f9.t3">규칙 · 보고서</b></div>
           </article>
+          <article class="card reveal">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14 7l3 3"/></svg></div>
+            <h3 data-i18n="f10.h">셀 편집 · 원본 보존</h3>
+            <p data-i18n="f10.p">기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·컬럼 이름 변경·행 삽입/삭제가 되는 시트 편집 모드를 구분합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.</p>
+            <div class="tags"><b data-i18n="f10.t1">단일 / 시트 모드</b><b data-i18n="f10.t2">Ctrl+Z</b><b data-i18n="f10.t3">비정상 종료 복구</b></div>
+          </article>
+          <article class="card reveal">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></div>
+            <h3 data-i18n="f11.h">고급 통계 · 머신러닝</h3>
+            <p data-i18n="f11.p">GLM·ANCOVA(다요인·상호작용)·GLzM(오프셋·가중치·시행 수)·혼합모형·생존분석·비모수 검정, 트리·랜덤 포레스트·부스팅·SVM·K-means·PCA·AutoML. statsmodels·scipy·sklearn 기준값으로 검증했고 620만 행에서도 대부분 30초 안에 끝납니다.</p>
+            <div class="tags"><b data-i18n="f11.t1">통계 모형</b><b data-i18n="f11.t2">AutoML</b><b data-i18n="f11.t3">검증된 결과</b></div>
+          </article>
+          <article class="card reveal">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 15h6"/></svg></div>
+            <h3 data-i18n="f12.h">모형 저장 · ONNX · 보고서</h3>
+            <p data-i18n="f12.p">적합한 모형을 파일로 저장해 새 데이터에 적용하고, 표준 ONNX(float32/float64)로 내보냅니다. 결과는 HTML·Excel·PDF(한글 폰트 내장, 프린터 불필요) 보고서로 저장합니다.</p>
+            <div class="tags"><b data-i18n="f12.t1">모형 적용</b><b data-i18n="f12.t2">ONNX</b><b data-i18n="f12.t3">PDF · Excel</b></div>
+          </article>
         </div>
       </div>
     </section>
@@ -496,7 +514,7 @@
       <div class="wrap">
         <div class="sec-head center reveal">
           <p class="sec-eyebrow" data-i18n="dl.eyebrow">다운로드</p>
-          <h2 class="sec-title">Nanum CSV Viewer v1.15.0</h2>
+          <h2 class="sec-title">Nanum CSV Viewer v1.20.0</h2>
           <p class="sec-lede" data-i18n="dl.lede">아키텍처에 맞는 파일을 받으세요. 설치형은 시작 메뉴 등록·제거를 지원하고, 포터블은 복사 후 바로 실행합니다.</p>
         </div>
         <div class="dl-grid">
@@ -504,16 +522,16 @@
             <div class="arch"><span class="archname">Windows x64</span><span class="pill" data-i18n="dl.x64pill">대부분의 PC</span></div>
             <p class="for" data-i18n="dl.x64for">Intel · AMD 64비트 — 일반 데스크톱·노트북.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.20.0/NanumCsvViewer-v1.20.0-win-x64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.20.0/NanumCsvViewer-v1.20.0-win-x64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
           <div class="dl reveal">
             <div class="arch"><span class="archname">Windows ARM64</span><span class="pill" data-i18n="dl.armpill">ARM PC</span></div>
             <p class="for" data-i18n="dl.armfor">Snapdragon 등 ARM 기반 — Surface Pro X·Copilot+ PC.</p>
             <div class="row">
-              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
-              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.15.0/NanumCsvViewer-v1.15.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
+              <a class="btn btn-accent" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.20.0/NanumCsvViewer-v1.20.0-win-arm64-setup.exe" data-i18n="dl.setup">설치형 (setup)</a>
+              <a class="btn btn-ghost" href="https://github.com/kimmingul/NanumCsvViewer/releases/download/v1.20.0/NanumCsvViewer-v1.20.0-win-arm64-portable.exe" data-i18n="dl.portable">포터블 (exe)</a>
             </div>
           </div>
         </div>
@@ -611,6 +629,21 @@
         'f9.t1': { ko: '전수 프로파일', en: 'Full-file profile' },
         'f9.t2': { ko: '발견 → 필터', en: 'Findings → filter' },
         'f9.t3': { ko: '규칙 · 보고서', en: 'Rules · report' },
+        'f10.h': { ko: '셀 편집 · 원본 보존', en: 'Cell editing · original kept' },
+        'f10.p': { ko: '기본은 보기 전용. 셀 하나만 고치는 단일 편집과, 켜 두는 동안 붙여넣기·되돌리기·컬럼 이름 변경·행 삽입/삭제가 되는 시트 편집 모드를 구분합니다. 원본은 그대로 두고 새 파일(CSV·xlsx)로 저장하며, 001 같은 값은 그대로 유지됩니다.', en: 'Read-only by default. Single-cell editing is separate from a sheet edit mode that allows paste, undo, column rename and row insert/delete while it is on. The original file is never touched; edits are saved to a new CSV or xlsx, and values like 001 stay as typed.' },
+        'f10.t1': { ko: '단일 / 시트 모드', en: 'Single / sheet mode' },
+        'f10.t2': { ko: 'Ctrl+Z', en: 'Ctrl+Z' },
+        'f10.t3': { ko: '비정상 종료 복구', en: 'Crash recovery' },
+        'f11.h': { ko: '고급 통계 · 머신러닝', en: 'Advanced stats · machine learning' },
+        'f11.p': { ko: 'GLM·ANCOVA(다요인·상호작용)·GLzM(오프셋·가중치·시행 수)·혼합모형·생존분석·비모수 검정, 트리·랜덤 포레스트·부스팅·SVM·K-means·PCA·AutoML. statsmodels·scipy·sklearn 기준값으로 검증했고 620만 행에서도 대부분 30초 안에 끝납니다.', en: 'GLM, ANCOVA (multi-factor, interactions), GLzM (offset, weights, trials), mixed models, survival, nonparametric tests, trees, random forest, boosting, SVM, K-means, PCA and AutoML. Checked against statsmodels, scipy and sklearn; most finish within 30 s on 6.2M rows.' },
+        'f11.t1': { ko: '통계 모형', en: 'Statistical models' },
+        'f11.t2': { ko: 'AutoML', en: 'AutoML' },
+        'f11.t3': { ko: '검증된 결과', en: 'Verified results' },
+        'f12.h': { ko: '모형 저장 · ONNX · 보고서', en: 'Saved models · ONNX · reports' },
+        'f12.p': { ko: '적합한 모형을 파일로 저장해 새 데이터에 적용하고, 표준 ONNX(float32/float64)로 내보냅니다. 결과는 HTML·Excel·PDF(한글 폰트 내장, 프린터 불필요) 보고서로 저장합니다.', en: 'Save fitted models and apply them to new data, or export standard ONNX (float32/float64). Save results as HTML, Excel or PDF reports (fonts embedded, no printer needed).' },
+        'f12.t1': { ko: '모형 적용', en: 'Apply models' },
+        'f12.t2': { ko: 'ONNX', en: 'ONNX' },
+        'f12.t3': { ko: 'PDF · Excel', en: 'PDF · Excel' },
         'piv.eyebrow': { ko: '피벗 빌더', en: 'Pivot builder' },
         'piv.title': { ko: '필드를 끌어다 놓으면<br>표와 차트가 됩니다.', en: 'Assign fields,<br>get a table and a chart.' },
         'piv.lede1': { ko: '행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.', en: 'Assign fields to Rows, Columns, Values, and Filters — with multiple measures, date grouping, and totals. Pick a day/week/month/year period for date dimensions and a type-aware aggregation for values, right on each chip.' },
