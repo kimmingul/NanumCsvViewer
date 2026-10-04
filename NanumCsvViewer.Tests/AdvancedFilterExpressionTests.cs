@@ -20,6 +20,21 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(expected, Eval(expr, name, "1", "x"));
         }
 
+        [Theory]
+        [InlineData("name matches \"^김.{1,2}$\"", "김철수", true)]
+        [InlineData("name matches \"^김.{1,2}$\"", "이김철", false)]
+        [InlineData("name matches \"^kim\"", "KIM Lee", true)]
+        public void Regex_operator(string expr, string name, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, "1", "x"));
+        }
+
+        [Fact]
+        public void Invalid_regex_is_a_compile_error()
+        {
+            Assert.Throws<AdvancedFilterExpressionException>(() => AdvancedFilterExpression.Compile("name matches \"(\"", Headers));
+        }
+
         [Fact]
         public void Numeric_greater_than()
         {

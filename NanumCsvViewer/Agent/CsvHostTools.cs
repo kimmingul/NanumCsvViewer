@@ -356,7 +356,7 @@ namespace NanumCsvViewer.Agent
             {
                 throw new AgentToolException(
                     "Invalid filter expression: " + ex.Message + " " +
-                    "Syntax: <column> <op> <value>; op is = != < <= > >= contains startswith endswith; combine with AND / OR and parentheses (no NOT); " +
+                    "Syntax: <column> <op> <value>; op is = != < <= > >= contains startswith endswith matches (regex, case-insensitive); combine with AND / OR and parentheses (no NOT); " +
                     "put text values in double quotes; a right side like [other_column] compares two columns. " +
                     "Columns: " + string.Join(", ", names.Take(30)) + (names.Length > 30 ? ", …" : ""));
             }

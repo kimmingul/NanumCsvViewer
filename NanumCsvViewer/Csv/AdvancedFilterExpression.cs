@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Globalization;
 
 namespace NanumCsvViewer.Csv
@@ -236,6 +237,26 @@ namespace NanumCsvViewer.Csv
                     case "endswith":
                         return row => column < row.Length && CultureInfo.InvariantCulture.CompareInfo.IsSuffix(
                             row[column].TrimEnd(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
+                    case "matches":
+                    {
+                        // 정규식(대소문자 무시). 잘못된 패턴은 컴파일 오류, 셀 하나가 250ms를 넘기면(파국적 역추적) 그 셀은 불일치로 둔다.
+                        Regex regex;
+                        try
+                        {
+                            regex = new Regex(value, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled,
+                                TimeSpan.FromMilliseconds(250));
+                        }
+                        catch (ArgumentException ex)
+                        {
+                            throw new AdvancedFilterExpressionException($"잘못된 정규식: {value} ({ex.Message})");
+                        }
+                        return row =>
+                        {
+                            if (column >= row.Length) return false;
+                            try { return regex.IsMatch(row[column]); }
+                            catch (RegexMatchTimeoutException) { return false; }
+                        };
+                    }
                     case "==":
                     case "=":
                         return row => column < row.Length && row[column] == value;
