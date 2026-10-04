@@ -69,4 +69,66 @@ namespace NanumCsvViewer
             Shown += (_, _) => { _text.Focus(); _text.SelectAll(); };
         }
     }
+
+    /// <summary>컬럼 이름 변경 대화상자(시트 편집 모드). 한 줄 텍스트이며 이름은 그대로(대소문자·공백 유지) 돌려준다.</summary>
+    internal sealed class HeaderRenameDialog : Form
+    {
+        private readonly TextBox _text;
+
+        public string Value => _text.Text;
+
+        private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
+
+        /// <param name="validate">현재 입력이 쓸 수 있는 이름이면 null, 아니면 이유를 돌려준다(OK를 누를 때 검사).</param>
+        public HeaderRenameDialog(int columnNumber, string current, ThemePalette palette, Func<string, string?> validate)
+        {
+            Text = LT("Rename Column", "컬럼 이름 변경");
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MinimizeBox = false;
+            MaximizeBox = false;
+            ShowIcon = false;
+            BackColor = palette.Window;
+            ForeColor = palette.Text;
+            Font = SystemFonts.MessageBoxFont ?? SystemFonts.DefaultFont;
+            ClientSize = new Size(420, 138);
+            Padding = new Padding(12);
+
+            var header = new Label
+            {
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                Height = 44,
+                ForeColor = palette.Text,
+                Text = LT($"Column {columnNumber}. The new name is used by filters, charts and analyses and written to the first line of the saved file. The original file is not changed.",
+                          $"{columnNumber}번 컬럼. 새 이름은 필터·차트·분석에 쓰이고 저장 파일의 첫 줄에 기록됩니다. 원본 파일은 바뀌지 않습니다."),
+            };
+            _text = new TextBox
+            {
+                Dock = DockStyle.Top,
+                BackColor = palette.Surface,
+                ForeColor = palette.Text,
+                BorderStyle = BorderStyle.FixedSingle,
+                Text = current,
+            };
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(0, 6, 0, 0) };
+            var cancel = new Button { Text = LT("Cancel", "취소"), DialogResult = DialogResult.Cancel, Size = new Size(88, 28) };
+            var ok = new Button { Text = LT("Apply", "적용"), Size = new Size(88, 28) };
+            ok.Click += (_, _) =>
+            {
+                string? problem = validate(_text.Text);
+                if (problem is not null) { MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                DialogResult = DialogResult.OK;
+            };
+            buttons.Controls.Add(cancel);
+            buttons.Controls.Add(ok);
+            AcceptButton = ok;
+            CancelButton = cancel;
+
+            Controls.Add(_text);
+            Controls.Add(header);
+            Controls.Add(buttons);
+            Shown += (_, _) => { _text.Focus(); _text.SelectAll(); };
+        }
+    }
 }

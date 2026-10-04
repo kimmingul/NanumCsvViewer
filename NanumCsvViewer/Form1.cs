@@ -980,6 +980,7 @@ namespace NanumCsvViewer
         private void OnColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy || e.ColumnIndex < 0) return;
+            if (_sheetEditing && e.Clicks >= 2) return; // 시트 편집 모드의 헤더 더블클릭 = 컬럼 이름 변경(두 번째 클릭은 정렬하지 않는다)
             // 우측 깔때기 영역(약 18px) 클릭은 정렬 대신 필터 팝오버. 그 외는 정렬.
             if (e.Button == MouseButtons.Left && IsFilterableColumn(e.ColumnIndex) &&
                 e.X >= grid.Columns[e.ColumnIndex].Width - 18)

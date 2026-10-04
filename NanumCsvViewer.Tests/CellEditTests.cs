@@ -33,7 +33,7 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal("001", doc.GetDataRow(1)[1]);
                 Assert.Equal("001", doc.GetDataRowUncached(1)[1]);
                 Assert.Equal("001", doc.SnapshotViewRows()[1][1]);
-                Assert.Equal("6", doc.GetOriginalDataRow(1)[1]);
+                Assert.Equal("6", doc.GetOriginalRow(1)[1]);
                 Assert.Equal("5", doc.GetDataRow(0)[1]);
             }
         }

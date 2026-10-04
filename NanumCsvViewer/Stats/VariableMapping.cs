@@ -23,6 +23,9 @@ namespace NanumCsvViewer.Stats
         public const string SuggestionDisclaimer =
             "Suggestions, not assertions. Scores are explainable heuristics (name, label, type, value pattern, table context), not a claim that a column is the target field.";
 
+        public const string SuggestionDisclaimerKo =
+            "추천일 뿐 단정이 아닙니다. 점수는 설명 가능한 휴리스틱(이름, 라벨, 타입, 값 패턴, 테이블 맥락)이며, 컬럼이 그 대상 필드라고 단정하지 않습니다.";
+
         public static bool TryDetectLayout(IReadOnlyList<string> headers, out SpecColumnRoles roles)
         {
             ArgumentNullException.ThrowIfNull(headers);
@@ -184,7 +187,8 @@ namespace NanumCsvViewer.Stats
                 indexed);
         }
 
-        public static string ExportCsv(MappingSuggestionResult result)
+        /// <summary>추천 CSV. 열 이름은 안정적인 스키마로 영어를 유지하고, korean이면 근거 열만 한국어로 쓴다.</summary>
+        public static string ExportCsv(MappingSuggestionResult result, bool korean = false)
         {
             ArgumentNullException.ThrowIfNull(result);
             var sb = new StringBuilder();
@@ -197,7 +201,7 @@ namespace NanumCsvViewer.Stats
                     sb.Append(CsvEscape(c.Table)).Append(',');
                     sb.Append(CsvEscape(c.Field)).Append(',');
                     sb.Append(c.Score.ToString("0.00", CultureInfo.InvariantCulture)).Append(',');
-                    sb.Append(CsvEscape(string.Join("; ", c.Reasons.Select(r => r.Text))));
+                    sb.Append(CsvEscape(string.Join("; ", c.Reasons.Select(r => ErrorText.ToLanguage(r.Text, korean)))));
                     sb.AppendLine();
                 }
             }
@@ -252,42 +256,50 @@ namespace NanumCsvViewer.Stats
         public static string ExportProfileJson(MappingSuggestionResult result, TargetSpec spec, string? name = null)
             => ConformanceProfileJson.Serialize(BuildProfile(result, spec, name));
 
-        public static string Format(MappingSuggestionResult result, TargetSpec spec, MappingSuggestOptions? options = null)
+        /// <summary>결과 서식. korean이면 제목·표 머리글·근거 문장을 한국어로(컬럼·필드 이름과 타입 이름은 원문 그대로).</summary>
+        public static string Format(MappingSuggestionResult result, TargetSpec spec, MappingSuggestOptions? options = null, bool korean = false)
         {
             ArgumentNullException.ThrowIfNull(result);
             ArgumentNullException.ThrowIfNull(spec);
             options ??= new MappingSuggestOptions();
+            static string Int(int n) => n.ToString(CultureInfo.InvariantCulture);
+            string L(string en, string ko) => korean ? ko : en;
             var sb = new StringBuilder();
-            sb.AppendLine(SuggestionDisclaimer);
+            sb.AppendLine(korean ? SuggestionDisclaimerKo : SuggestionDisclaimer);
             sb.AppendLine();
-            sb.Append("Spec: ").Append(spec.SourceName ?? "(text)");
-            sb.Append(" · layout ").Append(LayoutLabel(spec.Layout));
-            sb.Append(" · ").Append(spec.Fields.Count.ToString(CultureInfo.InvariantCulture)).Append(" fields");
+            sb.Append(L("Spec: ", "명세: ")).Append(spec.SourceName ?? L("(text)", "(텍스트)"));
+            sb.Append(L(" · layout ", " · 레이아웃 ")).Append(LayoutLabel(spec.Layout, korean));
+            sb.Append(" · ").Append(Int(spec.Fields.Count)).Append(L(" fields", "개 필드"));
             if (result.TargetTable is { Length: > 0 } table)
-                sb.Append(" · table filter ").Append(table);
+                sb.Append(L(" · table filter ", " · 테이블 필터 ")).Append(table);
             else
-                sb.Append(" · all tables");
-            sb.Append(" · considered ").Append(result.FieldsConsidered.ToString(CultureInfo.InvariantCulture));
+                sb.Append(L(" · all tables", " · 모든 테이블"));
+            sb.Append(L(" · considered ", " · 비교 대상 ")).Append(Int(result.FieldsConsidered));
+            if (korean) sb.Append('개');
             if (result.IndexedCandidatePool)
-                sb.Append(" · candidate pool limited to shared tokens (spec above ").Append(FullScanFieldCap.ToString(CultureInfo.InvariantCulture)).Append(" fields; name-only matches may be missed)");
+                sb.Append(L(" · candidate pool limited to shared tokens (spec above ", " · 후보 풀을 공통 토큰이 있는 필드로 제한(명세가 "))
+                    .Append(Int(FullScanFieldCap))
+                    .Append(L(" fields; name-only matches may be missed)", "개 필드를 넘음; 이름만 닮은 후보는 놓칠 수 있음)"));
             sb.AppendLine();
-            sb.Append("Source columns: ").Append(result.Columns.Count.ToString(CultureInfo.InvariantCulture));
-            sb.Append(" · value-pattern sample: first ");
-            sb.Append(result.SampleRowsRead.ToString(CultureInfo.InvariantCulture));
-            sb.Append(" rows of the current view");
+            sb.Append(L("Source columns: ", "원본 컬럼: ")).Append(Int(result.Columns.Count));
+            sb.Append(L(" · value-pattern sample: first ", " · 값 패턴 표본: 현재 보기의 처음 "));
+            sb.Append(Int(result.SampleRowsRead));
+            sb.Append(L(" rows of the current view", "행"));
             if (result.SampleCapped)
-                sb.Append(" (cap ").Append(result.SampleRowCap.ToString(CultureInfo.InvariantCulture)).Append(')');
-            sb.Append(" · up to ").Append(MaxSampleValuesPerColumn.ToString(CultureInfo.InvariantCulture)).AppendLine(" non-empty values per column.");
-            sb.Append("Accept score for the conformance skeleton: ");
+                sb.Append(L(" (cap ", " (상한 ")).Append(Int(result.SampleRowCap)).Append(')');
+            sb.Append(L(" · up to ", " · 컬럼마다 비어 있지 않은 값 최대 ")).Append(Int(MaxSampleValuesPerColumn)).AppendLine(L(" non-empty values per column.", "개."));
+            sb.Append(L("Accept score for the conformance skeleton: ", "적합성 골격의 수용 점수: "));
             sb.AppendLine(options.AcceptScore.ToString("0.##", CultureInfo.InvariantCulture));
             sb.AppendLine();
 
-            var suggestions = new TextTable("Source", "Rank", "Target table", "Target field", "Score", "Reasons");
+            var suggestions = new TextTable(
+                L("Source", "원본"), L("Rank", "순위"), L("Target table", "대상 테이블"),
+                L("Target field", "대상 필드"), L("Score", "점수"), L("Reasons", "근거"));
             foreach (var col in result.Columns)
             {
                 if (col.Candidates.Count == 0)
                 {
-                    suggestions.AddRow(col.SourceColumn, "—", "—", "—", "—", "no candidate");
+                    suggestions.AddRow(col.SourceColumn, "—", "—", "—", "—", L("no candidate", "후보 없음"));
                     continue;
                 }
                 for (int i = 0; i < col.Candidates.Count; i++)
@@ -299,19 +311,21 @@ namespace NanumCsvViewer.Stats
                         c.Table,
                         c.Field,
                         c.Score.ToString("0.00", CultureInfo.InvariantCulture),
-                        JoinReasons(c.Reasons));
+                        JoinReasons(c.Reasons, korean));
                 }
             }
             sb.AppendLine(suggestions.Render());
             sb.AppendLine();
 
-            var gaps = new TextTable("Target table", "Target field", "Type", "Status");
+            var gaps = new TextTable(L("Target table", "대상 테이블"), L("Target field", "대상 필드"), L("Type", "타입"), L("Status", "상태"));
             if (result.UnmatchedRequired.Count == 0)
-                gaps.AddRow("—", "—", "—", "no unmatched required field in scope");
+                gaps.AddRow("—", "—", "—", L("no unmatched required field in scope", "범위 안에 짝이 없는 필수 필드 없음"));
             else
                 foreach (var g in result.UnmatchedRequired)
-                    gaps.AddRow(g.Table, g.Field, g.DataType ?? "—", "required, no accepted suggestion");
-            sb.AppendLine("Unmatched required target fields (accepted suggestions only; not assertions):");
+                    gaps.AddRow(g.Table, g.Field, g.DataType ?? "—", L("required, no accepted suggestion", "필수, 수용된 추천 없음"));
+            sb.AppendLine(L(
+                "Unmatched required target fields (accepted suggestions only; not assertions):",
+                "짝이 없는 필수 대상 필드(수용된 추천만 기준, 단정 아님):"));
             sb.AppendLine(gaps.Render());
             return sb.ToString();
         }
@@ -858,18 +872,18 @@ namespace NanumCsvViewer.Stats
         private static string DisplayName(SourceColumn source, int index)
             => string.IsNullOrWhiteSpace(source.Name) ? "Column" + (index + 1).ToString(CultureInfo.InvariantCulture) : source.Name;
 
-        private static string JoinReasons(IReadOnlyList<MappingReason> reasons)
+        private static string JoinReasons(IReadOnlyList<MappingReason> reasons, bool korean)
         {
-            string text = string.Join("; ", reasons.Select(r => r.Text));
+            string text = string.Join("; ", reasons.Select(r => ErrorText.ToLanguage(r.Text, korean)));
             return text.Length <= 160 ? text : text[..157] + "...";
         }
 
-        private static string LayoutLabel(SpecLayoutKind kind) => kind switch
+        private static string LayoutLabel(SpecLayoutKind kind, bool korean) => kind switch
         {
-            SpecLayoutKind.OmopFieldLevel => "OMOP field-level",
-            SpecLayoutKind.CdiscVariable => "CDISC variable metadata",
-            SpecLayoutKind.Custom => "custom columns",
-            _ => "unknown",
+            SpecLayoutKind.OmopFieldLevel => korean ? "OMOP 필드 레벨" : "OMOP field-level",
+            SpecLayoutKind.CdiscVariable => korean ? "CDISC 변수 메타데이터" : "CDISC variable metadata",
+            SpecLayoutKind.Custom => korean ? "사용자 지정 열" : "custom columns",
+            _ => korean ? "알 수 없음" : "unknown",
         };
 
         private static List<string> DistinctTexts(params string?[] texts)

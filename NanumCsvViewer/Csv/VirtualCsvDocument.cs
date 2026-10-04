@@ -46,12 +46,24 @@ namespace NanumCsvViewer.Csv
         private long _headerEnd;
         // 백그라운드(필터/정렬)에서 교체하고 UI 스레드에서 읽으므로 volatile로 가시성 보장.
         // 참조 대입은 원자적이며, 읽는 쪽은 항상 지역 변수로 스냅샷을 떠 길이/인덱스를 일관되게 사용한다.
-        private volatile int[]? _viewMap; // null이면 항등(전체, 원래 순서)
+        private volatile int[]? _viewMap; // null이면 항등(전체, 원래 순서). 값은 "행 id"(원본 0..N-1, 추가 행은 그 뒤)
+        // 행 삽입/삭제가 있을 때만 존재: _live = 화면 순서의 행 id(삭제 제외), _rank = 행 id → 화면 순서 위치(삭제는 -1).
+        private volatile int[]? _live;
+        private volatile int[]? _rank;
+        private long _structureSeen, _headerSeen;
 
         private static readonly string[] EmptyRow = { string.Empty };
 
         public long FileLength { get; }
-        public string[] Header { get; private set; } = Array.Empty<string>();
+        private string[] _rawHeader = Array.Empty<string>();
+        private volatile string[] _header = Array.Empty<string>();
+
+        /// <summary>현재 컬럼 이름(파일의 이름 + 사용자가 바꾼 이름). 분석·필터·그리드가 모두 이 이름을 본다.</summary>
+        public string[] Header => _header;
+
+        /// <summary>파일에 적힌 원래 컬럼 이름.</summary>
+        public string[] OriginalHeader => _rawHeader;
+
         public int ColumnCount => Header.Length;
         public string EncodingName { get; private set; }
         public char Delimiter => (char)_delim;
@@ -67,7 +79,7 @@ namespace NanumCsvViewer.Csv
         private VirtualCsvDocument(string path, EncodingDetectionResult det)
         {
             _path = path;
-            Edits.Changed += _cache.Clear;
+            Edits.Changed += OnEditsChanged;
             _encoding = det.Encoding;
             _preamble = det.PreambleLength;
             EncodingName = det.DisplayName;
@@ -108,7 +120,8 @@ namespace NanumCsvViewer.Csv
             _headerStart = _preamble;
             _headerEnd = tmp.Count >= 2 ? tmp[1] : Math.Min(sampleLen, FileLength);
 
-            Header = DecodeAndParse(_headerStart, _headerEnd);
+            _rawHeader = DecodeAndParse(_headerStart, _headerEnd);
+            _header = Edits.ApplyHeader(_rawHeader);
         }
 
         private static byte DetectDelimiter(ReadOnlySpan<byte> sample, int preamble)
@@ -215,7 +228,7 @@ namespace NanumCsvViewer.Csv
             }, ct);
         }
 
-        /// <summary>int 범위로 자르기 전, 실제 데이터 행 수(헤더 제외). 인덱싱 중에는 끝 오프셋이 확정된 행만.</summary>
+        /// <summary>int 범위로 자르기 전, 실제 원본 데이터 행 수(헤더 제외). 인덱싱 중에는 끝 오프셋이 확정된 행만.</summary>
         private long RawDataRowCount
         {
             get
@@ -228,8 +241,14 @@ namespace NanumCsvViewer.Csv
         /// <summary>행 수가 int.MaxValue를 넘어 일부만 표시되는지. 부수효과 없는 순수 계산.</summary>
         public bool RowCountTruncated => RawDataRowCount > int.MaxValue;
 
-        /// <summary>현재 표시 가능한 데이터 행 수(헤더 제외, DataGridView용 int 상한 적용).</summary>
-        public int DataRowsAvailable => (int)Math.Min(int.MaxValue, RawDataRowCount);
+        /// <summary>원본 파일의 데이터 행 수(DataGridView용 int 상한). 추가 행의 id는 이 값부터 시작한다.</summary>
+        public int BaseRowCount => (int)Math.Min(int.MaxValue, RawDataRowCount);
+
+        /// <summary>행 삽입·삭제가 가능한가(인덱싱 완료 + 행 수가 int 범위 안).</summary>
+        public bool CanEditStructure => IndexingComplete && !RowCountTruncated;
+
+        /// <summary>현재 데이터 행 수(헤더 제외, 삭제 제외·추가 포함, DataGridView용 int 상한 적용). 필터와 무관.</summary>
+        public int DataRowsAvailable => _live?.Length ?? BaseRowCount;
 
         /// <summary>그리드에 표시할 행 수(필터 적용 시 일치 행 수).</summary>
         public int DisplayRowCount => _viewMap?.Length ?? DataRowsAvailable;
@@ -237,13 +256,13 @@ namespace NanumCsvViewer.Csv
         /// <summary>Freeze the current row order without materializing CSV fields.
         /// The caller must keep this document open while enumerating the snapshot.</summary>
         public IReadOnlyList<string[]> SnapshotViewRows()
-            => new ViewRows(this, _viewMap?.ToArray(), DataRowsAvailable);
+            => new ViewRows(this, _viewMap?.ToArray(), _live, DataRowsAvailable);
 
-        private sealed class ViewRows(VirtualCsvDocument document, int[]? map, int total) : IReadOnlyList<string[]>
+        private sealed class ViewRows(VirtualCsvDocument document, int[]? map, int[]? live, int total) : IReadOnlyList<string[]>
         {
-            public int Count => map?.Length ?? total;
+            public int Count => map?.Length ?? live?.Length ?? total;
             public string[] this[int index] => index >= 0 && index < Count
-                ? document.GetDataRowUncached(map is null ? index : map[index])
+                ? document.ParseDataRow(map is not null ? map[index] : live is not null ? live[index] : index)
                 : throw new ArgumentOutOfRangeException(nameof(index));
             public IEnumerator<string[]> GetEnumerator()
             {
@@ -252,72 +271,178 @@ namespace NanumCsvViewer.Csv
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
         }
 
-        /// <summary>표시 행(viewIndex)을 데이터 행으로 변환. 뷰맵 스냅샷 1회 + 범위 가드(레이스 안전).</summary>
+        /// <summary>표시 행(viewIndex)을 행 id로 변환. 뷰맵 스냅샷 1회 + 범위 가드(레이스 안전).</summary>
         private bool TryMapToDataRow(int viewIndex, out int dataRow)
         {
             int[]? map = _viewMap; // 스냅샷: 길이/인덱스 모두 이 참조로만 판단
-            if (map is null)
+            if (map is not null)
             {
-                dataRow = viewIndex;
-                return viewIndex >= 0;
+                if ((uint)viewIndex >= (uint)map.Length) { dataRow = -1; return false; }
+                dataRow = map[viewIndex];
+                return true;
             }
-            if ((uint)viewIndex >= (uint)map.Length) { dataRow = -1; return false; }
-            dataRow = map[viewIndex];
-            return true;
+            int[]? live = _live;
+            if (live is not null)
+            {
+                if ((uint)viewIndex >= (uint)live.Length) { dataRow = -1; return false; }
+                dataRow = live[viewIndex];
+                return true;
+            }
+            dataRow = viewIndex;
+            return viewIndex >= 0;
+        }
+
+        /// <summary>현재 화면 순서(삭제 제외)의 행 id 전체. 행 구조 편집이 없으면 새 항등 배열.</summary>
+        private int[] LiveIds() => _live ?? CreateIdentity(BaseRowCount);
+
+        /// <summary>데이터 행 위치(0 = 헤더 다음 첫 행, 삭제 제외·추가 포함) → 행 id. 범위 밖이면 -1.</summary>
+        private int PositionToId(int position)
+        {
+            int[]? live = _live;
+            if (live is null) return position >= 0 ? position : -1;
+            return (uint)position < (uint)live.Length ? live[position] : -1;
         }
 
         /// <summary>표시 행(viewIndex) → 실제 데이터 행을 디코드/파싱하여 반환(캐시 사용).</summary>
         public string[] GetDisplayRow(int viewIndex)
-            => TryMapToDataRow(viewIndex, out int dataRow) ? GetDataRow(dataRow) : EmptyRow;
+            => TryMapToDataRow(viewIndex, out int rowId) ? GetRowById(rowId) : EmptyRow;
 
-        /// <summary>표시 행(viewIndex) → 원본 데이터 행 번호(1-based, 헤더 제외). 필터/정렬 시 원래 위치를 유지.</summary>
+        /// <summary>
+        /// 표시 행(viewIndex) → 현재 행 번호(1-based, 헤더 제외). 필터/정렬 시 원래 위치를 유지한다.
+        /// 행을 삭제·추가했으면 편집 후 순서 기준 번호(삭제된 행은 건너뛰고 번호가 당겨진다).
+        /// </summary>
         public long GetSourceRowNumber(int viewIndex)
-            => TryMapToDataRow(viewIndex, out int dataRow) ? dataRow + 1L : 0L;
+        {
+            if (!TryMapToDataRow(viewIndex, out int rowId)) return 0L;
+            var rank = _rank;
+            if (rank is null) return rowId + 1L;
+            return (uint)rowId < (uint)rank.Length && rank[rowId] >= 0 ? rank[rowId] + 1L : 0L;
+        }
+
+        /// <summary>표시 행 → 행 id(편집 덮개의 키). 범위 밖이면 -1. 추가 행의 id는 BaseRowCount 이상.</summary>
+        public int GetRowId(int viewIndex) => TryMapToDataRow(viewIndex, out int r) ? r : -1;
+
+        /// <summary>데이터 행 위치(필터와 무관한 화면 순서, 0-based) → 행 id. 범위 밖이면 -1.</summary>
+        public int GetRowIdAtPosition(int position) => PositionToId(position);
+
+        /// <summary>행 id가 현재 표시 중인 위치(없으면 -1). 필터에 걸러졌거나 삭제된 행은 -1.</summary>
+        public int FindViewIndex(int rowId)
+        {
+            if (_viewMap is { } map) return Array.IndexOf(map, rowId);
+            var rank = _rank;
+            if (rank is not null) return (uint)rowId < (uint)rank.Length ? rank[rowId] : -1;
+            return rowId >= 0 && rowId < BaseRowCount ? rowId : -1;
+        }
+
+        /// <summary>화면 순서에서 rowId 바로 앞 행의 id(첫 행이면 -1). "위에 행 삽입"의 앵커용.</summary>
+        public int PredecessorId(int rowId)
+        {
+            var live = _live;
+            if (live is null) return rowId - 1;
+            var rank = _rank;
+            if (rank is null || (uint)rowId >= (uint)rank.Length || rank[rowId] <= 0) return -1;
+            return live[rank[rowId] - 1];
+        }
+
+        /// <summary>표시 행이 시트 편집으로 추가한 행인가.</summary>
+        public bool IsAddedRow(int viewIndex) => TryMapToDataRow(viewIndex, out int rowId) && Edits.IsAddedRow(rowId);
 
         /// <summary>이미 캐시에 있을 때만 행을 반환(디스크/파싱 트리거 없음). 행 높이 계산 등 핫 패스용.</summary>
         public bool TryGetCachedDisplayRow(int viewIndex, out string[] fields)
         {
-            if (!TryMapToDataRow(viewIndex, out int dataRow)) { fields = EmptyRow; return false; }
-            return _cache.TryGet(dataRow, out fields);
+            if (!TryMapToDataRow(viewIndex, out int rowId)) { fields = EmptyRow; return false; }
+            return _cache.TryGet(rowId, out fields);
         }
 
-        public string[] GetDataRow(int dataRow)
+        /// <summary>데이터 행 위치(필터와 무관한 화면 순서) → 행 파싱(캐시 사용).</summary>
+        public string[] GetDataRow(int position)
         {
-            if (_cache.TryGet(dataRow, out var cached)) return cached;
-            string[] fields = ParseDataRow(dataRow);
-            _cache.Add(dataRow, fields);
+            int rowId = PositionToId(position);
+            return rowId < 0 ? EmptyRow : GetRowById(rowId);
+        }
+
+        private string[] GetRowById(int rowId)
+        {
+            if (_cache.TryGet(rowId, out var cached)) return cached;
+            string[] fields = ParseDataRow(rowId);
+            _cache.Add(rowId, fields);
             return fields;
         }
 
-        /// <summary>캐시를 조회하지도 채우지도 않는 디코드. 필터/정렬의 대량 스캔용(LRU 오염·락 경합 방지).</summary>
-        public string[] GetDataRowUncached(int dataRow) => ParseDataRow(dataRow);
-
-        // 모든 읽기(그리드·필터·정렬·분석·내보내기)의 단일 경로: 원본 파싱 + 셀 편집 덮개.
-        private string[] ParseDataRow(int dataRow)
+        /// <summary>캐시를 조회하지도 채우지도 않는 디코드(데이터 행 위치 기준). 필터/정렬의 대량 스캔용(LRU 오염·락 경합 방지).</summary>
+        public string[] GetDataRowUncached(int position)
         {
-            var fields = ParseRawDataRow(dataRow);
-            return Edits.IsEmpty ? fields : Edits.Apply(dataRow, fields);
+            int rowId = PositionToId(position);
+            return rowId < 0 ? EmptyRow : ParseDataRow(rowId);
         }
 
-        /// <summary>편집 덮개를 적용하지 않은 원본 행(편집 전 값 확인·되돌림 비교용).</summary>
-        public string[] GetOriginalDataRow(int dataRow) => ParseRawDataRow(dataRow);
+        // 모든 읽기(그리드·필터·정렬·분석·내보내기)의 단일 경로: 원본 파싱(또는 추가 행 기본값) + 셀 편집 덮개.
+        private string[] ParseDataRow(int rowId) => Edits.Apply(rowId, ParseRawDataRow(rowId));
 
-        /// <summary>표시 행 → 0-based 데이터 행. 범위 밖이면 -1.</summary>
-        public int GetDataRowIndex(int viewIndex) => TryMapToDataRow(viewIndex, out int r) ? r : -1;
+        /// <summary>편집 덮개를 적용하지 않은 원본 행(편집 전 값 확인·되돌림 비교용). 추가 행은 빈 값 행.</summary>
+        public string[] GetOriginalRow(int rowId) => ParseRawDataRow(rowId);
 
-        private string[] ParseRawDataRow(int dataRow)
+        private string[] ParseRawDataRow(int rowId)
         {
-            long rec = dataRow + 1L; // 0번 레코드는 헤더
+            long rec = rowId + 1L; // 0번 레코드는 헤더
             long count = _index.Count;
-            if (rec < 1 || rec >= count) return EmptyRow; // 범위 밖(레이스/인덱싱 중)이면 안전하게 빈 행
+            if (rec < 1) return EmptyRow;
+            if (rec >= count)
+            {
+                // 원본 끝을 넘은 id = 시트 편집으로 추가한 행. 그 밖(레이스/인덱싱 중)이면 안전하게 빈 행.
+                return IndexingComplete && Edits.GetAddedBase(rowId) is { } added ? added : EmptyRow;
+            }
             long start = _index[rec];
             long end = (rec + 1 < count) ? _index[rec + 1] : FileLength;
             return DecodeAndParse(start, end);
         }
 
+        // 덮개 변경 반영: 행 캐시 폐기 + 행 구조(화면 순서)·헤더 이름 재구성. 구독 순서상 UI 핸들러보다 먼저 실행된다.
+        private void OnEditsChanged()
+        {
+            _cache.Clear();
+            if (_structureSeen != Edits.StructureVersion) { _structureSeen = Edits.StructureVersion; RebuildStructure(); }
+            if (_headerSeen != Edits.HeaderVersion)
+            {
+                _headerSeen = Edits.HeaderVersion;
+                _header = Edits.ApplyHeader(_rawHeader);
+            }
+        }
+
+        private void RebuildStructure()
+        {
+            if (!Edits.HasStructureEdits)
+            {
+                _live = null;
+                _rank = null;
+            }
+            else
+            {
+                int baseRows = Edits.BaseRowCount >= 0 ? Edits.BaseRowCount : BaseRowCount;
+                int[] live = Edits.BuildLiveOrder(baseRows);
+                var rank = new int[Edits.TotalRowIds(baseRows)];
+                Array.Fill(rank, -1);
+                for (int p = 0; p < live.Length; p++) rank[live[p]] = p;
+                _rank = rank;
+                _live = live;
+            }
+
+            // 필터/정렬 뷰: 삭제됐거나 사라진(추가를 되돌린) 행은 즉시 뺀다. 새로 보여야 할 행은 재평가가 채운다.
+            if (_viewMap is { } map)
+            {
+                int total = Edits.TotalRowIds(Edits.BaseRowCount >= 0 ? Edits.BaseRowCount : BaseRowCount);
+                var kept = new List<int>(map.Length);
+                foreach (int id in map)
+                    if (id < total && !Edits.IsDeleted(id)) kept.Add(id);
+                if (kept.Count != map.Length) _viewMap = kept.ToArray();
+            }
+        }
+
         /// <summary>
         /// 편집 내용을 새 파일로 저장(원본은 절대 덮어쓰지 않는다). 편집되지 않은 행은 원본 바이트를 그대로 복사하고,
         /// 편집된 행만 같은 인코딩·구분자·줄바꿈으로 다시 쓴다(값은 문자열 그대로 — 선행 0 보존).
+        /// 이름을 바꾼 컬럼이 있으면 헤더 레코드를 다시 쓰고(BOM·줄바꿈 보존), 삭제한 행은 건너뛰며,
+        /// 추가한 행은 화면 순서대로 같은 줄바꿈으로 쓴다.
         /// 인덱싱이 끝난 뒤에만 호출한다. 실패·취소 시 부분 파일을 남기지 않는다.
         /// </summary>
         public void SaveWithEdits(string destinationPath, IProgress<int>? progress, CancellationToken ct)
@@ -334,24 +459,63 @@ namespace NanumCsvViewer.Csv
                 {
                     var src = (IRandomByteSource?)_ramBuffer ?? _diskSource;
                     long count = _index.Count;
-                    var rows = Edits.EditedRows();
-                    int next = 0;
+                    int baseRows = BaseRowCount;
                     var chunk = new byte[1 << 20];
-                    long first = count > 1 ? _index[1] : FileLength; // 헤더(+BOM)는 원본 그대로
-                    CopyRange(src, fs, 0, first, chunk, ct);
+                    long first = count > 1 ? _index[1] : FileLength; // 헤더(+BOM) 끝
                     char delim = (char)_delim;
-                    for (long rec = 1; rec < count; rec++)
+
+                    // 헤더 레코드의 줄바꿈 종류를 알아 둔다(추가 행·구분용). 없으면 CRLF.
+                    int headerLen = (int)Math.Max(0, first - _headerStart);
+                    var headerRaw = new byte[headerLen];
+                    if (headerLen > 0) src.Read(_headerStart, headerRaw);
+                    int headerBody = headerLen;
+                    while (headerBody > 0 && (headerRaw[headerBody - 1] == 0x0A || headerRaw[headerBody - 1] == 0x0D)) headerBody--;
+                    string term = headerLen - headerBody == 0 ? "\r\n"
+                        : headerRaw[headerLen - 1] == 0x0A ? (headerLen - headerBody >= 2 && headerRaw[headerLen - 2] == 0x0D ? "\r\n" : "\n")
+                        : "\r";
+                    byte[] termBytes = _encoding.GetBytes(term);
+
+                    bool pendingSeparator;
+                    if (Edits.HeaderEditCount > 0)
                     {
-                        if ((rec & 0x3FFF) == 0)
+                        CopyRange(src, fs, 0, _headerStart, chunk, ct); // BOM
+                        byte[] body = _encoding.GetBytes(CellEdits.JoinRecord(_header, delim));
+                        fs.Write(body, 0, body.Length);
+                        fs.Write(headerRaw, headerBody, headerLen - headerBody);
+                        pendingSeparator = headerLen > 0 && headerBody == headerLen;
+                    }
+                    else
+                    {
+                        CopyRange(src, fs, 0, first, chunk, ct);
+                        pendingSeparator = headerLen > 0 && headerBody == headerLen; // 헤더만 있고 줄바꿈 없는 파일
+                    }
+
+                    int[]? live = _live;
+                    long total = live?.Length ?? Math.Max(0, count - 1);
+                    for (long i = 0; i < total; i++)
+                    {
+                        if ((i & 0x3FFF) == 0)
                         {
                             ct.ThrowIfCancellationRequested();
-                            progress?.Report((int)(rec * 100 / count));
+                            progress?.Report((int)(i * 100 / Math.Max(1, total)));
                         }
+                        int rowId = live is null ? (int)i : live[i];
+                        if (pendingSeparator) { fs.Write(termBytes, 0, termBytes.Length); pendingSeparator = false; }
+
+                        if (rowId >= baseRows)
+                        {
+                            // 추가 행: 새로 직렬화 + 파일의 줄바꿈.
+                            byte[] added = _encoding.GetBytes(CellEdits.JoinRecord(ParseDataRow(rowId), delim));
+                            fs.Write(added, 0, added.Length);
+                            fs.Write(termBytes, 0, termBytes.Length);
+                            continue;
+                        }
+
+                        long rec = rowId + 1L;
                         long start = _index[rec];
                         long end = rec + 1 < count ? _index[rec + 1] : FileLength;
-                        int dataRow = (int)(rec - 1);
-                        while (next < rows.Length && rows[next] < dataRow) next++;
-                        if (next < rows.Length && rows[next] == dataRow)
+                        bool isLastRecord = rec + 1 >= count;
+                        if (Edits.HasRowEdits(rowId))
                         {
                             // 원본 레코드의 끝 줄바꿈을 보존하고, 필드만 다시 직렬화한다.
                             int len = (int)(end - start);
@@ -359,12 +523,21 @@ namespace NanumCsvViewer.Csv
                             src.Read(start, raw);
                             int n = len;
                             while (n > 0 && (raw[n - 1] == 0x0A || raw[n - 1] == 0x0D)) n--;
-                            var fields = ParseDataRow(dataRow);
-                            byte[] body = _encoding.GetBytes(CellEdits.JoinRecord(fields, delim));
+                            byte[] body = _encoding.GetBytes(CellEdits.JoinRecord(ParseDataRow(rowId), delim));
                             fs.Write(body, 0, body.Length);
                             fs.Write(raw, n, len - n);
+                            if (n == len) pendingSeparator = true; // 줄바꿈 없는 마지막 레코드 — 뒤에 무엇이 오면 구분 필요
                         }
-                        else CopyRange(src, fs, start, end, chunk, ct);
+                        else
+                        {
+                            CopyRange(src, fs, start, end, chunk, ct);
+                            if (isLastRecord && end > start)
+                            {
+                                var last = new byte[1];
+                                src.Read(end - 1, last);
+                                if (last[0] != 0x0A && last[0] != 0x0D) pendingSeparator = true;
+                            }
+                        }
                     }
                 }
                 File.Move(tmp, full, overwrite: true);
@@ -374,6 +547,47 @@ namespace NanumCsvViewer.Csv
             {
                 try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 부분 파일은 남기지 않는다. */ }
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// 현재 데이터(헤더 이름 변경·셀 편집·삭제/추가 행 반영, 값은 전부 문자열)를 단일 시트 .xlsx로 저장한다.
+        /// 원본(또는 임포트 임시 CSV)은 덮어쓰지 않는다. 실패·취소 시 부분 파일을 남기지 않는다.
+        /// </summary>
+        public void SaveAsXlsx(string destinationPath, string sheetName, IProgress<int>? progress, CancellationToken ct)
+        {
+            if (!IndexingComplete) throw new InvalidOperationException("Indexing is not complete.");
+            string full = Path.GetFullPath(destinationPath);
+            if (string.Equals(full, Path.GetFullPath(_path), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The original file is never overwritten. Choose a different file name.");
+
+            string tmp = full + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                int total = DataRowsAvailable;
+                using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20))
+                    XlsxDataWriter.Write(fs, sheetName, EnumerateExportRows(total, progress, ct), (long)total + 1);
+                File.Move(tmp, full, overwrite: true);
+                progress?.Report(100);
+            }
+            catch
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 부분 파일은 남기지 않는다. */ }
+                throw;
+            }
+        }
+
+        private IEnumerable<string[]> EnumerateExportRows(int total, IProgress<int>? progress, CancellationToken ct)
+        {
+            yield return _header;
+            for (int i = 0; i < total; i++)
+            {
+                if ((i & 0x3FFF) == 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress?.Report((int)(i * 100L / Math.Max(1, total)));
+                }
+                yield return GetDataRowUncached(i);
             }
         }
 
@@ -418,28 +632,37 @@ namespace NanumCsvViewer.Csv
             _encoding = EncodingDetector.GetEncodingByName(encodingName);
             EncodingName = encodingName;
             _cache.Clear();
-            Header = DecodeAndParse(_headerStart, _headerEnd);
+            _rawHeader = DecodeAndParse(_headerStart, _headerEnd);
+            _header = Edits.ApplyHeader(_rawHeader);
         }
 
         // ---- 필터 / 정렬 (Phase 3) : 인덱싱 완료 후에만 호출 ----
+        // 뷰맵은 "행 id" 배열이다(행 삽입·삭제로 위치가 밀려도 id는 그대로). 계산은 모두 새 배열을 만든 뒤 한 번에 교체한다.
 
         /// <summary>predicate가 참인 데이터 행만 남기는 뷰맵을 백그라운드로 구성.</summary>
         public Task ApplyFilterAsync(Func<string[], bool> predicate, IProgress<int>? progress, CancellationToken ct)
         {
             return Task.Run(() =>
             {
-                int total = DataRowsAvailable;
-                var matches = new List<int>();
-                for (int i = 0; i < total; i++)
-                {
-                    if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    if (predicate(GetDataRowUncached(i))) matches.Add(i);
-                    if (progress is not null && (i & 0x3FFFF) == 0)
-                        progress.Report(total == 0 ? 100 : (int)(i * 100L / total));
-                }
-                _viewMap = matches.ToArray();
+                _viewMap = ComputeFilter(predicate, progress, ct);
                 progress?.Report(100);
             }, ct);
+        }
+
+        private int[] ComputeFilter(Func<string[], bool> predicate, IProgress<int>? progress, CancellationToken ct)
+        {
+            int[]? live = _live; // 스냅샷
+            int total = live?.Length ?? BaseRowCount;
+            var matches = new List<int>();
+            for (int i = 0; i < total; i++)
+            {
+                if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                int id = live is null ? i : live[i];
+                if (predicate(ParseDataRow(id))) matches.Add(id);
+                if (progress is not null && (i & 0x3FFFF) == 0)
+                    progress.Report(total == 0 ? 100 : (int)(i * 100L / total));
+            }
+            return matches.ToArray();
         }
 
         /// <summary>
@@ -450,13 +673,13 @@ namespace NanumCsvViewer.Csv
         {
             return Task.Run(() =>
             {
-                int[] baseMap = _viewMap ?? CreateIdentity(DataRowsAvailable);
+                int[] baseMap = _viewMap ?? LiveIds();
                 var result = new List<int>(Math.Min(baseMap.Length, 1 << 16));
                 for (int i = 0; i < baseMap.Length; i++)
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    int dataRow = baseMap[i];
-                    if (predicate(GetDataRowUncached(dataRow))) result.Add(dataRow);
+                    int id = baseMap[i];
+                    if (predicate(ParseDataRow(id))) result.Add(id);
                     if (progress is not null && (i & 0x3FFFF) == 0 && baseMap.Length > 0)
                         progress.Report((int)(i * 100L / baseMap.Length));
                 }
@@ -465,10 +688,33 @@ namespace NanumCsvViewer.Csv
             }, ct);
         }
 
+        /// <summary>
+        /// 활성 필터(없으면 null)와 정렬 키(없으면 빈 목록)를 처음부터 다시 평가해 뷰맵을 한 번에 교체한다.
+        /// 셀 편집·행 삽입/삭제 뒤 필터/정렬을 현재 데이터로 재평가하는 데 쓴다(중간에 전체 보기로 깜빡이지 않음).
+        /// 둘 다 없으면 뷰맵을 비운다.
+        /// </summary>
+        public Task RebuildViewAsync(Func<string[], bool>? predicate, IReadOnlyList<SortKey> sortKeys,
+            IProgress<int>? progress, CancellationToken ct)
+        {
+            var keys = sortKeys.ToArray();
+            return Task.Run(() =>
+            {
+                int[]? map = predicate is null ? null : ComputeFilter(predicate, progress, ct);
+                if (keys.Length > 0) map = ComputeSort(map ?? LiveIds(), keys, progress, ct);
+                _viewMap = map;
+                progress?.Report(100);
+            }, ct);
+        }
+
         /// <summary>현재 뷰를 원래(파일) 순서로 즉시 되돌림(행 재읽기 없음). 필터 결과는 유지.</summary>
         public void ResetViewOrder()
         {
-            if (_viewMap is { } map) Array.Sort(map); // 데이터 행 인덱스 오름차순 = 파일 순서
+            if (_viewMap is not { } map) return;
+            var rank = _rank;
+            if (rank is null) { Array.Sort(map); return; } // 행 id 오름차순 = 파일 순서
+            var order = new int[map.Length];
+            for (int i = 0; i < map.Length; i++) order[i] = (uint)map[i] < (uint)rank.Length ? rank[map[i]] : int.MaxValue;
+            Array.Sort(order, map); // 행 구조 편집이 있으면 화면 순서(위치) 기준
         }
 
         /// <summary>현재 뷰(필터 결과 또는 전체)를 단일 컬럼 기준으로 정렬(다중 키 버전의 편의 오버로드).</summary>
@@ -482,62 +728,71 @@ namespace NanumCsvViewer.Csv
         public Task SortAsync(IReadOnlyList<SortKey> sortKeys, IProgress<int>? progress, CancellationToken ct)
         {
             // 호출 스레드에서 스냅샷(공유 컬렉션 변경과 분리).
-            int k = sortKeys.Count;
+            var keys = sortKeys.ToArray();
+            return Task.Run(() =>
+            {
+                if (keys.Length == 0) { progress?.Report(100); return; }
+                _viewMap = ComputeSort(_viewMap ?? LiveIds(), keys, progress, ct);
+                progress?.Report(100);
+            }, ct);
+        }
+
+        private int[] ComputeSort(int[] baseMap, SortKey[] sortKeys, IProgress<int>? progress, CancellationToken ct)
+        {
+            int k = sortKeys.Length;
             var cols = new int[k];
             var asc = new bool[k];
             for (int j = 0; j < k; j++) { cols[j] = sortKeys[j].Column; asc[j] = sortKeys[j].Ascending; }
+            if (k == 0) return baseMap;
 
-            return Task.Run(() =>
+            int n = baseMap.Length;
+
+            // 컬럼별 키/숫자값을 한 번만 추출(캐시 우회) + 숫자 여부 1회 판정.
+            var keys = new string[k][];
+            var num = new double[k][];
+            var allNumeric = new bool[k];
+            for (int j = 0; j < k; j++) { keys[j] = new string[n]; num[j] = new double[n]; allNumeric[j] = n > 0; }
+
+            for (int i = 0; i < n; i++)
             {
-                int total = DataRowsAvailable;
-                int[] baseMap = _viewMap ?? CreateIdentity(total);
-                int n = baseMap.Length;
-                if (k == 0) { progress?.Report(100); return; }
-
-                // 컬럼별 키/숫자값을 한 번만 추출(캐시 우회) + 숫자 여부 1회 판정.
-                var keys = new string[k][];
-                var num = new double[k][];
-                var allNumeric = new bool[k];
-                for (int j = 0; j < k; j++) { keys[j] = new string[n]; num[j] = new double[n]; allNumeric[j] = n > 0; }
-
-                for (int i = 0; i < n; i++)
+                if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string[] row = ParseDataRow(baseMap[i]);
+                for (int j = 0; j < k; j++)
                 {
-                    if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    string[] row = GetDataRowUncached(baseMap[i]);
-                    for (int j = 0; j < k; j++)
+                    int col = cols[j];
+                    string key = (col >= 0 && col < row.Length) ? row[col] : string.Empty;
+                    keys[j][i] = key;
+                    if (allNumeric[j])
                     {
-                        int col = cols[j];
-                        string key = (col >= 0 && col < row.Length) ? row[col] : string.Empty;
-                        keys[j][i] = key;
-                        if (allNumeric[j])
-                        {
-                            if (double.TryParse(key, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) num[j][i] = d;
-                            else if (key.Length == 0) num[j][i] = double.NegativeInfinity; // 빈 값은 맨 앞
-                            else allNumeric[j] = false; // 숫자 아님 → 해당 컬럼은 문자열 비교
-                        }
+                        if (double.TryParse(key, NumberStyles.Any, CultureInfo.InvariantCulture, out double d)) num[j][i] = d;
+                        else if (key.Length == 0) num[j][i] = double.NegativeInfinity; // 빈 값은 맨 앞
+                        else allNumeric[j] = false; // 숫자 아님 → 해당 컬럼은 문자열 비교
                     }
-                    if (progress is not null && (i & 0x3FFFF) == 0 && n > 0)
-                        progress.Report((int)(i * 100L / n));
                 }
+                if (progress is not null && (i & 0x3FFFF) == 0 && n > 0)
+                    progress.Report((int)(i * 100L / n));
+            }
 
-                // idx를 다중 키 우선순위로 정렬 후 baseMap을 재배열. 모든 키가 같으면 파일 순서로 안정화.
-                int[] idx = CreateIdentity(n);
-                Array.Sort(idx, (x, y) =>
+            // idx를 다중 키 우선순위로 정렬 후 baseMap을 재배열. 모든 키가 같으면 화면(파일) 순서로 안정화한다.
+            int[] idx = CreateIdentity(n);
+            var rank = _rank;
+            Array.Sort(idx, (x, y) =>
+            {
+                for (int j = 0; j < k; j++)
                 {
-                    for (int j = 0; j < k; j++)
-                    {
-                        int c = allNumeric[j]
-                            ? num[j][x].CompareTo(num[j][y])
-                            : string.Compare(keys[j][x], keys[j][y], StringComparison.OrdinalIgnoreCase);
-                        if (c != 0) return asc[j] ? c : -c;
-                    }
-                    return baseMap[x].CompareTo(baseMap[y]); // 안정 정렬 tie-break
-                });
-                var result = new int[n];
-                for (int i = 0; i < n; i++) result[i] = baseMap[idx[i]];
-                _viewMap = result;
-                progress?.Report(100);
-            }, ct);
+                    int c = allNumeric[j]
+                        ? num[j][x].CompareTo(num[j][y])
+                        : string.Compare(keys[j][x], keys[j][y], StringComparison.OrdinalIgnoreCase);
+                    if (c != 0) return asc[j] ? c : -c;
+                }
+                int bx = baseMap[x], by = baseMap[y];
+                if (rank is not null && (uint)bx < (uint)rank.Length && (uint)by < (uint)rank.Length)
+                    return rank[bx].CompareTo(rank[by]); // 행 구조 편집이 있으면 화면 순서
+                return bx.CompareTo(by); // 안정 정렬 tie-break
+            });
+            var result = new int[n];
+            for (int i = 0; i < n; i++) result[i] = baseMap[idx[i]];
+            return result;
         }
 
         private static int[] CreateIdentity(int n)
@@ -578,7 +833,7 @@ namespace NanumCsvViewer.Csv
                 for (int i = 0; i < map.Length; i++)
                 {
                     if ((i & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    Tally(GetDataRowUncached(map[i]));
+                    Tally(ParseDataRow(map[i]));
                 }
             }
             else

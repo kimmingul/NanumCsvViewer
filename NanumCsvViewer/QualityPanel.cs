@@ -121,9 +121,10 @@ namespace NanumCsvViewer
                     string pct = f.Approximate
                         ? LT("count not in source", "소스에 건수 없음")
                         : f.EvaluatedRows > 0
-                            ? $"{100.0 * f.ViolationCount / f.EvaluatedRows:0.##}% of {f.EvaluatedRows:N0}"
+                            ? LT($"{100.0 * f.ViolationCount / f.EvaluatedRows:0.##}% of {f.EvaluatedRows:N0}",
+                                 $"{f.EvaluatedRows:N0}행 중 {100.0 * f.ViolationCount / f.EvaluatedRows:0.##}%")
                             : LT("denominator not reported", "분모 없음");
-                    string note = f.Breakdown.Count > 0 ? f.Breakdown[0].Value : "";
+                    string note = f.Breakdown.Count > 0 ? Stats.ErrorText.LocalizeNote(f.Breakdown[0].Value) : "";
                     return LT("imported from DQD", "DQD에서 가져옴") + " · " + pct
                         + (note.Length > 0 ? " · " + note : "");
                 }
@@ -144,8 +145,12 @@ namespace NanumCsvViewer
         /// <summary>검사 열·보고서 제목. 규칙·적합성·DQD는 라벨(규칙명·검사명)을 붙인다.</summary>
         public static string CheckTitle(QualityFinding f)
             => QualitySessionChecks.UsesLabel(f.Kind) && f.Label is { Length: > 0 }
-                ? $"{KindName(f.Kind)}: {f.Label}"
+                ? $"{KindName(f.Kind)}: {CheckLabel(f)}"
                 : KindName(f.Kind);
+
+        // 규칙명은 사용자 데이터라 그대로. 적합성·DQD 라벨의 엔진 고정 문구("column absent" 등)만 변환한다.
+        private static string CheckLabel(QualityFinding f)
+            => f.Kind == QualityCheckKind.Rule ? f.Label! : Stats.ErrorText.Localize(f.Label!);
 
         private static string ConformanceDetail(QualityFinding f)
         {
@@ -153,7 +158,7 @@ namespace NanumCsvViewer
                 return LT("column not in this table — checks not run", "이 테이블에 없는 컬럼 — 검사하지 않음");
             if (f.Column < 0)
                 return LT("required column is not in this table", "이 테이블에 없는 필수 컬럼");
-            string extra = f.Breakdown.Count > 0 ? string.Join(" · ", f.Breakdown.Select(b => b.Value)) : "";
+            string extra = f.Breakdown.Count > 0 ? Stats.ErrorText.LocalizeNote(string.Join(" · ", f.Breakdown.Select(b => b.Value))) : "";
             if (f.ViolationCount == 0)
             {
                 string passed = LT("passed (0 violations)", "통과(위반 0건)");
@@ -583,7 +588,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, LT("Failed to load rule set", "규칙 세트 불러오기 실패"),
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), LT("Failed to load rule set", "규칙 세트 불러오기 실패"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -763,7 +768,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, LT("Failed to load profile", "프로파일 불러오기 실패"),
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), LT("Failed to load profile", "프로파일 불러오기 실패"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }

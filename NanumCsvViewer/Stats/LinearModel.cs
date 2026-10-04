@@ -85,14 +85,18 @@ namespace NanumCsvViewer.Stats
         IReadOnlyList<AdjustedMeanDifference> Pairwise,
         NestedFTest Slopes);
 
-    /// <summary>다요인 ANCOVA(주효과만): 가법 적합, Type II, 요인별 보정 평균·쌍별 비교·기울기 동질성(요인×공변량).</summary>
+    /// <summary>상호작용 항 하나의 셀(수준 조합) 보정 평균. Level은 "a × u" 꼴.</summary>
+    public sealed record AncovaCellResult(string Term, IReadOnlyList<string> Factors, IReadOnlyList<AdjustedMean> AdjustedMeans);
+
+    /// <summary>다요인 ANCOVA: 가법(+요인 상호작용) 적합, Type II, 요인별 보정 평균·쌍별 비교·기울기 동질성(요인×공변량), 상호작용 셀 평균.</summary>
     public sealed record MultiAncovaResult(
         LinearModelFit Additive,
         IReadOnlyList<AnovaTerm> TypeII,
         NestedFTest AllSlopes,
         IReadOnlyList<string> Covariates,
         IReadOnlyList<double> CovariateMeans,
-        IReadOnlyList<AncovaFactorResult> Factors);
+        IReadOnlyList<AncovaFactorResult> Factors,
+        IReadOnlyList<AncovaCellResult> Cells);
 
     /// <summary>
     /// 일반선형모형(OLS) 적합. 계수·적합 통계·잔차 요약.
@@ -446,22 +450,30 @@ namespace NanumCsvViewer.Stats
         }
 
         /// <summary>
-        /// 다요인 ANCOVA. design은 y ~ 범주 요인 2개 이상 + 수치 공변량(주효과만, 절편 있음).
+        /// 다요인 ANCOVA. design은 y ~ 범주 요인 2개 이상 + 수치 공변량 + (선택) 요인끼리의 상호작용(절편 있음).
         /// 요인 F의 보정 평균 = 절편 + F 수준 효과 + 다른 요인 효과의 수준 동일 가중 평균(R emmeans·SAS LSMEANS 기본)
-        /// + 공변량 평균. 기울기 동질성은 요인 F×공변량 열을 더한 모형과 내포 F(요인별, 그리고 전체).
+        /// + 공변량 평균. 상호작용 열도 같은 규칙(고정하지 않은 요인은 수준 동일 가중)으로 평균에 들어가며,
+        /// 상호작용 항마다 셀(수준 조합) 보정 평균을 따로 낸다. Type II는 주변성을 지킨다(상호작용이 있어도 주효과 SS는 상호작용을 뺀 모형 기준).
+        /// 기울기 동질성은 요인 F×공변량 열을 더한 모형과 내포 F(요인별, 그리고 전체).
         /// </summary>
         public static MultiAncovaResult AncovaMulti(DesignMatrix additive, CancellationToken cancellation = default)
         {
             cancellation.ThrowIfCancellationRequested();
             if (!additive.HasIntercept)
                 throw new DesignMatrixException("ANCOVA requires an intercept so adjusted means are estimable.");
-            if (additive.Terms.Any(t => t.Term.Order != 1))
-                throw new DesignMatrixException(
-                    "ANCOVA expects main effects only (one factor + covariates). Interactions are added internally for the slopes test.");
             var factorTerms = new List<TermColumns>();
+            var interactionTerms = new List<TermColumns>();
             var covariates = new List<TermColumns>();
             foreach (var t in additive.Terms)
             {
+                if (t.Term.Order >= 2)
+                {
+                    if (!t.Term.Variables.All(additive.Factors.ContainsKey))
+                        throw new DesignMatrixException(
+                            $"'{t.Term.Name}' mixes a numeric covariate into an interaction. ANCOVA allows only factor×factor interactions here (factor×covariate slopes are tested internally).");
+                    interactionTerms.Add(t);
+                    continue;
+                }
                 string v = t.Term.Variables[0];
                 if (additive.Factors.ContainsKey(v)) factorTerms.Add(t);
                 else if (t.Count == 1) covariates.Add(t);
@@ -478,6 +490,48 @@ namespace NanumCsvViewer.Stats
 
             var means = new double[covariates.Count];
             for (int k = 0; k < covariates.Count; k++) means[k] = ColumnMean(additive.X, covariates[k].Start, cancellation);
+
+            // 보정 평균의 대비 벡터: fixedLevels에 든 요인은 그 수준에 고정, 나머지 요인은 수준 동일 가중, 공변량은 평균.
+            // 상호작용 열(처리 코딩의 곱)은 구성 요인마다의 가중(고정: 지시값, 평균: 1/수준 수)의 곱.
+            double[] Contrast(IReadOnlyDictionary<string, int> fixedLevels)
+            {
+                var c = new double[additive.ColumnCount];
+                c[0] = 1;
+                foreach (var ft in factorTerms)
+                {
+                    string name = ft.Term.Variables[0];
+                    int m = additive.Factors[name].Levels.Count;
+                    if (fixedLevels.TryGetValue(name, out int lv)) { if (lv > 0) c[ft.Start + lv - 1] = 1; }
+                    else for (int d = 0; d < ft.Count; d++) c[ft.Start + d] = 1.0 / m;
+                }
+                foreach (var it in interactionTerms)
+                {
+                    var vars = it.Term.Variables;
+                    for (int d = 0; d < it.Count; d++)
+                    {
+                        var lv = DecodeLevels(additive, it, d);
+                        double w = 1;
+                        for (int j = 0; j < vars.Count; j++)
+                        {
+                            if (fixedLevels.TryGetValue(vars[j], out int fl)) w *= lv[j] == fl ? 1 : 0;
+                            else w *= 1.0 / additive.Factors[vars[j]].Levels.Count;
+                        }
+                        c[it.Start + d] = w;
+                    }
+                }
+                for (int k = 0; k < covariates.Count; k++) c[covariates[k].Start] = means[k];
+                return c;
+            }
+
+            double crit = Dist.TQuantile(1 - (1 - Confidence) / 2, additiveFit.DfResidual);
+            AdjustedMean Estimate(string label, int count, double[] c)
+            {
+                if (!TryLinearCombination(additiveFit, c, out double est, out double se))
+                    return new AdjustedMean(label, count, double.NaN, double.NaN, double.NaN, double.NaN);
+                double lo = double.NaN, hi = double.NaN;
+                if (!double.IsNaN(est) && !double.IsNaN(se) && !double.IsNaN(crit)) { lo = est - crit * se; hi = est + crit * se; }
+                return new AdjustedMean(label, count, est, se, lo, hi);
+            }
 
             // 기울기: 요인별 + 전체
             NestedFTest Slopes(IReadOnlyList<TermColumns> withFactors)
@@ -511,28 +565,11 @@ namespace NanumCsvViewer.Stats
                 var counts = LevelCounts(additive, ft, m);
                 var contrasts = new double[m][];
                 var adjusted = new List<AdjustedMean>(m);
-                double crit = Dist.TQuantile(1 - (1 - Confidence) / 2, additiveFit.DfResidual);
                 for (int L = 0; L < m; L++)
                 {
-                    var c = new double[additive.ColumnCount];
-                    c[0] = 1;
-                    if (L > 0) c[ft.Start + L - 1] = 1;
-                    foreach (var other in factorTerms)
-                    {
-                        if (other.Equals(ft)) continue;
-                        int mo = additive.Factors[other.Term.Variables[0]].Levels.Count;
-                        for (int d = 0; d < other.Count; d++) c[other.Start + d] = 1.0 / mo;
-                    }
-                    for (int k = 0; k < covariates.Count; k++) c[covariates[k].Start] = means[k];
+                    var c = Contrast(new Dictionary<string, int> { [name] = L });
                     contrasts[L] = c;
-                    if (!TryLinearCombination(additiveFit, c, out double est, out double se))
-                        adjusted.Add(new AdjustedMean(levels[L], counts[L], double.NaN, double.NaN, double.NaN, double.NaN));
-                    else
-                    {
-                        double lo = double.NaN, hi = double.NaN;
-                        if (!double.IsNaN(est) && !double.IsNaN(se) && !double.IsNaN(crit)) { lo = est - crit * se; hi = est + crit * se; }
-                        adjusted.Add(new AdjustedMean(levels[L], counts[L], est, se, lo, hi));
-                    }
+                    adjusted.Add(Estimate(levels[L], counts[L], c));
                 }
                 int pairs = m * (m - 1) / 2;
                 var diffs = new List<AdjustedMeanDifference>(pairs);
@@ -553,7 +590,52 @@ namespace NanumCsvViewer.Stats
                 results.Add(new AncovaFactorResult(name, adjusted, diffs, Slopes(new[] { ft })));
             }
 
-            return new MultiAncovaResult(additiveFit, type2, Slopes(factorTerms), covariates.Select(t => t.Term.Name).ToArray(), means, results);
+            // 상호작용 항마다 셀(수준 조합) 보정 평균. 비어 있는 셀은 추정 불가(NaN)로 둔다.
+            var cells = new List<AncovaCellResult>(interactionTerms.Count);
+            if (interactionTerms.Count > 0)
+            {
+                var rowLevel = new Dictionary<string, int[]>(StringComparer.Ordinal);
+                foreach (var ft in factorTerms)
+                {
+                    var lv = new int[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        if ((i & 16383) == 0) cancellation.ThrowIfCancellationRequested();
+                        for (int d = 0; d < ft.Count; d++)
+                            if (additive.X[i, ft.Start + d] != 0) { lv[i] = d + 1; break; }
+                    }
+                    rowLevel[ft.Term.Variables[0]] = lv;
+                }
+                foreach (var it in interactionTerms)
+                {
+                    var vars = it.Term.Variables;
+                    var sizes = vars.Select(v => additive.Factors[v].Levels.Count).ToArray();
+                    long total = 1;
+                    foreach (int s in sizes) total *= s;
+                    var cellCounts = new int[total];
+                    for (int i = 0; i < n; i++)
+                    {
+                        long idx = 0;
+                        for (int j = 0; j < vars.Count; j++) idx = idx * sizes[j] + rowLevel[vars[j]][i];
+                        cellCounts[idx]++;
+                    }
+                    var cellMeans = new List<AdjustedMean>((int)total);
+                    for (long idx = 0; idx < total; idx++)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        var lv = new int[vars.Count];
+                        long rem = idx;
+                        for (int j = vars.Count - 1; j >= 0; j--) { lv[j] = (int)(rem % sizes[j]); rem /= sizes[j]; }
+                        var fixedLevels = new Dictionary<string, int>(StringComparer.Ordinal);
+                        for (int j = 0; j < vars.Count; j++) fixedLevels[vars[j]] = lv[j];
+                        string label = string.Join(" × ", vars.Select((v, j) => additive.Factors[v].Levels[lv[j]]));
+                        cellMeans.Add(Estimate(label, cellCounts[idx], Contrast(fixedLevels)));
+                    }
+                    cells.Add(new AncovaCellResult(it.Term.Name, vars.ToArray(), cellMeans));
+                }
+            }
+
+            return new MultiAncovaResult(additiveFit, type2, Slopes(factorTerms), covariates.Select(t => t.Term.Name).ToArray(), means, results, cells);
         }
 
         /// <summary>c′β 와 표준오차. 별칭 열에 0이 아닌 가중이면 추정 불가(false).</summary>
@@ -629,6 +711,20 @@ namespace NanumCsvViewer.Stats
             if (levelIndex > 0) c[factor.Start + levelIndex - 1] = 1;
             for (int k = 0; k < covariates.Count; k++) c[covariates[k].Start] = means[k];
             return c;
+        }
+
+        /// <summary>범주 요인만의 상호작용 항에서 d번째 열의 수준 번호(항 변수 순서; 앞 변수가 가장 느리게 변함, 0=기준 수준 제외라 1부터).</summary>
+        private static int[] DecodeLevels(DesignMatrix dm, TermColumns term, int d)
+        {
+            var vars = term.Term.Variables;
+            var lv = new int[vars.Count];
+            for (int j = vars.Count - 1; j >= 0; j--)
+            {
+                int width = dm.Factors[vars[j]].Levels.Count - 1;
+                lv[j] = d % width + 1;
+                d /= width;
+            }
+            return lv;
         }
 
         private static int[] LevelCounts(DesignMatrix dm, TermColumns factor, int levelCount)

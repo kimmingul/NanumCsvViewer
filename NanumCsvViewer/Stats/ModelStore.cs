@@ -28,6 +28,8 @@ namespace NanumCsvViewer.Stats
         /// <summary>회귀 값, 또는 분류에서 사건(클래스 1) 확률. 없으면 NaN.</summary>
         public double Value { get; init; } = double.NaN;
         public double[]? Probability { get; init; }
+        /// <summary>시행 수 열을 쓴 이항 GLzM만: 시행 수 × 사건 확률(기대 성공 횟수). 그 외는 NaN.</summary>
+        public double ExpectedSuccesses { get; init; } = double.NaN;
     }
 
     /// <summary>이미 인코딩된 특성 행렬(스케일 전)에 대한 예측. 로드 후 같은 입력이면 비트 단위로 같다.</summary>
@@ -36,6 +38,8 @@ namespace NanumCsvViewer.Stats
         public required int Count { get; init; }
         public int[]? ClassIndex { get; init; }
         public double[]? Value { get; init; }
+        /// <summary>시행 수 열을 쓴 이항 GLzM만: 행별 시행 수 × 확률.</summary>
+        public double[]? ExpectedSuccesses { get; init; }
         public double[,]? Probability { get; init; }
     }
 
@@ -45,11 +49,14 @@ namespace NanumCsvViewer.Stats
         public bool Ready { get; init; }
         public IReadOnlyList<string> MissingColumns { get; init; } = Array.Empty<string>();
         public IReadOnlyList<string> AmbiguousColumns { get; init; } = Array.Empty<string>();
+        /// <summary>적용 데이터에 없거나 모호해 모형이 요구하는 오프셋·노출·시행 수 열(MissingColumns에도 포함).</summary>
+        public IReadOnlyList<string> MissingPredictionColumns { get; init; } = Array.Empty<string>();
         public string? Error { get; init; }
         internal int Width;
         internal bool FormulaMode;
         internal ModelStore.FormulaLayout? Formula;
         internal ModelStore.FeatureLayout? Features;
+        internal ModelStore.ExtrasLayout? Extras;
     }
 
     /// <summary>
@@ -124,7 +131,10 @@ namespace NanumCsvViewer.Stats
     /// </summary>
     public static class ModelStore
     {
-        public const int FormatVersion = 1;
+        /// <summary>이 빌드가 읽는 가장 높은 형식 버전. 2부터 GLzM 오프셋·노출·시행 수 열을 담는다.</summary>
+        public const int FormatVersion = 2;
+        /// <summary>그런 열이 없는 모형을 쓰는 형식 버전(이전 빌드와 호환).</summary>
+        public const int BaseFormatVersion = 1;
         public const string FormatName = "nanum-model";
         public const int ApplyBatchSize = 4096;
         /// <summary>한 수치 덩어리·파일의 상한. 파일의 차원 값이 int 곱셈으로 넘쳐도 이 한도를 넘기면 할당하지 않는다.</summary>
@@ -157,7 +167,8 @@ namespace NanumCsvViewer.Stats
             var dto = new FileDto
             {
                 Format = FormatName,
-                Version = FormatVersion,
+                // 오프셋·노출·시행 수 열이 필요한 모형은 버전 2로 쓴다 — 이 열을 모르는 이전 빌드가 읽고 조용히 틀린 예측을 내지 않게 한다.
+                Version = bundle.UsesPredictionColumns ? FormatVersion : BaseFormatVersion,
                 AppVersion = appVersion,
                 CreatedAt = createdAt.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
                 ModelType = bundle.ModelType,
@@ -170,6 +181,11 @@ namespace NanumCsvViewer.Stats
                 HasIntercept = bundle.HasIntercept,
                 ForcedCategorical = bundle.ForcedCategorical?.ToArray() ?? Array.Empty<string>(),
                 ResponseLevels = bundle.ResponseLevels?.ToArray(),
+                OffsetColumn = bundle.OffsetColumn,
+                ExposureColumn = bundle.ExposureColumn,
+                TrialsColumn = bundle.TrialsColumn,
+                VarianceWeightColumn = bundle.VarianceWeightColumn,
+                FrequencyWeightColumn = bundle.FrequencyWeightColumn,
                 Parameters = new Dictionary<string, string>(bundle.Parameters, StringComparer.Ordinal),
                 Features = bundle.Features.Select(f => new FeatureDto { Column = f.Column, Kind = f.Kind.ToString(), Level = f.Level }).ToArray(),
                 Factors = bundle.Factors?.Select(f => new FactorDto { Variable = f.Variable, Levels = f.Levels.ToArray() }).ToArray(),
@@ -251,10 +267,12 @@ namespace NanumCsvViewer.Stats
             var ok = new bool[count];
             var reasons = new string?[count];
             var buf = new double[p];
+            double[]? rowOffset = null, rowTrials = null;
             for (int i = 0; i < count; i++)
             {
                 if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
-                if (TryEncode(binding, rows[offset + i], buf, out var reason))
+                if (TryEncode(binding, rows[offset + i], buf, out var reason)
+                    && TryRowExtras(binding, rows[offset + i], i, ref rowOffset, ref rowTrials, count, out reason))
                 {
                     ok[i] = true;
                     for (int j = 0; j < p; j++) encoded[i, j] = buf[j];
@@ -269,15 +287,19 @@ namespace NanumCsvViewer.Stats
             {
                 var compact = new double[nOk, p];
                 map = new int[nOk];
+                var cOffset = binding.Extras is { NeedsOffset: true } ? new double[nOk] : null;
+                var cTrials = binding.Extras is { TrialsCol: >= 0 } ? new double[nOk] : null;
                 int w = 0;
                 for (int i = 0; i < count; i++)
                 {
                     if (!ok[i]) continue;
                     map[w] = i;
                     for (int j = 0; j < p; j++) compact[w, j] = encoded[i, j];
+                    if (cOffset != null) cOffset[w] = rowOffset![i];
+                    if (cTrials != null) cTrials[w] = rowTrials![i];
                     w++;
                 }
-                pred = PredictEncoded(model, compact, cancellation);
+                pred = PredictEncoded(model, compact, cancellation, cOffset, cTrials);
             }
             var names = model.ClassNames;
             for (int i = 0; i < count; i++)
@@ -304,15 +326,23 @@ namespace NanumCsvViewer.Stats
                 double value = pred.Value?[t] ?? double.NaN;
                 bool finite = model.Task == ModelTask.Classification ? cls >= 0 : double.IsFinite(value);
                 dest[i] = finite
-                    ? new RowPrediction { Scorable = true, ClassIndex = cls, ClassLabel = label, Value = value, Probability = proba }
+                    ? new RowPrediction { Scorable = true, ClassIndex = cls, ClassLabel = label, Value = value, Probability = proba, ExpectedSuccesses = pred.ExpectedSuccesses?[t] ?? double.NaN }
                     : new RowPrediction { Scorable = false, Reason = "The model mean is undefined for this row.", Value = double.NaN };
             }
         }
 
-        public static EncodedPredictions PredictEncoded(ModelBundle model, double[,] rawFeatures, CancellationToken cancellation = default)
+        /// <param name="offset">행별 오프셋 + ln(노출). 모형이 오프셋·노출 열을 쓰면 필요하다.</param>
+        /// <param name="trials">행별 시행 수. 모형이 시행 수 열을 쓰면 필요하다.</param>
+        public static EncodedPredictions PredictEncoded(ModelBundle model, double[,] rawFeatures, CancellationToken cancellation = default,
+            double[]? offset = null, double[]? trials = null)
         {
             if (rawFeatures.GetLength(1) != model.Features.Count)
                 throw new ModelStoreException($"Feature count {rawFeatures.GetLength(1)} does not match the model ({model.Features.Count}).");
+            int rowsIn = rawFeatures.GetLength(0);
+            if ((model.OffsetColumn != null || model.ExposureColumn != null) && (offset is null || offset.Length != rowsIn))
+                throw new ModelStoreException("This model was fitted with an offset or exposure column; per-row offsets (offset + ln exposure) are required to predict.");
+            if (model.TrialsColumn != null && (trials is null || trials.Length != rowsIn))
+                throw new ModelStoreException("This model was fitted with a trials column; per-row trials are required to predict.");
             var x = model.Scaler is null ? rawFeatures : model.Scaler.Transform(rawFeatures);
             cancellation.ThrowIfCancellationRequested();
             return model.Engine switch
@@ -325,8 +355,8 @@ namespace NanumCsvViewer.Stats
                 RandomForestModel forest => PredictForest(forest, x, cancellation),
                 SvmModel svm => PredictSvm(svm, x, model, cancellation),
                 GradientBoostingModel gb => PredictBoosting(gb, x, model, cancellation),
-                LinearModelFit ols => PredictLinear(ols.Beta, x, regression: true, link: null, cancellation),
-                GeneralizedLinearFit glm => PredictGlm(glm, x, model, cancellation),
+                LinearModelFit ols => PredictLinear(ols.Beta, x, regression: true, link: null, null, cancellation),
+                GeneralizedLinearFit glm => PredictGlm(glm, x, model, offset, trials, cancellation),
                 AdaBoostModel ada => PredictAda(ada, x, cancellation),
                 LinearScoreModel score => PredictScore(score, x, cancellation),
                 _ => throw new ModelStoreException($"Model type '{model.ModelType}' cannot be scored (engine {model.Engine?.GetType().Name ?? "null"})."),
@@ -365,8 +395,8 @@ namespace NanumCsvViewer.Stats
         {
             if (!string.Equals(dto.Format, FormatName, StringComparison.Ordinal))
                 throw new ModelStoreException($"Unrecognized model format '{dto.Format ?? ""}'. Expected {FormatName}.");
-            if (dto.Version != FormatVersion)
-                throw new ModelStoreException($"Unsupported model format version {dto.Version}. This build reads version {FormatVersion} only.");
+            if (dto.Version < BaseFormatVersion || dto.Version > FormatVersion)
+                throw new ModelStoreException($"Unsupported model format version {dto.Version}. This build reads versions {BaseFormatVersion} to {FormatVersion}.");
             if (string.IsNullOrWhiteSpace(dto.ModelType)) throw new ModelStoreException("The model file has no model type.");
             if (string.IsNullOrWhiteSpace(dto.Target)) throw new ModelStoreException("The model file has no target name.");
             if (dto.Features is null || dto.Features.Length == 0) throw new ModelStoreException("The model file has no features.");
@@ -399,6 +429,7 @@ namespace NanumCsvViewer.Stats
                 return new ModelFactor(f.Variable, f.Levels);
             }).ToArray();
             var engine = ReadEngine(dto.ModelType, dto.Engine, features.Length, task);
+            ValidatePredictionColumns(dto, engine, task);
             var bundle = new ModelBundle
             {
                 ModelType = dto.ModelType,
@@ -413,11 +444,112 @@ namespace NanumCsvViewer.Stats
                 HasIntercept = dto.HasIntercept,
                 ForcedCategorical = dto.ForcedCategorical ?? Array.Empty<string>(),
                 ResponseLevels = dto.ResponseLevels,
+                OffsetColumn = dto.OffsetColumn,
+                ExposureColumn = dto.ExposureColumn,
+                TrialsColumn = dto.TrialsColumn,
+                VarianceWeightColumn = dto.VarianceWeightColumn,
+                FrequencyWeightColumn = dto.FrequencyWeightColumn,
                 TrainingRows = dto.TrainingRows,
                 EvaluationSummary = dto.EvaluationSummary,
                 Parameters = dto.Parameters ?? new Dictionary<string, string>(),
             };
             return new StoredModel(bundle, dto.AppVersion, created);
+        }
+
+        /// <summary>
+        /// 오프셋·노출·시행 수 열은 식 GLzM만 갖고(버전 2부터), 이름이 있어야 하며, 시행 수는 이항 + 회귀(기대 성공 횟수) 모형에만 있다.
+        /// 조건을 어긴 파일은 예측이 조용히 달라질 수 있으므로 불러오지 않는다.
+        /// </summary>
+        static void ValidatePredictionColumns(FileDto dto, object engine, ModelTask task)
+        {
+            bool any = dto.OffsetColumn != null || dto.ExposureColumn != null || dto.TrialsColumn != null;
+            if (!any) return;
+            if (dto.Version < 2)
+                throw new ModelStoreException("The model file declares an offset, exposure or trials column but is format version 1. The model was not loaded.");
+            if (!string.Equals(dto.ModelType, ModelTypes.Glzm, StringComparison.Ordinal) || engine is not GeneralizedLinearFit glm || string.IsNullOrEmpty(dto.Formula))
+                throw new ModelStoreException("Offset, exposure and trials columns are only valid for a formula GLzM model. The model was not loaded.");
+            foreach (var name in new[] { dto.OffsetColumn, dto.ExposureColumn, dto.TrialsColumn })
+                if (name != null && string.IsNullOrWhiteSpace(name))
+                    throw new ModelStoreException("A stored offset, exposure or trials column name is empty. The model was not loaded.");
+            if (dto.TrialsColumn != null && (glm.Family != GlmFamily.Binomial || task != ModelTask.Regression))
+                throw new ModelStoreException("A trials column is only valid for a binomial model that predicts probability and expected successes. The model was not loaded.");
+        }
+
+        internal sealed class ExtrasLayout
+        {
+            public int OffsetCol = -1, ExposureCol = -1, TrialsCol = -1;
+            public string? OffsetName, ExposureName, TrialsName;
+            public bool NeedsOffset => OffsetCol >= 0 || ExposureCol >= 0;
+        }
+
+        /// <summary>모형이 요구하는 오프셋·노출·시행 수 열을 뷰 헤더에 붙인다. 없거나 모호한 열 이름은 missing/ambiguous에 더한다.</summary>
+        static ExtrasLayout? BindExtras(ModelBundle model, IReadOnlyList<string> headers, List<string> missing, List<string> ambiguous, List<string> needed)
+        {
+            if (!model.UsesPredictionColumns) return null;
+            var layout = new ExtrasLayout { OffsetName = model.OffsetColumn, ExposureName = model.ExposureColumn, TrialsName = model.TrialsColumn };
+            int Resolve(string? name)
+            {
+                if (name is null) return -1;
+                if (TryResolve(headers, name, out int idx, out bool amb)) return idx;
+                (amb ? ambiguous : missing).Add(name);
+                needed.Add(name);
+                return -1;
+            }
+            layout.OffsetCol = Resolve(model.OffsetColumn);
+            layout.ExposureCol = Resolve(model.ExposureColumn);
+            layout.TrialsCol = Resolve(model.TrialsColumn);
+            return layout;
+        }
+
+        /// <summary>행의 오프셋(오프셋 + ln 노출)과 시행 수를 읽는다. 결측·비수치·노출 ≤ 0·시행 수가 양의 정수가 아니면 채점 불가.</summary>
+        static bool TryExtras(ExtrasLayout layout, string[] row, out double offset, out double trials, out string? reason)
+        {
+            offset = 0;
+            trials = double.NaN;
+            reason = null;
+            if (layout.OffsetCol >= 0)
+            {
+                if (layout.OffsetCol >= row.Length || !StatValue.TryNumber(row[layout.OffsetCol], out double o))
+                {
+                    reason = $"missing or non-numeric offset value in '{layout.OffsetName}'";
+                    return false;
+                }
+                offset += o;
+            }
+            if (layout.ExposureCol >= 0)
+            {
+                if (layout.ExposureCol >= row.Length || !StatValue.TryNumber(row[layout.ExposureCol], out double e))
+                {
+                    reason = $"missing or non-numeric exposure value in '{layout.ExposureName}'";
+                    return false;
+                }
+                if (!(e > 0))
+                {
+                    reason = $"exposure must be greater than 0 in '{layout.ExposureName}'";
+                    return false;
+                }
+                offset += Math.Log(e);
+            }
+            if (layout.TrialsCol >= 0)
+            {
+                if (layout.TrialsCol >= row.Length || !StatValue.TryNumber(row[layout.TrialsCol], out double t))
+                {
+                    reason = $"missing or non-numeric trials value in '{layout.TrialsName}'";
+                    return false;
+                }
+                if (t < 1 || Math.Abs(t - Math.Round(t)) > 1e-8)
+                {
+                    reason = $"trials must be a positive integer in '{layout.TrialsName}'";
+                    return false;
+                }
+                trials = Math.Round(t);
+            }
+            if (!double.IsFinite(offset))
+            {
+                reason = "offset plus ln(exposure) is not finite";
+                return false;
+            }
+            return true;
         }
 
         static ModelBinding BindFormula(ModelBundle model, IReadOnlyList<string> headers)
@@ -451,8 +583,20 @@ namespace NanumCsvViewer.Stats
                 else if (formula.ForcedCategorical.Contains(name) || model.ForcedCategorical.Contains(name, StringComparer.Ordinal))
                     missing.Add(name + " (categorical levels were not stored)");
             }
+            var neededExtras = new List<string>();
+            var extras = BindExtras(model, headers, missing, ambiguous, neededExtras);
             if (missing.Count > 0 || ambiguous.Count > 0)
-                return new ModelBinding { MissingColumns = missing, AmbiguousColumns = ambiguous, Error = DescribeBind(missing, ambiguous) };
+            {
+                string error = DescribeBind(missing, ambiguous);
+                if (neededExtras.Count > 0)
+                    error += " The model was fitted with an offset, exposure or trials column; the new data needs the same numeric column(s): "
+                        + string.Join(", ", neededExtras.Distinct(StringComparer.Ordinal)) + ".";
+                return new ModelBinding
+                {
+                    MissingColumns = missing, AmbiguousColumns = ambiguous, Error = error,
+                    MissingPredictionColumns = neededExtras.Distinct(StringComparer.Ordinal).ToArray(),
+                };
+            }
             var columns = ExpandFormula(formula, predictors, categorical, levels);
             if (columns.Length != model.Features.Count)
                 return FailBind($"The formula expands to {columns.Length} columns but the model has {model.Features.Count}.");
@@ -462,6 +606,7 @@ namespace NanumCsvViewer.Stats
                 Width = columns.Length,
                 FormulaMode = true,
                 Formula = new FormulaLayout(predictors.ToArray(), index, categorical, levels, columns),
+                Extras = extras,
             };
         }
 
@@ -759,10 +904,27 @@ namespace NanumCsvViewer.Stats
             return new EncodedPredictions { Count = n, ClassIndex = cls, Probability = proba, Value = EventProb(proba) };
         }
 
-        static EncodedPredictions PredictGlm(GeneralizedLinearFit fit, double[,] x, ModelBundle model, CancellationToken cancellation)
+        static EncodedPredictions PredictGlm(GeneralizedLinearFit fit, double[,] x, ModelBundle model, double[]? offset, double[]? trials, CancellationToken cancellation)
         {
-            bool logistic = fit.Family == GlmFamily.Binomial;
-            return PredictLinear(fit.Coefficients, x, regression: !logistic, fit.Link, cancellation);
+            // 시행 수 열을 쓴 이항 모형은 분류가 아니라 확률 + 기대 성공 횟수(시행 수 × 확률)를 낸다.
+            bool logistic = fit.Family == GlmFamily.Binomial && model.TrialsColumn is null;
+            var result = PredictLinear(fit.Coefficients, x, regression: !logistic, fit.Link, offset, cancellation);
+            if (trials is null || result.Value is null) return result;
+            var expected = new double[result.Count];
+            for (int i = 0; i < expected.Length; i++) expected[i] = trials[i] * result.Value[i];
+            return new EncodedPredictions { Count = result.Count, ClassIndex = result.ClassIndex, Value = result.Value, Probability = result.Probability, ExpectedSuccesses = expected };
+        }
+
+        /// <summary>행의 오프셋·시행 수를 읽어 (행 인덱스 기준) 배열에 쓴다. 지연 할당 — 모형에 해당 열이 없으면 아무것도 하지 않는다.</summary>
+        static bool TryRowExtras(ModelBinding binding, string[] row, int i, ref double[]? offsets, ref double[]? trials, int count, out string? reason)
+        {
+            reason = null;
+            var layout = binding.Extras;
+            if (layout is null) return true;
+            if (!TryExtras(layout, row, out double off, out double tr, out reason)) return false;
+            if (layout.NeedsOffset) (offsets ??= new double[count])[i] = off;
+            if (layout.TrialsCol >= 0) (trials ??= new double[count])[i] = tr;
+            return true;
         }
 
         static EncodedPredictions PredictAda(AdaBoostModel model, double[,] x, CancellationToken cancellation)
@@ -789,7 +951,7 @@ namespace NanumCsvViewer.Stats
         }
 
 
-        static EncodedPredictions PredictLinear(double[] beta, double[,] x, bool regression, GlmLink? link, CancellationToken cancellation)
+        static EncodedPredictions PredictLinear(double[] beta, double[,] x, bool regression, GlmLink? link, double[]? offset, CancellationToken cancellation)
         {
             int n = x.GetLength(0), p = x.GetLength(1);
             if (beta.Length != p) throw new ModelStoreException($"Coefficient count {beta.Length} does not match features ({p}).");
@@ -802,6 +964,7 @@ namespace NanumCsvViewer.Stats
                 double eta = 0;
                 for (int j = 0; j < p; j++)
                     if (!double.IsNaN(beta[j])) eta += x[i, j] * beta[j];
+                if (offset != null) eta += offset[i];
                 double mu = link is null ? eta : InverseLink(eta, link.Value);
                 value[i] = mu;
                 if (!regression && proba != null && cls != null)
@@ -1886,6 +2049,11 @@ namespace NanumCsvViewer.Stats
             public bool HasIntercept { get; set; }
             public string[]? ForcedCategorical { get; set; }
             public string[]? ResponseLevels { get; set; }
+            public string? OffsetColumn { get; set; }
+            public string? ExposureColumn { get; set; }
+            public string? TrialsColumn { get; set; }
+            public string? VarianceWeightColumn { get; set; }
+            public string? FrequencyWeightColumn { get; set; }
             public Dictionary<string, string>? Parameters { get; set; }
             public FeatureDto[]? Features { get; set; }
             public FactorDto[]? Factors { get; set; }
@@ -2295,8 +2463,10 @@ namespace NanumCsvViewer.Stats
             }
             else
             {
-                if (!StatValue.TryNumber(actualRaw, out double y) || !double.IsFinite(pred.Value)) { TargetSkipped++; return; }
-                double e = y - pred.Value;
+                // 시행 수 열을 쓴 이항 모형의 목표는 성공 횟수이므로 시행 수 × 확률과 비교한다(확률과 비교하지 않음).
+                double predicted = _model.TrialsColumn != null ? pred.ExpectedSuccesses : pred.Value;
+                if (!StatValue.TryNumber(actualRaw, out double y) || !double.IsFinite(predicted)) { TargetSkipped++; return; }
+                double e = y - predicted;
                 _sse += e * e;
                 _sae += Math.Abs(e);
                 _sum += y;

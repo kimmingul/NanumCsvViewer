@@ -57,6 +57,18 @@ namespace NanumCsvViewer.Stats
         public IReadOnlyList<string> ForcedCategorical { get; init; } = Array.Empty<string>();
         /// <summary>이항 응답의 [음성, 사건] 수준. 로지스틱·이항 GLzM만.</summary>
         public IReadOnlyList<string>? ResponseLevels { get; init; }
+        /// <summary>GLzM 오프셋 열(선형 예측자에 그대로 더함). 적용 데이터에 같은 이름의 수치 열이 필요하다. 없으면 null.</summary>
+        public string? OffsetColumn { get; init; }
+        /// <summary>GLzM 노출 열(ln 값을 더함, 양수). 적용 데이터에 필요하다. 없으면 null.</summary>
+        public string? ExposureColumn { get; init; }
+        /// <summary>이항 GLzM 시행 수 열(반응 = 성공 횟수). 적용 데이터에 필요하다(양의 정수). 예측은 확률과 시행 수 × 확률(기대 성공 횟수). 없으면 null.</summary>
+        public string? TrialsColumn { get; init; }
+        /// <summary>적합에 쓴 분산 가중치 열(기록용 — 새 데이터 예측에는 영향이 없어 적용 때 필요하지 않다).</summary>
+        public string? VarianceWeightColumn { get; init; }
+        /// <summary>적합에 쓴 빈도 가중치 열(기록용 — 적용 때 필요하지 않다).</summary>
+        public string? FrequencyWeightColumn { get; init; }
+        /// <summary>예측에 새 데이터의 오프셋·노출·시행 수 열이 필요한 모형인가. ONNX(특성 벡터만 입력)로는 표현할 수 없다.</summary>
+        public bool UsesPredictionColumns => OffsetColumn is not null || ExposureColumn is not null || TrialsColumn is not null;
 
 
         /// <summary>특성행렬(FeatureMatrixBuilder) 열을 원본 컬럼·수준으로 풀어 ModelFeature 목록을 만든다.</summary>

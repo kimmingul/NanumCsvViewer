@@ -19,7 +19,15 @@ namespace NanumCsvViewer.Stats
         public required byte[] Model { get; init; }
         public required string SidecarJson { get; init; }
         public required string Summary { get; init; }
+        /// <summary>그래프 입력·부동소수 상수의 정밀도: "float32"(기본) 또는 "float64".</summary>
+        public required string Precision { get; init; }
     }
+
+    /// <summary>
+    /// ONNX 숫자 정밀도. Float64는 밀집 그래프(선형·GLM·로지스틱·LDA·다항 로지스틱·SVM·나이브 베이즈)만 지원한다.
+    /// 트리 계열은 ai.onnx.ml TreeEnsemble의 임계값·잎 가중치가 float32 속성이라 Float64를 거부한다.
+    /// </summary>
+    public enum OnnxPrecision { Float32, Float64 }
 
     /// <summary>내보낸 그래프의 구조(테스트·검증용). 수치 비교는 onnxruntime 기록값으로 한다.</summary>
     public sealed class OnnxGraphInfo
@@ -30,6 +38,10 @@ namespace NanumCsvViewer.Stats
         public required IReadOnlyList<string> NodeDomains { get; init; }
         public required IReadOnlyList<string> Inputs { get; init; }
         public required IReadOnlyList<string> Outputs { get; init; }
+        /// <summary>입력·출력·초기값의 TensorProto.DataType(1=float, 11=double, 7=int64).</summary>
+        public required IReadOnlyList<long> InputElemTypes { get; init; }
+        public required IReadOnlyList<long> OutputElemTypes { get; init; }
+        public required IReadOnlyList<long> InitializerElemTypes { get; init; }
     }
 
     /// <summary>
@@ -37,6 +49,7 @@ namespace NanumCsvViewer.Stats
     /// 결정트리·랜덤 포레스트·그래디언트 부스팅(TreeEnsemble, post_transform).
     /// 트리는 float32라 분할 경계에 아주 가까운 값은 C# double과 다를 수 있다.
     /// 분류 라벨은 점수 텐서의 ArgMax(첫 최댓값)다. onnxruntime 1.20의 TreeEnsemble 자체 라벨은 그 argmax와 다르다.
+    /// float64를 고르면 입력·상수·점수·확률이 모두 double이다(앱의 double 산술과 같은 계산 순서는 아니므로 점수가 0에 1e-12 이내면 득표가 달라질 수 있다).
     /// </summary>
     public static class OnnxExport
     {
@@ -47,13 +60,22 @@ namespace NanumCsvViewer.Stats
         public const string MlDomain = "ai.onnx.ml";
 
         const int FloatType = 1;
+        const int DoubleType = 11;
         const int Int64Type = 7;
 
+        /// <summary>float64를 쓸 수 있는 모형인가(트리·AdaBoost·부스팅은 아니다). UI가 정밀도 선택을 보일지 정하는 데 쓴다.</summary>
+        public static bool SupportsFloat64(ModelBundle bundle)
+            => bundle.Engine is LinearModelFit or GeneralizedLinearFit or LinearScoreModel or LinearDiscriminantModel
+                or MultinomialLogisticModel or SvmModel or NaiveBayesModel;
+
         public static bool TryExport(ModelBundle bundle, out OnnxPackage? package, out string? reason)
+            => TryExport(bundle, OnnxPrecision.Float32, out package, out reason);
+
+        public static bool TryExport(ModelBundle bundle, OnnxPrecision precision, out OnnxPackage? package, out string? reason)
         {
             try
             {
-                package = Export(bundle);
+                package = Export(bundle, precision);
                 reason = null;
                 return true;
             }
@@ -65,16 +87,17 @@ namespace NanumCsvViewer.Stats
             }
         }
 
-        public static OnnxPackage Export(ModelBundle bundle)
+        public static OnnxPackage Export(ModelBundle bundle, OnnxPrecision precision = OnnxPrecision.Float32)
         {
             if (bundle is null) throw new ArgumentNullException(nameof(bundle));
-            var built = Build(bundle);
+            var built = Build(bundle, precision == OnnxPrecision.Float64);
             var sidecar = Sidecar(bundle, built);
             return new OnnxPackage
             {
                 Model = built.Bytes,
                 SidecarJson = sidecar,
                 Summary = built.Summary,
+                Precision = built.F64 ? "float64" : "float32",
             };
         }
 
@@ -87,6 +110,9 @@ namespace NanumCsvViewer.Stats
             var domains = new List<string>();
             var inputs = new List<string>();
             var outputs = new List<string>();
+            var inElem = new List<long>();
+            var outElem = new List<long>();
+            var initElem = new List<long>();
             while (r.Remaining)
             {
                 r.ReadKey(out int field, out int wire);
@@ -105,7 +131,7 @@ namespace NanumCsvViewer.Stats
                     }
                     opsets.Add((domain, version));
                 }
-                else if (field == 7 && wire == 2) ReadGraph(new ProtoReader(r.ReadBytes()), ops, domains, inputs, outputs);
+                else if (field == 7 && wire == 2) ReadGraph(new ProtoReader(r.ReadBytes()), ops, domains, inputs, outputs, inElem, outElem, initElem);
                 else r.Skip(wire);
             }
             return new OnnxGraphInfo
@@ -116,19 +142,37 @@ namespace NanumCsvViewer.Stats
                 NodeDomains = domains,
                 Inputs = inputs,
                 Outputs = outputs,
+                InputElemTypes = inElem,
+                OutputElemTypes = outElem,
+                InitializerElemTypes = initElem,
             };
         }
 
-        static void ReadGraph(ProtoReader g, List<string> ops, List<string> domains, List<string> inputs, List<string> outputs)
+        static void ReadGraph(ProtoReader g, List<string> ops, List<string> domains, List<string> inputs, List<string> outputs,
+            List<long> inElem, List<long> outElem, List<long> initElem)
         {
             while (g.Remaining)
             {
                 g.ReadKey(out int field, out int wire);
                 if (field == 1 && wire == 2) ReadNode(new ProtoReader(g.ReadBytes()), ops, domains);
-                else if (field == 11 && wire == 2) inputs.Add(ReadName(g.ReadBytes()));
-                else if (field == 12 && wire == 2) outputs.Add(ReadName(g.ReadBytes()));
+                else if (field == 5 && wire == 2) initElem.Add(ReadTensorType(g.ReadBytes()));
+                else if (field == 11 && wire == 2) { inputs.Add(ReadValueInfo(g.ReadBytes(), out long e)); inElem.Add(e); }
+                else if (field == 12 && wire == 2) { outputs.Add(ReadValueInfo(g.ReadBytes(), out long e)); outElem.Add(e); }
                 else g.Skip(wire);
             }
+        }
+
+        static long ReadTensorType(byte[] tensor)
+        {
+            var r = new ProtoReader(tensor);
+            long type = 0;
+            while (r.Remaining)
+            {
+                r.ReadKey(out int field, out int wire);
+                if (field == 2 && wire == 0) type = (long)r.ReadVarint();
+                else r.Skip(wire);
+            }
+            return type;
         }
 
         static void ReadNode(ProtoReader n, List<string> ops, List<string> domains)
@@ -145,16 +189,38 @@ namespace NanumCsvViewer.Stats
             domains.Add(domain);
         }
 
-        static string ReadName(byte[] message)
+        // ValueInfoProto: name(1), type(2) → tensor_type(1) → elem_type(1)
+        static string ReadValueInfo(byte[] message, out long elemType)
         {
+            elemType = 0;
+            string name = "";
             var r = new ProtoReader(message);
             while (r.Remaining)
             {
                 r.ReadKey(out int field, out int wire);
-                if (field == 1 && wire == 2) return r.ReadString();
-                r.Skip(wire);
+                if (field == 1 && wire == 2) name = r.ReadString();
+                else if (field == 2 && wire == 2)
+                {
+                    var type = new ProtoReader(r.ReadBytes());
+                    while (type.Remaining)
+                    {
+                        type.ReadKey(out int tf, out int tw);
+                        if (tf == 1 && tw == 2)
+                        {
+                            var tensor = new ProtoReader(type.ReadBytes());
+                            while (tensor.Remaining)
+                            {
+                                tensor.ReadKey(out int ef, out int ew);
+                                if (ef == 1 && ew == 0) elemType = (long)tensor.ReadVarint();
+                                else tensor.Skip(ew);
+                            }
+                        }
+                        else type.Skip(tw);
+                    }
+                }
+                else r.Skip(wire);
             }
-            return "";
+            return name;
         }
 
         sealed class Built
@@ -163,16 +229,24 @@ namespace NanumCsvViewer.Stats
             public string Summary = "";
             public string[] Outputs = Array.Empty<string>();
             public string PostTransform = "";
+            public bool F64;
         }
 
-        static Built Build(ModelBundle bundle)
+        static Built Build(ModelBundle bundle, bool f64)
         {
+            if (bundle.UsesPredictionColumns)
+                throw new OnnxNotExportableException("This GLzM model uses an offset, exposure or trials column, which an ONNX feature-vector input cannot represent.");
             int p = bundle.Features.Count;
             if (p < 1) throw new OnnxNotExportableException("The model has no features to export.");
+            if (f64 && bundle.Engine is DecisionTreeModel or RandomForestModel or GradientBoostingModel or AdaBoostModel)
+                throw new OnnxNotExportableException(
+                    "float64 ONNX export is not available for tree models: TreeEnsemble (ai.onnx.ml) stores thresholds and leaf weights as float32 attributes, so the graph cannot be double precision. Export with float32.");
             return bundle.Engine switch
             {
-                LinearModelFit ols => Linear(bundle, Coefficients(ols.Beta), regressor: true, "LinearRegressor (identity). Input includes the intercept column of 1s when the formula has one."),
-                GeneralizedLinearFit glm => Glm(bundle, glm),
+                LinearModelFit ols => Linear(bundle, f64, Coefficients(ols.Beta), regressor: true,
+                    f64 ? "Linear regression as MatMul in float64 (identity). Input includes the intercept column of 1s when the formula has one."
+                        : "LinearRegressor (identity). Input includes the intercept column of 1s when the formula has one."),
+                GeneralizedLinearFit glm => Glm(bundle, glm, f64),
                 DecisionTreeModel tree => tree.Regression
                     ? RegressorEnsemble(bundle, new[] { FlattenTree(tree) }, aggregate: "AVERAGE", baseValue: null, "Decision tree regressor as TreeEnsembleRegressor (aggregate AVERAGE, post_transform NONE).")
                     : ClassifierEnsemble(bundle, new[] { FlattenTree(tree) }, ClassWeightsTree(tree), "NONE", null, "Decision tree classifier as TreeEnsembleClassifier (post_transform NONE)."),
@@ -181,11 +255,11 @@ namespace NanumCsvViewer.Stats
                     : ClassifierEnsemble(bundle, NumberTrees(forest.Trees.Select(FlattenTree)), ClassWeightsForest(forest), "NONE", null, "Random forest classifier as TreeEnsembleClassifier (vote fractions, post_transform NONE)."),
                 GradientBoostingModel gb => Boosting(bundle, gb),
                 AdaBoostModel ada => ExportAda(bundle, ada),
-                LinearScoreModel score => ExportScore(bundle, score),
-                LinearDiscriminantModel lda => ExportLda(bundle, lda),
-                MultinomialLogisticModel mn => ExportMultinomial(bundle, mn),
-                SvmModel svm => ExportSvm(bundle, svm),
-                NaiveBayesModel nb => ExportBayes(bundle, nb),
+                LinearScoreModel score => ExportScore(bundle, score, f64),
+                LinearDiscriminantModel lda => ExportLda(bundle, lda, f64),
+                MultinomialLogisticModel mn => ExportMultinomial(bundle, mn, f64),
+                SvmModel svm => ExportSvm(bundle, svm, f64),
+                NaiveBayesModel nb => ExportBayes(bundle, nb, f64),
                 _ => throw new OnnxNotExportableException(Refuse(bundle)),
             };
         }
@@ -201,79 +275,84 @@ namespace NanumCsvViewer.Stats
         };
 
         // LDA: 클래스 점수 = x·Coefᵀ + Intercept(앱과 같은 판별식), 확률 = Softmax, 라벨 = ArgMax(첫 최댓값).
-        static Built ExportLda(ModelBundle bundle, LinearDiscriminantModel lda)
+        static Built ExportLda(ModelBundle bundle, LinearDiscriminantModel lda, bool f64)
         {
             int p = lda.FeatureCount, k = lda.ClassCount;
             if (p != bundle.Features.Count) throw new OnnxNotExportableException("The LDA feature count does not match the bundle.");
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string x = MaybeScale(proto, bundle, p);
-            var w = new float[p * k]; // [p, K] 행 우선
+            var w = new double[p * k]; // [p, K] 행 우선
             for (int j = 0; j < p; j++)
-                for (int c = 0; c < k; c++) w[j * k + c] = (float)lda.Coef[c, j];
-            var b = new float[k];
-            for (int c = 0; c < k; c++) b[c] = (float)lda.Intercept[c];
-            proto.Tensor("lda_w", new[] { p, k }, w);
-            proto.Tensor("lda_b", new[] { k }, b);
+                for (int c = 0; c < k; c++) w[j * k + c] = lda.Coef[c, j];
+            var b = new double[k];
+            for (int c = 0; c < k; c++) b[c] = lda.Intercept[c];
+            proto.Real("lda_w", new[] { p, k }, w);
+            proto.Real("lda_b", new[] { k }, b);
             proto.Node("", "MatMul", new[] { x, "lda_w" }, new[] { "lda_xw" }, _ => { });
             proto.Node("", "Add", new[] { "lda_xw", "lda_b" }, new[] { "scores" }, _ => { });
             proto.Node("", "Softmax", new[] { "scores" }, new[] { "probabilities" }, a => a.Int("axis", 1));
             proto.Node("", "ArgMax", new[] { "scores" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
             proto.ValueOut("label", Int64Type, -1);
-            proto.ValueOut("probabilities", FloatType, -1, k);
+            proto.ValueOut("probabilities", proto.Elem, -1, k);
             return Finish(proto, "LDA as MatMul + Add (class scores), Softmax probabilities, ArgMax label (first maximum). Same discriminant as the app (sklearn svd solver).", new[] { "label", "probabilities" }, "SOFTMAX");
         }
 
         // 다항 로지스틱: 점수 = x·Wᵀ + b(앱과 같은 소프트맥스 입력), 확률 = Softmax, 라벨 = ArgMax(첫 최댓값).
         // 학습 행에 없던 클래스는 가중치 0 + 상수 −1e30이라 확률 0이며 ArgMax에서 선택되지 않는다.
-        static Built ExportMultinomial(ModelBundle bundle, MultinomialLogisticModel m)
+        static Built ExportMultinomial(ModelBundle bundle, MultinomialLogisticModel m, bool f64)
         {
             int p = m.FeatureCount, k = m.ClassCount;
             if (p != bundle.Features.Count) throw new OnnxNotExportableException("The multinomial logistic feature count does not match the bundle.");
             if (k < 2) throw new OnnxNotExportableException("The multinomial logistic model has fewer than two classes.");
             if (m.ClassPresent.Length != k || !m.ClassPresent.Any(v => v))
                 throw new OnnxNotExportableException("The multinomial logistic model has no fitted class.");
-            if ((long)p * k > MaxExportElements) throw new OnnxNotExportableException("The multinomial logistic model is too large to write into one ONNX tensor.");
-            var proto = NewModel();
+            if ((long)p * k > MaxElements(f64)) throw new OnnxNotExportableException("The multinomial logistic model is too large to write into one ONNX tensor.");
+            var proto = NewModel(f64);
             string x = MaybeScale(proto, bundle, p);
-            var w = new float[p * k]; // [p, K] 행 우선
-            var b = new float[k];
+            var w = new double[p * k]; // [p, K] 행 우선
+            var b = new double[k];
             for (int c = 0; c < k; c++)
             {
-                if (!m.ClassPresent[c]) { b[c] = VeryNegative; continue; }
-                b[c] = FiniteFloat(m.Coefficients[c, 0], "multinomial logistic intercept");
-                for (int j = 0; j < p; j++) w[j * k + c] = FiniteFloat(m.Coefficients[c, j + 1], "multinomial logistic weight");
+                if (!m.ClassPresent[c]) { b[c] = VeryNeg(f64); continue; }
+                b[c] = Fin(f64, m.Coefficients[c, 0], "multinomial logistic intercept");
+                for (int j = 0; j < p; j++) w[j * k + c] = Fin(f64, m.Coefficients[c, j + 1], "multinomial logistic weight");
             }
-            proto.Tensor("mn_w", new[] { p, k }, w);
-            proto.Tensor("mn_b", new[] { k }, b);
+            proto.Real("mn_w", new[] { p, k }, w);
+            proto.Real("mn_b", new[] { k }, b);
             proto.Node("", "MatMul", new[] { x, "mn_w" }, new[] { "mn_xw" }, _ => { });
             proto.Node("", "Add", new[] { "mn_xw", "mn_b" }, new[] { "scores" }, _ => { });
             proto.Node("", "Softmax", new[] { "scores" }, new[] { "probabilities" }, a => a.Int("axis", 1));
             proto.Node("", "ArgMax", new[] { "scores" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
             proto.ValueOut("label", Int64Type, -1);
-            proto.ValueOut("probabilities", FloatType, -1, k);
+            proto.ValueOut("probabilities", proto.Elem, -1, k);
             return Finish(proto, "Multinomial logistic regression as MatMul + Add (class scores), Softmax probabilities, ArgMax label (first maximum). Classes absent from the training rows get zero weights and bias -1e30 (probability 0).", new[] { "label", "probabilities" }, "SOFTMAX");
         }
 
-        // 비어 있는 클래스·널 클래스 가중치: Softmax에서 확률 0, ArgMax에서 선택되지 않는 매우 작은 상수.
-        const float VeryNegative = -1e30f;
+        // 비어 있는 클래스·널 클래스 가중치: Softmax에서 확률 0, ArgMax에서 선택되지 않는 매우 작은 상수. 앱의 −1e30과 같다(float32는 −1e30f).
+        static double VeryNeg(bool f64) => f64 ? -1e30 : -1e30f;
         const long MaxExportElements = 200_000_000;
 
-        static float FiniteFloat(double v, string what)
+        // double 텐서는 같은 원소 수에서 바이트가 두 배라 상한을 절반으로 한다.
+        static long MaxElements(bool f64) => f64 ? MaxExportElements / 2 : MaxExportElements;
+
+        // 값 검증만 한다(float32 쓰기는 ModelWriter.Real이 좁힌다).
+        static double Fin(bool f64, double v, string what)
         {
-            float f = (float)v;
-            if (!double.IsFinite(v) || !float.IsFinite(f))
-                throw new OnnxNotExportableException($"The model has a non-finite or float32-overflowing {what}, which cannot be written to ONNX.");
-            return f;
+            if (!double.IsFinite(v) || (!f64 && !float.IsFinite((float)v)))
+                throw new OnnxNotExportableException(f64
+                    ? $"The model has a non-finite {what}, which cannot be written to ONNX."
+                    : $"The model has a non-finite or float32-overflowing {what}, which cannot be written to ONNX.");
+            return v;
         }
 
         // SVM: SMO(쌍마다 서포트 벡터) → 쌍 점수 → 득표(점수 > 0이면 Pos, 아니면 Neg) → ArgMax(첫 최댓값, 앱과 동일).
         // 같은 학습 행이 여러 쌍에 나오므로 서포트 벡터 행렬은 행 단위로 중복 제거하고 쌍별 계수(α·y)는 0으로 채운다.
         // DCD(선형, 상한 초과 학습)는 클래스별 가중치·절편의 argmax.
-        static Built ExportSvm(ModelBundle bundle, SvmModel svm)
+        static Built ExportSvm(ModelBundle bundle, SvmModel svm, bool f64)
         {
             int p = bundle.Features.Count, k = svm.ClassCount;
             if (k < 2) throw new OnnxNotExportableException("The SVM has fewer than two classes.");
-            if (svm.Solver == "DCD") return ExportSvmDcd(bundle, svm, p, k);
+            if (svm.Solver == "DCD") return ExportSvmDcd(bundle, svm, p, k, f64);
             if (svm.Solver != "SMO")
                 throw new OnnxNotExportableException($"The SVM solver '{svm.Solver}' is not exportable to ONNX. Only SMO and DCD models are.");
             var x = svm.X;
@@ -287,7 +366,7 @@ namespace NanumCsvViewer.Stats
 
             var pos = new int[t];
             var neg = new int[t];
-            var rho = new float[t];
+            var rho = new double[t];
             var unique = new Dictionary<int, int>();
             var svRows = new List<int>();
             var coefRows = new List<double[]>();
@@ -296,7 +375,7 @@ namespace NanumCsvViewer.Stats
                 var pair = svm.Pairs[q];
                 if (pair.Rows.Length == 0 || pair.Y.Length != pair.Rows.Length || pair.Alpha.Length != pair.Rows.Length)
                     throw new OnnxNotExportableException("An SVM class pair has inconsistent row, label and alpha lengths.");
-                rho[q] = FiniteFloat(pair.Rho, "SVM rho");
+                rho[q] = Fin(f64, pair.Rho, "SVM rho");
                 int lp = svm.Labels[pair.Rows[0]], ln = lp;
                 for (int s = 0; s < pair.Rows.Length; s++)
                 {
@@ -307,7 +386,7 @@ namespace NanumCsvViewer.Stats
                     if (pair.Y[s] > 0) lp = lab; else ln = lab;
                     if (pair.Alpha[s] == 0) continue;
                     double coeff = pair.Alpha[s] * pair.Y[s];
-                    FiniteFloat(coeff, "SVM coefficient");
+                    Fin(f64, coeff, "SVM coefficient");
                     if (!unique.TryGetValue(row, out int u))
                     {
                         u = svRows.Count;
@@ -322,35 +401,35 @@ namespace NanumCsvViewer.Stats
             }
 
             int count = svRows.Count;
-            if ((long)Math.Max(count, 1) * Math.Max(p, t) > MaxExportElements)
+            if ((long)Math.Max(count, 1) * Math.Max(p, t) > MaxElements(f64))
                 throw new OnnxNotExportableException("The SVM has too many support vectors to write into one ONNX tensor.");
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string input = MaybeScale(proto, bundle, p);
             string summary;
             if (rbf)
             {
                 int u = Math.Max(count, 1); // 서포트 벡터가 없으면 계수 0인 더미 한 행
-                var svT = new float[p * u];
-                var norm = new float[u];
-                var coef = new float[u * t];
+                var svT = new double[p * u];
+                var norm = new double[u];
+                var coef = new double[u * t];
                 for (int s = 0; s < count; s++)
                 {
                     double nrm = 0;
                     for (int j = 0; j < p; j++)
                     {
                         double v = x[svRows[s], j];
-                        svT[j * u + s] = FiniteFloat(v, "SVM support vector value");
+                        svT[j * u + s] = Fin(f64, v, "SVM support vector value");
                         nrm += v * v;
                     }
-                    norm[s] = FiniteFloat(nrm, "SVM support vector norm");
-                    for (int q = 0; q < t; q++) coef[s * t + q] = (float)coefRows[s][q];
+                    norm[s] = Fin(f64, nrm, "SVM support vector norm");
+                    for (int q = 0; q < t; q++) coef[s * t + q] = coefRows[s][q];
                 }
-                proto.Tensor("svm_sv", new[] { p, u }, svT);
-                proto.Tensor("svm_norm", new[] { 1, u }, norm);
-                proto.Tensor("svm_coef", new[] { u, t }, coef);
-                proto.Tensor("svm_rho", new[] { t }, rho);
-                proto.Tensor("svm_minus2", new[] { 1 }, new[] { -2f });
-                proto.Tensor("svm_neg_gamma", new[] { 1 }, new[] { FiniteFloat(-svm.Gamma, "SVM gamma") });
+                proto.Real("svm_sv", new[] { p, u }, svT);
+                proto.Real("svm_norm", new[] { 1, u }, norm);
+                proto.Real("svm_coef", new[] { u, t }, coef);
+                proto.Real("svm_rho", new[] { t }, rho);
+                proto.Real("svm_minus2", new[] { 1 }, new[] { -2.0 });
+                proto.Real("svm_neg_gamma", new[] { 1 }, new[] { Fin(f64, -svm.Gamma, "SVM gamma") });
                 proto.TensorInt64("svm_axis1", new[] { 1 }, new long[] { 1 });
                 proto.Node("", "Mul", new[] { input, input }, new[] { "svm_x2" }, _ => { });
                 proto.Node("", "ReduceSum", new[] { "svm_x2", "svm_axis1" }, new[] { "svm_xn" }, a => a.Int("keepdims", 1));
@@ -362,7 +441,10 @@ namespace NanumCsvViewer.Stats
                 proto.Node("", "Mul", new[] { "svm_dist", "svm_neg_gamma" }, new[] { "svm_arg" }, _ => { });
                 proto.Node("", "Exp", new[] { "svm_arg" }, new[] { "svm_kernel" }, _ => { });
                 proto.Node("", "MatMul", new[] { "svm_kernel", "svm_coef" }, new[] { "svm_sum" }, _ => { });
-                summary = "RBF SVM (one-vs-one) as pairwise decision scores sum(alpha*y*exp(-gamma*max(|x|^2+|sv|^2-2x.sv, 0))) - rho from the de-duplicated support vectors, then votes (score > 0 votes the pair's +1 class, otherwise the other), label = ArgMax of the votes (first maximum, the app's rule). float32: a pair score within about 1e-5 of 0 may vote differently from the app's double arithmetic.";
+                summary = "RBF SVM (one-vs-one) as pairwise decision scores sum(alpha*y*exp(-gamma*max(|x|^2+|sv|^2-2x.sv, 0))) - rho from the de-duplicated support vectors, then votes (score > 0 votes the pair's +1 class, otherwise the other), label = ArgMax of the votes (first maximum, the app's rule). "
+                    + (f64
+                        ? "float64: same double arithmetic as the app, but onnxruntime sums in a different order, so a pair score within about 1e-12 of 0 may still vote differently."
+                        : "float32: a pair score within about 1e-5 of 0 may vote differently from the app's double arithmetic.");
             }
             else
             {
@@ -374,66 +456,68 @@ namespace NanumCsvViewer.Stats
                         if (c == 0) continue;
                         for (int j = 0; j < p; j++) w[j * t + q] += c * x[svRows[s], j];
                     }
-                var wf = new float[p * t];
-                for (int i = 0; i < wf.Length; i++) wf[i] = FiniteFloat(w[i], "SVM linear weight");
-                proto.Tensor("svm_w", new[] { p, t }, wf);
-                proto.Tensor("svm_rho", new[] { t }, rho);
+                for (int i = 0; i < w.Length; i++) Fin(f64, w[i], "SVM linear weight");
+                proto.Real("svm_w", new[] { p, t }, w);
+                proto.Real("svm_rho", new[] { t }, rho);
                 proto.Node("", "MatMul", new[] { input, "svm_w" }, new[] { "svm_sum" }, _ => { });
-                summary = "Linear SVM (one-vs-one) as pairwise decision scores x.w - rho (w = sum(alpha*y*sv) collapsed per pair), then votes (score > 0 votes the pair's +1 class, otherwise the other), label = ArgMax of the votes (first maximum, the app's rule). float32: a pair score within about 1e-5 of 0 may vote differently from the app's double arithmetic.";
+                summary = "Linear SVM (one-vs-one) as pairwise decision scores x.w - rho (w = sum(alpha*y*sv) collapsed per pair), then votes (score > 0 votes the pair's +1 class, otherwise the other), label = ArgMax of the votes (first maximum, the app's rule). "
+                    + (f64
+                        ? "float64: same double arithmetic as the app, but onnxruntime sums in a different order, so a pair score within about 1e-12 of 0 may still vote differently."
+                        : "float32: a pair score within about 1e-5 of 0 may vote differently from the app's double arithmetic.");
             }
             proto.Node("", "Sub", new[] { "svm_sum", "svm_rho" }, new[] { "svm_pair_scores" }, _ => { });
 
             // 득표 = I·(Mpos − Mneg) + Σ Mneg, I = [pair score > 0]. 모두 작은 정수라 float에서 정확하다.
-            var diff = new float[t * k];
-            var baseVotes = new float[k];
+            var diff = new double[t * k];
+            var baseVotes = new double[k];
             for (int q = 0; q < t; q++)
             {
                 diff[q * k + pos[q]] += 1f;
                 diff[q * k + neg[q]] -= 1f;
                 baseVotes[neg[q]] += 1f;
             }
-            proto.Tensor("svm_zero", new[] { 1 }, new[] { 0f });
-            proto.Tensor("svm_diff", new[] { t, k }, diff);
-            proto.Tensor("svm_base", new[] { k }, baseVotes);
+            proto.Real("svm_zero", new[] { 1 }, new[] { 0.0 });
+            proto.Real("svm_diff", new[] { t, k }, diff);
+            proto.Real("svm_base", new[] { k }, baseVotes);
             proto.Node("", "Greater", new[] { "svm_pair_scores", "svm_zero" }, new[] { "svm_pos" }, _ => { });
-            proto.Node("", "Cast", new[] { "svm_pos" }, new[] { "svm_ind" }, a => a.Int("to", FloatType));
+            proto.Node("", "Cast", new[] { "svm_pos" }, new[] { "svm_ind" }, a => a.Int("to", proto.Elem));
             proto.Node("", "MatMul", new[] { "svm_ind", "svm_diff" }, new[] { "svm_vote_part" }, _ => { });
             proto.Node("", "Add", new[] { "svm_vote_part", "svm_base" }, new[] { "votes" }, _ => { });
             proto.Node("", "ArgMax", new[] { "votes" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
             proto.ValueOut("label", Int64Type, -1);
-            proto.ValueOut("votes", FloatType, -1, k);
+            proto.ValueOut("votes", proto.Elem, -1, k);
             return Finish(proto, summary + " The 'votes' output is the per-class vote count, not a probability.", new[] { "label", "votes" }, "NONE");
         }
 
-        static Built ExportSvmDcd(ModelBundle bundle, SvmModel svm, int p, int k)
+        static Built ExportSvmDcd(ModelBundle bundle, SvmModel svm, int p, int k, bool f64)
         {
             var weights = svm.LinearWeights;
             var bias = svm.LinearBias;
             if (weights is null || bias is null || weights.Length != k || bias.Length != k)
                 throw new OnnxNotExportableException("The linear SVM weights do not match its class count.");
-            var w = new float[p * k];
-            var b = new float[k];
+            var w = new double[p * k];
+            var b = new double[k];
             for (int c = 0; c < k; c++)
             {
-                if (weights[c] is null) { b[c] = VeryNegative; continue; } // 앱은 널 클래스를 건너뛴다
+                if (weights[c] is null) { b[c] = VeryNeg(f64); continue; } // 앱은 널 클래스를 건너뛴다
                 if (weights[c].Length != p) throw new OnnxNotExportableException("A linear SVM class weight vector does not match the feature count.");
-                for (int j = 0; j < p; j++) w[j * k + c] = FiniteFloat(weights[c][j], "SVM linear weight");
-                b[c] = FiniteFloat(bias[c], "SVM linear bias");
+                for (int j = 0; j < p; j++) w[j * k + c] = Fin(f64, weights[c][j], "SVM linear weight");
+                b[c] = Fin(f64, bias[c], "SVM linear bias");
             }
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string input = MaybeScale(proto, bundle, p);
-            proto.Tensor("svm_w", new[] { p, k }, w);
-            proto.Tensor("svm_b", new[] { k }, b);
+            proto.Real("svm_w", new[] { p, k }, w);
+            proto.Real("svm_b", new[] { k }, b);
             proto.Node("", "MatMul", new[] { input, "svm_w" }, new[] { "svm_xw" }, _ => { });
             proto.Node("", "Add", new[] { "svm_xw", "svm_b" }, new[] { "scores" }, _ => { });
             proto.Node("", "ArgMax", new[] { "scores" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
             proto.ValueOut("label", Int64Type, -1);
-            proto.ValueOut("scores", FloatType, -1, k);
+            proto.ValueOut("scores", proto.Elem, -1, k);
             return Finish(proto, "Linear SVM (dual coordinate descent, one-vs-rest) as MatMul + Add class scores, label = ArgMax (first maximum). Classes without a weight vector get a score of -1e30 so they are never chosen, as in the app. The 'scores' output is the decision score, not a probability.", new[] { "label", "scores" }, "NONE");
         }
 
         // 나이브 베이즈: 결합 로그확률 = 로그 사전 + 가우시안 수치 로그우도(차이를 float 그래프에서 직접 제곱) + 범주 LogProb(원-핫 MatMul).
-        static Built ExportBayes(ModelBundle bundle, NaiveBayesModel nb)
+        static Built ExportBayes(ModelBundle bundle, NaiveBayesModel nb, bool f64)
         {
             int p = bundle.Features.Count, k = nb.ClassCount;
             int pn = nb.NumericColumns.Length;
@@ -464,12 +548,12 @@ namespace NanumCsvViewer.Stats
                 }
             }
 
-            var constant = new float[k];
-            var mean = new float[k * pn];
-            var coef = new float[k * pn];
+            var constant = new double[k];
+            var mean = new double[k * pn];
+            var coef = new double[k * pn];
             for (int c = 0; c < k; c++)
             {
-                if (nb.ClassCounts[c] == 0) { constant[c] = VeryNegative; continue; }
+                if (nb.ClassCounts[c] == 0) { constant[c] = VeryNeg(f64); continue; }
                 double sum = nb.LogPrior[c];
                 for (int j = 0; j < pn; j++)
                 {
@@ -477,16 +561,16 @@ namespace NanumCsvViewer.Stats
                     if (!(v > 0) || !double.IsFinite(v))
                         throw new OnnxNotExportableException(
                             "Naive Bayes has a numeric feature with zero or non-finite variance in a class. The app's rule for it (impossible unless the value equals the mean) is not representable in ONNX; refit with var_smoothing > 0.");
-                    mean[c * pn + j] = FiniteFloat(nb.Mean[c, j], "Naive Bayes mean");
-                    coef[c * pn + j] = FiniteFloat(-0.5 / v, "Naive Bayes inverse variance");
+                    mean[c * pn + j] = Fin(f64, nb.Mean[c, j], "Naive Bayes mean");
+                    coef[c * pn + j] = Fin(f64, -0.5 / v, "Naive Bayes inverse variance");
                     sum += -0.5 * Math.Log(2.0 * Math.PI * v);
                 }
-                constant[c] = FiniteFloat(sum, "Naive Bayes class constant");
+                constant[c] = Fin(f64, sum, "Naive Bayes class constant");
             }
 
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string input = MaybeScale(proto, bundle, p);
-            proto.Tensor("nb_const", new[] { k }, constant);
+            proto.Real("nb_const", new[] { k }, constant);
             string joint = "nb_const";
             if (pn > 0)
             {
@@ -499,8 +583,8 @@ namespace NanumCsvViewer.Stats
                     proto.Node("", "Gather", new[] { input, "nb_num_idx" }, new[] { "nb_xn" }, a => a.Int("axis", 1));
                     xn = "nb_xn";
                 }
-                proto.Tensor("nb_mean", new[] { 1, k, pn }, mean);
-                proto.Tensor("nb_coef", new[] { 1, k, pn }, coef);
+                proto.Real("nb_mean", new[] { 1, k, pn }, mean);
+                proto.Real("nb_coef", new[] { 1, k, pn }, coef);
                 proto.TensorInt64("nb_axis1", new[] { 1 }, new long[] { 1 });
                 proto.TensorInt64("nb_axis2", new[] { 1 }, new long[] { 2 });
                 proto.Node("", "Unsqueeze", new[] { xn, "nb_axis1" }, new[] { "nb_xe" }, _ => { });
@@ -513,12 +597,12 @@ namespace NanumCsvViewer.Stats
             }
             if (nb.Categorical.Length > 0)
             {
-                var wc = new float[p * k];
+                var wc = new double[p * k];
                 foreach (var f in nb.Categorical)
                     for (int l = 0; l < f.Columns.Length; l++)
                         for (int c = 0; c < k; c++)
-                            if (nb.ClassCounts[c] > 0) wc[f.Columns[l] * k + c] = FiniteFloat(f.LogProb[c, l], "Naive Bayes log-probability");
-                proto.Tensor("nb_cat_w", new[] { p, k }, wc);
+                            if (nb.ClassCounts[c] > 0) wc[f.Columns[l] * k + c] = Fin(f64, f.LogProb[c, l], "Naive Bayes log-probability");
+                proto.Real("nb_cat_w", new[] { p, k }, wc);
                 proto.Node("", "MatMul", new[] { input, "nb_cat_w" }, new[] { "nb_cat" }, _ => { });
                 proto.Node("", "Add", new[] { "nb_cat", joint }, new[] { "nb_joint_all" }, _ => { });
                 joint = "nb_joint_all";
@@ -527,55 +611,70 @@ namespace NanumCsvViewer.Stats
             proto.Node("", "Softmax", new[] { "log_joint" }, new[] { "probabilities" }, a => a.Int("axis", 1));
             proto.Node("", "ArgMax", new[] { "log_joint" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
             proto.ValueOut("label", Int64Type, -1);
-            proto.ValueOut("probabilities", FloatType, -1, k);
-            return Finish(proto, "Naive Bayes as joint log-probability = log prior + Gaussian numeric log-likelihood (squared differences from the class means, float32) + MatMul of the one-hot categorical columns with the Laplace-smoothed log-probabilities, then Softmax probabilities and label = ArgMax (first maximum). Empty classes get -1e30. The categorical columns must be exact 0/1 one-hot values.", new[] { "label", "probabilities" }, "SOFTMAX");
+            proto.ValueOut("probabilities", proto.Elem, -1, k);
+            return Finish(proto, $"Naive Bayes as joint log-probability = log prior + Gaussian numeric log-likelihood (squared differences from the class means, {(f64 ? "float64" : "float32")}) + MatMul of the one-hot categorical columns with the Laplace-smoothed log-probabilities, then Softmax probabilities and label = ArgMax (first maximum). Empty classes get -1e30. The categorical columns must be exact 0/1 one-hot values.", new[] { "label", "probabilities" }, "SOFTMAX");
         }
 
-        static Built Glm(ModelBundle bundle, GeneralizedLinearFit glm)
+        static Built Glm(ModelBundle bundle, GeneralizedLinearFit glm, bool f64)
         {
             var beta = Coefficients(glm.Coefficients);
             if (glm.Link == GlmLink.Identity)
-                return Linear(bundle, beta, regressor: true, $"GLM {glm.Family}/identity as LinearRegressor. The output is the mean, which equals the linear predictor.");
+                return Linear(bundle, f64, beta, regressor: true, f64
+                    ? $"GLM {glm.Family}/identity as MatMul in float64. The output is the mean, which equals the linear predictor."
+                    : $"GLM {glm.Family}/identity as LinearRegressor. The output is the mean, which equals the linear predictor.");
             if (glm.Family == GlmFamily.Binomial && glm.Link == GlmLink.Logit)
-                return Linear(bundle, beta, regressor: false, "Logistic regression as MatMul + Sigmoid. Class 1 if probability ≥ 0.5 (the same rule as the app). LinearClassifier is not used: its binary tie-break and post_transform do not match that rule.");
+                return Linear(bundle, f64, beta, regressor: false, "Logistic regression as MatMul + Sigmoid. Class 1 if probability ≥ 0.5 (the same rule as the app). LinearClassifier is not used: its binary tie-break and post_transform do not match that rule.");
             throw new OnnxNotExportableException(
                 $"This {glm.Family}/{glm.Link} model is not exportable to ONNX. Only the identity link and binomial logit are exported.");
         }
 
-        static float[] Coefficients(double[] beta)
+        static double[] Coefficients(double[] beta)
         {
-            var c = new float[beta.Length];
-            for (int i = 0; i < beta.Length; i++) c[i] = double.IsNaN(beta[i]) ? 0f : (float)beta[i];
+            var c = new double[beta.Length];
+            for (int i = 0; i < beta.Length; i++) c[i] = double.IsNaN(beta[i]) ? 0.0 : beta[i];
             return c;
         }
 
-        static Built Linear(ModelBundle bundle, float[] beta, bool regressor, string summary)
+        static float[] ToFloat(double[] v)
+        {
+            var f = new float[v.Length];
+            for (int i = 0; i < f.Length; i++) f[i] = (float)v[i];
+            return f;
+        }
+
+        static Built Linear(ModelBundle bundle, bool f64, double[] beta, bool regressor, string summary)
         {
             int p = beta.Length;
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string x = MaybeScale(proto, bundle, p);
             if (regressor)
             {
-                proto.Node(MlDomain, "LinearRegressor", new[] { x }, new[] { "prediction" }, a =>
+                if (f64)
                 {
-                    a.Floats("coefficients", beta);
-                    a.Floats("intercepts", new[] { 0f });
-                    a.String("post_transform", "NONE");
-                    a.Int("targets", 1);
-                });
-                proto.ValueOut("prediction", FloatType, -1, 1);
+                    proto.Real("coef", new[] { p, 1 }, beta);
+                    proto.Node("", "MatMul", new[] { x, "coef" }, new[] { "prediction" }, _ => { });
+                }
+                else
+                {
+                    proto.Node(MlDomain, "LinearRegressor", new[] { x }, new[] { "prediction" }, a =>
+                    {
+                        a.Floats("coefficients", ToFloat(beta));
+                        a.Floats("intercepts", new[] { 0f });
+                        a.String("post_transform", "NONE");
+                        a.Int("targets", 1);
+                    });
+                }
+                proto.ValueOut("prediction", proto.Elem, -1, 1);
                 return Finish(proto, summary, new[] { "prediction" }, "NONE");
             }
-            var coef = new float[p];
-            for (int j = 0; j < p; j++) coef[j] = beta[j];
-            proto.Tensor("coef", new[] { p, 1 }, coef);
+            proto.Real("coef", new[] { p, 1 }, beta);
             proto.Node("", "MatMul", new[] { x, "coef" }, new[] { "eta" }, _ => { });
             proto.Node("", "Sigmoid", new[] { "eta" }, new[] { "probability" }, _ => { });
-            proto.Tensor("half", new[] { 1 }, new[] { 0.5f });
+            proto.Real("half", new[] { 1 }, new[] { 0.5 });
             proto.Node("", "GreaterOrEqual", new[] { "probability", "half" }, new[] { "ge" }, _ => { });
             proto.Node("", "Cast", new[] { "ge" }, new[] { "label" }, a => a.Int("to", Int64Type));
             proto.ValueOut("label", Int64Type, -1, 1);
-            proto.ValueOut("probability", FloatType, -1, 1);
+            proto.ValueOut("probability", proto.Elem, -1, 1);
             return Finish(proto, summary, new[] { "label", "probability" }, "SIGMOID");
         }
 
@@ -658,42 +757,51 @@ namespace NanumCsvViewer.Stats
             return tree;
         }
 
-        static Built ExportScore(ModelBundle bundle, LinearScoreModel model)
+        static Built ExportScore(ModelBundle bundle, LinearScoreModel model, bool f64)
         {
             int p = bundle.Features.Count;
             if (model.Coefficients.Length != p + 1)
                 throw new OnnxNotExportableException("The linear score coefficient count does not match the feature list (expected features + intercept).");
-            float intercept = Finite(model.Coefficients[0]);
-            var coef = new float[p];
+            double intercept = Finite(model.Coefficients[0]);
+            var coef = new double[p];
             for (int j = 0; j < p; j++) coef[j] = Finite(model.Coefficients[j + 1]);
-            var proto = NewModel();
+            var proto = NewModel(f64);
             string x = MaybeScale(proto, bundle, p);
             if (!model.Logistic)
             {
+                if (f64)
+                {
+                    proto.Real("coef", new[] { p, 1 }, coef);
+                    proto.Real("intercept", new[] { 1, 1 }, new[] { intercept });
+                    proto.Node("", "MatMul", new[] { x, "coef" }, new[] { "dot" }, _ => { });
+                    proto.Node("", "Add", new[] { "dot", "intercept" }, new[] { "prediction" }, _ => { });
+                    proto.ValueOut("prediction", proto.Elem, -1, 1);
+                    return Finish(proto, "Linear score as MatMul + Add in float64. The intercept is the first coefficient and is not a feature column.", new[] { "prediction" }, "NONE");
+                }
                 proto.Node(MlDomain, "LinearRegressor", new[] { x }, new[] { "prediction" }, a =>
                 {
-                    a.Floats("coefficients", coef);
-                    a.Floats("intercepts", new[] { intercept });
+                    a.Floats("coefficients", ToFloat(coef));
+                    a.Floats("intercepts", new[] { (float)intercept });
                     a.String("post_transform", "NONE");
                     a.Int("targets", 1);
                 });
                 proto.ValueOut("prediction", FloatType, -1, 1);
                 return Finish(proto, "Linear score as LinearRegressor. The intercept is the first coefficient and is not a feature column.", new[] { "prediction" }, "NONE");
             }
-            proto.Tensor("coef", new[] { p, 1 }, coef);
-            proto.Tensor("intercept", new[] { 1, 1 }, new[] { intercept });
+            proto.Real("coef", new[] { p, 1 }, coef);
+            proto.Real("intercept", new[] { 1, 1 }, new[] { intercept });
             proto.Node("", "MatMul", new[] { x, "coef" }, new[] { "dot" }, _ => { });
             proto.Node("", "Add", new[] { "dot", "intercept" }, new[] { "eta" }, _ => { });
             proto.Node("", "Sigmoid", new[] { "eta" }, new[] { "probability" }, _ => { });
-            proto.Tensor("half", new[] { 1 }, new[] { 0.5f });
+            proto.Real("half", new[] { 1 }, new[] { 0.5 });
             proto.Node("", "GreaterOrEqual", new[] { "probability", "half" }, new[] { "ge" }, _ => { });
             proto.Node("", "Cast", new[] { "ge" }, new[] { "label" }, a => a.Int("to", Int64Type));
             proto.ValueOut("label", Int64Type, -1, 1);
-            proto.ValueOut("probability", FloatType, -1, 1);
+            proto.ValueOut("probability", proto.Elem, -1, 1);
             return Finish(proto, "Logistic linear score as MatMul + Add + Sigmoid. Class 1 if probability ≥ 0.5. The intercept is not a feature column.", new[] { "label", "probability" }, "SIGMOID");
         }
 
-        static float Finite(double v) => double.IsFinite(v) ? (float)v : 0f;
+        static double Finite(double v) => double.IsFinite(v) ? v : 0.0;
 
 
         static Built RegressorEnsemble(ModelBundle bundle, FlatTree[] trees, string aggregate, double? baseValue, string summary)
@@ -946,51 +1054,54 @@ namespace NanumCsvViewer.Stats
 
         static string MaybeScale(ModelWriter proto, ModelBundle bundle, int p)
         {
-            proto.ValueIn(InputName, FloatType, -1, p);
+            proto.ValueIn(InputName, proto.Elem, -1, p);
             if (bundle.Scaler is null || bundle.Scaler.Method == ScalingMethod.None) return InputName;
-            var center = new float[p];
-            var scale = new float[p];
+            var center = new double[p];
+            var scale = new double[p];
             for (int j = 0; j < p; j++)
             {
-                center[j] = (float)bundle.Scaler.Center[j];
-                scale[j] = (float)bundle.Scaler.Scale[j];
+                center[j] = bundle.Scaler.Center[j];
+                scale[j] = bundle.Scaler.Scale[j];
             }
-            proto.Tensor("center", new[] { 1, p }, center);
-            proto.Tensor("scale", new[] { 1, p }, scale);
+            proto.Real("center", new[] { 1, p }, center);
+            proto.Real("scale", new[] { 1, p }, scale);
             proto.Node("", "Sub", new[] { InputName, "center" }, new[] { "centered" }, _ => { });
             proto.Node("", "Div", new[] { "centered", "scale" }, new[] { "scaled" }, _ => { });
             return "scaled";
         }
 
-        static ModelWriter NewModel()
+        static ModelWriter NewModel(bool f64 = false)
         {
-            var w = new ModelWriter();
+            var w = new ModelWriter(f64);
             w.Int(1, IrVersion);
             w.Message(8, op => { op.Str(1, ""); op.Int(2, OnnxOpset); });
             w.Message(8, op => { op.Str(1, MlDomain); op.Int(2, MlOpset); });
             w.Str(2, "Nanum CSV Viewer");
             w.Str(3, AppInfo.Version);
-            w.Str(6, "Input '" + InputName + "' is a float32 matrix [N, P] of model features in the sidecar order. Categorical columns are already one-hot; unseen levels are not representable here.");
+            w.Str(6, "Input '" + InputName + "' is a " + (f64 ? "float64" : "float32") + " matrix [N, P] of model features in the sidecar order. Categorical columns are already one-hot; unseen levels are not representable here.");
             return w;
         }
 
         static Built Finish(ModelWriter proto, string summary, string[] outputs, string post)
         {
             var bytes = proto.Finish();
-            return new Built { Bytes = bytes, Summary = summary + " IR " + IrVersion + ", ai.onnx " + OnnxOpset + ", ai.onnx.ml " + MlOpset + ". Inputs are the numeric feature vector (one-hot already applied); see the sidecar JSON.", Outputs = outputs, PostTransform = post };
+            string precision = proto.F64 ? " Precision float64: the input, every floating-point constant and the score/probability/vote outputs are float64." : "";
+            return new Built { Bytes = bytes, Summary = summary + " IR " + IrVersion + ", ai.onnx " + OnnxOpset + ", ai.onnx.ml " + MlOpset + ". Inputs are the numeric feature vector (one-hot already applied); see the sidecar JSON." + precision, Outputs = outputs, PostTransform = post, F64 = proto.F64 };
         }
 
         static string Sidecar(ModelBundle bundle, Built built)
         {
             var features = bundle.Features.Select(f => new { column = f.Column, kind = f.Kind.ToString(), level = f.Level }).ToArray();
+            string dtype = built.F64 ? "float64" : "float32";
             var doc = new
             {
                 format = "nanum-onnx-features",
                 version = 1,
                 modelType = bundle.ModelType,
+                precision = dtype,
                 irVersion = IrVersion,
                 opsets = new Dictionary<string, long> { [""] = OnnxOpset, [MlDomain] = MlOpset },
-                input = new { name = InputName, dtype = "float32", features = bundle.Features.Count },
+                input = new { name = InputName, dtype, features = bundle.Features.Count },
                 outputs = built.Outputs,
                 postTransform = built.PostTransform,
                 classNames = bundle.ClassNames,
@@ -1113,6 +1224,11 @@ namespace NanumCsvViewer.Stats
             readonly Proto _graph = new();
             bool _closed;
 
+            public readonly bool F64;
+            public ModelWriter(bool f64) { F64 = f64; }
+            /// <summary>부동소수 텐서의 TensorProto.DataType.</summary>
+            public int Elem => F64 ? DoubleType : FloatType;
+
             public void Int(int field, long v) => _root.Int(field, v);
             public void Str(int field, string s) => _root.Str(field, s);
             public void Message(int field, Action<Proto> write) => _root.Message(field, write);
@@ -1127,6 +1243,25 @@ namespace NanumCsvViewer.Stats
                     foreach (int d in dims) t.Int(1, d);
                     t.Int(2, FloatType);
                     t.PackedFloats(4, data);
+                    t.Str(8, name);
+                });
+            }
+
+            /// <summary>모형 정밀도의 부동소수 상수. float32면 (float)로 좁혀 쓰고 float64면 그대로 쓴다.</summary>
+            public void Real(string name, int[] dims, double[] data)
+            {
+                if (!F64)
+                {
+                    var f = new float[data.Length];
+                    for (int i = 0; i < f.Length; i++) f[i] = (float)data[i];
+                    Tensor(name, dims, f);
+                    return;
+                }
+                _graph.Message(5, t =>
+                {
+                    foreach (int d in dims) t.Int(1, d);
+                    t.Int(2, DoubleType);
+                    t.PackedDoubles(10, data);
                     t.Str(8, name);
                 });
             }
@@ -1233,6 +1368,12 @@ namespace NanumCsvViewer.Stats
             public void PackedFloats(int field, float[] values)
             {
                 var bytes = new byte[values.Length * 4];
+                Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+                Bytes(field, bytes);
+            }
+            public void PackedDoubles(int field, double[] values)
+            {
+                var bytes = new byte[values.Length * 8];
                 Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
                 Bytes(field, bytes);
             }

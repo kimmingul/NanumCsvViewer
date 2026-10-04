@@ -11,7 +11,7 @@ namespace NanumCsvViewer.Tests
         static readonly string[] Levels = { "red", "green", "blue" };
 
         // 결정적 합성 데이터. 수치 열 x1..xP(클래스별 이동 + 겹침), 선택적 범주 열 col, 마지막 열이 목표.
-        static (FeatureMatrix Fm, string[] Headers, Func<int, VariableKind> Kind) Data(int n, int classes, int seed, int numeric, bool categorical)
+        internal static (FeatureMatrix Fm, string[] Headers, Func<int, VariableKind> Kind) Data(int n, int classes, int seed, int numeric, bool categorical)
         {
             var headers = new List<string> { "id" };
             for (int j = 1; j <= numeric; j++) headers.Add("x" + j);
@@ -37,10 +37,10 @@ namespace NanumCsvViewer.Tests
             return (fm, headers.ToArray(), kind);
         }
 
-        static ModelBundle Bundle(string type, FeatureMatrix fm, string[] headers, Func<int, VariableKind> kind, object engine, FeatureScaler? scaler)
+        internal static ModelBundle Bundle(string type, FeatureMatrix fm, string[] headers, Func<int, VariableKind> kind, object engine, FeatureScaler? scaler)
             => ModelBundle.FromFeatures(type, ModelTask.Classification, fm, headers, kind, "cls", engine, scaler, fm.RowCount, type);
 
-        static (ModelBundle Bundle, double[,] X) RbfMulticlass()
+        internal static (ModelBundle Bundle, double[,] X) RbfMulticlass()
         {
             var (fm, h, kind) = Data(36, 3, 21, 3, false);
             var scaler = FeatureScaler.Fit(fm.X, ScalingMethod.ZScore);
@@ -48,7 +48,7 @@ namespace NanumCsvViewer.Tests
             return (Bundle(ModelTypes.Svm, fm, h, kind, svm, scaler), fm.X);
         }
 
-        static (ModelBundle Bundle, double[,] X) LinearBinary()
+        internal static (ModelBundle Bundle, double[,] X) LinearBinary()
         {
             var (fm, h, kind) = Data(30, 2, 5, 2, false);
             var svm = SupportVectorMachine.Fit(fm.X, fm.ClassLabels!, 2, new SvmOptions { Kernel = SvmKernel.Linear, C = 1 });
@@ -56,7 +56,7 @@ namespace NanumCsvViewer.Tests
         }
 
         // MaxTrainingRows(20) < n(45)이면 선형 SVM은 DCD(one-vs-rest)로 푼다. classCount 4는 데이터에 없는 클래스(널 가중치)를 만든다.
-        static (ModelBundle Bundle, double[,] X) DcdLinear(int classCount)
+        internal static (ModelBundle Bundle, double[,] X) DcdLinear(int classCount)
         {
             var (fm, h, kind) = Data(45, 3, 33, 3, false);
             var scaler = FeatureScaler.Fit(fm.X, ScalingMethod.ZScore);
@@ -65,7 +65,7 @@ namespace NanumCsvViewer.Tests
         }
 
         // classCount 4: 데이터에 없는 클래스 → 빈 클래스(로그 확률 −∞).
-        static (ModelBundle Bundle, double[,] X) BayesNumeric(int classCount)
+        internal static (ModelBundle Bundle, double[,] X) BayesNumeric(int classCount)
         {
             var (fm, h, kind) = Data(36, 3, 44, 3, false);
             var scaler = FeatureScaler.Fit(fm.X, ScalingMethod.ZScore);
@@ -74,7 +74,7 @@ namespace NanumCsvViewer.Tests
             return (Bundle(ModelTypes.NaiveBayes, fm, h, kind, nb, scaler), fm.X);
         }
 
-        static (ModelBundle Bundle, double[,] X) BayesCategorical()
+        internal static (ModelBundle Bundle, double[,] X) BayesCategorical()
         {
             var (fm, h, kind) = Data(42, 3, 55, 2, true);
             var groups = FeatureGroups.FromMatrix(fm.SourceColumns, fm.FeatureNames);
@@ -82,18 +82,23 @@ namespace NanumCsvViewer.Tests
             return (Bundle(ModelTypes.NaiveBayes, fm, h, kind, nb, null), fm.X);
         }
 
-        // 앱 쪽 득표를 Pairs·X·Labels에서 독립적으로 다시 계산한다(내보내기 코드와 무관한 double 산술).
-        static int[,] AppVotes(ModelBundle bundle, double[,] raw)
+        // 앱 쪽 쌍 점수(합 − rho)와 각 쌍의 (+1 클래스, −1 클래스)를 Pairs·X·Labels에서 독립적으로 다시 계산한다(내보내기 코드와 무관한 double 산술).
+        internal static (double[,] Scores, int[] Pos, int[] Neg) AppPairScores(ModelBundle bundle, double[,] raw)
         {
             var svm = (SvmModel)bundle.Engine;
             var x = bundle.Scaler is null ? raw : bundle.Scaler.Transform(raw);
             int n = x.GetLength(0), p = x.GetLength(1);
-            var votes = new int[n, svm.ClassCount];
-            foreach (var pair in svm.Pairs)
+            var scores = new double[n, svm.Pairs.Length];
+            var posOf = new int[svm.Pairs.Length];
+            var negOf = new int[svm.Pairs.Length];
+            for (int q = 0; q < svm.Pairs.Length; q++)
             {
+                var pair = svm.Pairs[q];
                 int pos = svm.Labels[pair.Rows[0]], neg = pos;
                 for (int s = 0; s < pair.Rows.Length; s++)
                     if (pair.Y[s] > 0) pos = svm.Labels[pair.Rows[s]]; else neg = svm.Labels[pair.Rows[s]];
+                posOf[q] = pos;
+                negOf[q] = neg;
                 for (int i = 0; i < n; i++)
                 {
                     double sum = 0;
@@ -106,13 +111,25 @@ namespace NanumCsvViewer.Tests
                         double k = svm.Kernel == SvmKernel.Rbf ? Math.Exp(-svm.Gamma * Math.Max(qn + sn - 2 * dot, 0)) : dot;
                         sum += pair.Alpha[s] * pair.Y[s] * k;
                     }
-                    if (sum - pair.Rho > 0) votes[i, pos]++; else votes[i, neg]++;
+                    scores[i, q] = sum - pair.Rho;
                 }
             }
+            return (scores, posOf, negOf);
+        }
+
+        internal static int[,] AppVotes(ModelBundle bundle, double[,] raw)
+        {
+            var svm = (SvmModel)bundle.Engine;
+            var (scores, pos, neg) = AppPairScores(bundle, raw);
+            int n = scores.GetLength(0);
+            var votes = new int[n, svm.ClassCount];
+            for (int q = 0; q < pos.Length; q++)
+                for (int i = 0; i < n; i++)
+                    votes[i, scores[i, q] > 0 ? pos[q] : neg[q]]++;
             return votes;
         }
 
-        static double[,] AppDcdScores(ModelBundle bundle, double[,] raw)
+        internal static double[,] AppDcdScores(ModelBundle bundle, double[,] raw)
         {
             var svm = (SvmModel)bundle.Engine;
             var x = bundle.Scaler!.Transform(raw);

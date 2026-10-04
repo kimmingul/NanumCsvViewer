@@ -37,6 +37,8 @@ namespace NanumCsvViewer.Tests
             });
 
             Assert.True(result.LloydFixedPoint);
+            Assert.Equal(1, result.TerminationType);
+            Assert.Equal(5, result.ConvergedRestarts);
             Assert.Equal(0, result.EmptyClusters);
             AssertPartition(result.Assignment, 20);
             Assert.Equal(new[] { 20, 20, 20 }, result.Clusters.Select(c => c.Size).OrderBy(s => s).ToArray());

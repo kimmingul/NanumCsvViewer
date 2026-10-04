@@ -2874,7 +2874,7 @@ namespace NanumCsvViewer
                 catch (Exception ex)
                 {
                     statusLabel.Text = LT("Referential check failed", "참조 검사 실패");
-                    MessageBox.Show(this, ex.Message, LT("Data Quality", "데이터 품질"),
+                    MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), LT("Data Quality", "데이터 품질"),
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -3142,7 +3142,7 @@ namespace NanumCsvViewer
             catch (Exception ex)
             {
                 statusLabel.Text = LT("Conformance profile failed", "적합성 프로파일 실패");
-                MessageBox.Show(this, ex.Message, LT("Conformance Profile", "적합성 프로파일"),
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), LT("Conformance Profile", "적합성 프로파일"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -3209,7 +3209,7 @@ namespace NanumCsvViewer
             catch (Exception ex)
             {
                 statusLabel.Text = LT("DQD import failed", "DQD 가져오기 실패");
-                MessageBox.Show(this, ex.Message, LT("Import DQD Results", "DQD 결과 가져오기"),
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), LT("Import DQD Results", "DQD 결과 가져오기"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }

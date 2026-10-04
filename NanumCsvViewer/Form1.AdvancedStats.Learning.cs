@@ -191,12 +191,15 @@ namespace NanumCsvViewer
                 $"방법: Lloyd K-means, k-means++ 초기화, 유클리드 거리, 시드 {result.Seed}, 재시작 {result.Restarts}회."));
             if (result.InitializationSampleRows > 0)
                 sb.AppendLine(LT(
-                    $"Large data: ALGLIB k-means++ ({result.Iterations} iteration(s) across restarts) on a fixed-seed sample of {result.InitializationSampleRows:N0} rows found the starting centers; Lloyd iterations on all {matrix.RowCount:N0} rows refined them ({result.RefinementIterations} iteration(s), {(result.RefinementConverged ? "converged" : "iteration limit reached")}).",
-                    $"대용량: 시드 고정 표본 {result.InitializationSampleRows:N0}행에서 ALGLIB k-means++(재시작 합계 {result.Iterations}회)로 시작 중심을 찾고, 전체 {matrix.RowCount:N0}행 Lloyd 반복으로 정제했습니다({result.RefinementIterations}회, {(result.RefinementConverged ? "수렴" : "반복 한도 도달")})."));
+                    $"Large data: k-means++ with restarts ({result.Iterations} iteration(s) in total) on a fixed-seed sample of {result.InitializationSampleRows:N0} rows found the starting centers; Lloyd iterations on all {matrix.RowCount:N0} rows refined them ({result.RefinementIterations} iteration(s), {(result.RefinementConverged ? "converged" : "iteration limit reached")}).",
+                    $"대용량: 시드 고정 표본 {result.InitializationSampleRows:N0}행에서 k-means++·재시작(합계 {result.Iterations}회)으로 시작 중심을 찾고, 전체 {matrix.RowCount:N0}행 Lloyd 반복으로 정제했습니다({result.RefinementIterations}회, {(result.RefinementConverged ? "수렴" : "반복 한도 도달")})."));
             else
                 sb.AppendLine(LT(
-                    $"ALGLIB termination {result.TerminationType} (success), {result.Iterations} iteration(s) across restarts.",
-                    $"ALGLIB 종료코드 {result.TerminationType}(성공), 재시작 합계 반복 {result.Iterations}회."));
+                    $"{result.Iterations} iteration(s) across restarts; {result.ConvergedRestarts} of {result.Restarts} restart(s) converged.",
+                    $"재시작 합계 반복 {result.Iterations}회, 재시작 {result.Restarts}회 중 {result.ConvergedRestarts}회 수렴."));
+            if (!result.Converged)
+                sb.AppendLine(LT("WARNING: the iteration limit was reached; the partition below is not a fixed point.",
+                    "경고: 반복 한도에 도달했습니다. 아래 분할은 고정점이 아닙니다."));
             sb.AppendLine(LT($"Scaling: {ScalingLabel(result.Scaling)} (fit on all used rows).",
                 $"스케일링: {ScalingLabel(result.Scaling)} (사용한 행 전체로 적합)."));
             sb.AppendLine(LT($"Features: {FeatureList(result.FeatureNames)}", $"특성: {FeatureList(result.FeatureNames)}"));

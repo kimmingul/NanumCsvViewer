@@ -130,16 +130,17 @@ namespace NanumCsvViewer
                     "Suggestions, not assertions. Scores are explainable heuristics, not a claim that a column is the target field.",
                     "추천일 뿐 단정이 아닙니다. 점수는 설명 가능한 휴리스틱이며, 컬럼이 그 대상 필드라고 단정하지 않습니다."));
                 text.AppendLine(LT(
-                    $"Layout: {LayoutCaption(spec.Layout)}. Reasons below are in English.",
-                    $"레이아웃: {LayoutCaption(spec.Layout)}. 아래 근거 문장은 영어입니다."));
+                    $"Layout: {LayoutCaption(spec.Layout)}.",
+                    $"레이아웃: {LayoutCaption(spec.Layout)}."));
                 text.AppendLine();
-                text.Append(VariableMapping.Format(result, spec, opt));
+                bool korean = Loc.CurrentLanguage == "ko";
+                text.Append(VariableMapping.Format(result, spec, opt, korean));
 
                 if (csvPath is not null)
                 {
                     try
                     {
-                        File.WriteAllText(csvPath, VariableMapping.ExportCsv(result), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                        File.WriteAllText(csvPath, VariableMapping.ExportCsv(result, korean), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                         text.AppendLine().AppendLine(LT($"Saved suggestion CSV: {csvPath}", $"추천 CSV 저장: {csvPath}"));
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -263,10 +264,10 @@ namespace NanumCsvViewer
 
         private static string LayoutCaption(SpecLayoutKind layout) => layout switch
         {
-            SpecLayoutKind.OmopFieldLevel => "OMOP field-level",
-            SpecLayoutKind.CdiscVariable => "CDISC variable metadata",
-            SpecLayoutKind.Custom => "custom columns",
-            _ => "unknown",
+            SpecLayoutKind.OmopFieldLevel => LT("OMOP field-level", "OMOP 필드 레벨"),
+            SpecLayoutKind.CdiscVariable => LT("CDISC variable metadata", "CDISC 변수 메타데이터"),
+            SpecLayoutKind.Custom => LT("custom columns", "사용자 지정 열"),
+            _ => LT("unknown", "알 수 없음"),
         };
     }
 }

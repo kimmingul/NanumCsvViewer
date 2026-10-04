@@ -57,17 +57,31 @@ namespace NanumCsvViewer
                 bool logistic = family == GlmFamily.Binomial && link == GlmLink.Logit && extras is null;
                 var fit = GeneralizedLinearModel.Fit(design, family, link, logistic, input.Cancellation, extras);
                 string note = AdvSavedNote(design.RowCount);
-                // 오프셋·시행 수 모형은 새 데이터 예측에 같은 열이 필요하거나 응답 의미가 달라 저장 모형으로 쓰지 않는다.
-                bool savable = extras?.Offset is null && extras?.Trials is null;
-                object? bundle = savable
-                    ? ModelBundle.FromFormula(ModelTypes.Glzm,
-                        family == GlmFamily.Binomial ? ModelTask.Classification : ModelTask.Regression,
+                // 오프셋·노출·시행 수 열은 번들에 기록한다 — 적용할 때 새 데이터에 같은 열이 필요하다(가중치는 예측에 영향이 없어 기록만).
+                var bundle = ModelBundle.FromFormula(ModelTypes.Glzm,
+                        family == GlmFamily.Binomial && trialsColumn is null ? ModelTask.Classification : ModelTask.Regression,
                         design, fit, note,
                         new Dictionary<string, string> { ["family"] = family.ToString(), ["link"] = link.ToString(), ["converged"] = fit.Converged.ToString() })
-                    : null;
-                string text = RenderGlm(design, fit, logistic) + "\n" + (savable ? note : LT(
-                    "This model uses an offset or trials column, so it cannot be saved or applied to new data as a stored model.",
-                    "이 모형은 오프셋 또는 시행 수 열을 쓰므로 저장 모형으로 저장하거나 새 데이터에 적용할 수 없습니다."));
+                    with
+                    {
+                        OffsetColumn = offsetColumn,
+                        ExposureColumn = exposureColumn,
+                        TrialsColumn = trialsColumn,
+                        VarianceWeightColumn = varWeightColumn,
+                        FrequencyWeightColumn = freqWeightColumn,
+                    };
+                string text = RenderGlm(design, fit, logistic) + "\n" + note;
+                if (bundle.UsesPredictionColumns)
+                {
+                    var needed = new[] { offsetColumn, exposureColumn, trialsColumn }.Where(c => c != null).Select(c => c!);
+                    text += "\n" + LT(
+                        $"Applying this saved model needs the numeric column(s) {string.Join(", ", needed)} in the new data (offset added as is, ln of exposure added" +
+                        (trialsColumn is not null ? "; with trials the prediction is the probability and expected successes = trials × probability" : "") +
+                        "). Rows with a missing or invalid value are not scored. ONNX export is not available for this model.",
+                        $"이 저장 모형을 적용하려면 새 데이터에 수치 열 {string.Join(", ", needed)}이(가) 있어야 합니다(오프셋은 그대로, 노출은 ln 값을 더함" +
+                        (trialsColumn is not null ? "; 시행 수가 있으면 예측은 확률이며 기대 성공 횟수 = 시행 수 × 확률" : "") +
+                        "). 값이 없거나 올바르지 않은 행은 채점하지 않습니다. 이 모형은 ONNX로 내보낼 수 없습니다.");
+                }
                 return new AdvancedOutput(text, bundle);
             });
         }

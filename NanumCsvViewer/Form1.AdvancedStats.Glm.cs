@@ -50,10 +50,17 @@ namespace NanumCsvViewer
             {
                 if (e.NewValue == CheckState.Checked && e.Index < cov.Items.Count) cov.SetItemChecked(e.Index, false);
             };
+            var interactions = dlg.AddCombo(LT("Factor interactions (several factors)", "요인 상호작용(요인 2개 이상)"), new[]
+            {
+                LT("None (main effects)", "없음(주효과만)"),
+                LT("All 2-way", "2차 상호작용 모두"),
+                LT("All orders", "모든 차수"),
+            }, 0);
             dlg.AddNote(LT(
-                "Main effects only. Adjusted means are estimated at each covariate's mean; with several factors the others are averaged with equal level weights. Homogeneity of slopes adds factor×covariate interactions (per factor and overall).",
-                "주효과만 다룹니다. 보정 평균은 각 공변량의 평균에서 추정하며, 요인이 여럿이면 다른 요인은 수준 동일 가중으로 평균합니다. 기울기 동질성은 요인×공변량 상호작용을 넣어 검정합니다(요인별·전체)."));
+                "Adjusted means are estimated at each covariate's mean; with several factors the others are averaged with equal level weights (interaction columns included). With interactions, Type II respects marginality and a cell (level combination) adjusted-mean table is added per interaction. Homogeneity of slopes adds factor×covariate interactions (per factor and overall).",
+                "보정 평균은 각 공변량의 평균에서 추정하며, 요인이 여럿이면 다른 요인은 수준 동일 가중으로 평균합니다(상호작용 열 포함). 상호작용을 넣으면 Type II는 주변성을 지키고 상호작용마다 셀(수준 조합) 보정 평균표가 추가됩니다. 기울기 동질성은 요인×공변량 상호작용을 넣어 검정합니다(요인별·전체)."));
             if (!dlg.ShowOk(this)) return;
+            int interactionOrder = interactions.SelectedIndex;
 
             int depCol = dep.SelectedIndex;
             var factorCols = CheckedIndexes(factorList);
@@ -97,7 +104,21 @@ namespace NanumCsvViewer
             var factorNames = factorCols.Select(c => headers[c]).ToHashSet(StringComparer.Ordinal);
             var predictors = new List<string>(factorCols.Select(c => headers[c]));
             predictors.AddRange(covCols.Select(c => headers[c]));
-            var formula = ModelFormula.Parse(FormulaText.MainEffects(headers[depCol], predictors, name => factorNames.Contains(name)));
+            string formulaText = FormulaText.MainEffects(headers[depCol], predictors, name => factorNames.Contains(name));
+            if (interactionOrder > 0 && factorCols.Count >= 2)
+            {
+                var fnames = factorCols.Select(c => FormulaText.QuoteName(headers[c])).Select(q => $"C({q})").ToList();
+                int maxOrder = interactionOrder == 1 ? 2 : fnames.Count;
+                var extra = new List<string>();
+                for (int mask = 1; mask < (1 << fnames.Count); mask++)
+                {
+                    int bits = System.Numerics.BitOperations.PopCount((uint)mask);
+                    if (bits < 2 || bits > maxOrder) continue;
+                    extra.Add(string.Join(":", Enumerable.Range(0, fnames.Count).Where(k => (mask & (1 << k)) != 0).Select(k => fnames[k])));
+                }
+                formulaText += " + " + string.Join(" + ", extra);
+            }
+            var formula = ModelFormula.Parse(formulaText);
             await RunAdvancedAsync(title, input =>
             {
                 LinearModel.EnsureNumericResponse(input.Headers, formula, input.KindOf);
@@ -211,8 +232,11 @@ namespace NanumCsvViewer
             sb.AppendLine(AdvScope(dm.RowsRead, dm.RowCount, dm.RowsDropped));
             sb.AppendLine();
             sb.AppendLine(dm.Formula.ToString());
-            sb.AppendLine(LT("Multi-factor ANCOVA · main effects · treatment coding · Type II SS · adjusted means at covariate means",
-                             "다요인 공분산분석 · 주효과 · 처리 코딩 · Type II 제곱합 · 공변량 평균에서의 보정 평균"));
+            sb.AppendLine(result.Cells.Count > 0
+                ? LT("Multi-factor ANCOVA · with factor interactions · treatment coding · Type II SS (marginality) · adjusted means at covariate means",
+                     "다요인 공분산분석 · 요인 상호작용 포함 · 처리 코딩 · Type II 제곱합(주변성) · 공변량 평균에서의 보정 평균")
+                : LT("Multi-factor ANCOVA · main effects · treatment coding · Type II SS · adjusted means at covariate means",
+                     "다요인 공분산분석 · 주효과 · 처리 코딩 · Type II 제곱합 · 공변량 평균에서의 보정 평균"));
             sb.AppendLine();
             AppendFitSummary(sb, fit);
             sb.AppendLine();
@@ -260,6 +284,22 @@ namespace NanumCsvViewer
                     pairs.AddRow(d.LevelA, d.LevelB, StatFormat.G(d.Difference), StatFormat.G(d.StdError), StatFormat.G(d.T),
                         StatFormat.P(d.PValue), StatFormat.P(d.BonferroniP));
                 sb.Append(pairs.Render());
+            }
+            if (result.Cells.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LT("Note: with interactions, the main-effect adjusted means and pairwise differences above are averaged over the other factors' levels (equal weights); the effect of a factor can differ between levels of the others — read the cell means below and the interaction rows of the Type II table.",
+                                 "참고: 상호작용이 있으면 위의 주효과 보정 평균·쌍별 차이는 다른 요인 수준에 걸친 평균(동일 가중)입니다. 한 요인의 효과가 다른 요인의 수준마다 다를 수 있으니 아래 셀 평균과 Type II 표의 상호작용 행을 함께 보세요."));
+                foreach (var cell in result.Cells)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine(LT($"Cell adjusted means — {cell.Term}  (at covariate means; other factors averaged with equal weights; empty cells are not estimable)",
+                                     $"셀 보정 평균 — {cell.Term}  (공변량 평균에서, 다른 요인은 동일 가중 평균, 빈 셀은 추정 불가)"));
+                    var ct = new TextTable(LT("Cell", "셀"), "n", LT("Estimate", "추정값"), "SE", LT("95% low", "95% 하한"), LT("95% high", "95% 상한"));
+                    foreach (var m in cell.AdjustedMeans)
+                        ct.AddRow(m.Level, StatFormat.Int(m.Count), StatFormat.G(m.Estimate), StatFormat.G(m.StdError), StatFormat.G(m.CiLow), StatFormat.G(m.CiHigh));
+                    sb.Append(ct.Render());
+                }
             }
             sb.AppendLine();
             AppendResidualBlock(sb, fit);
