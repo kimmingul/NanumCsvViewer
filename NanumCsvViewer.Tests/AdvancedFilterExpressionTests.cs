@@ -9,6 +9,17 @@ namespace NanumCsvViewer.Tests
         private static bool Eval(string expr, params string[] row)
             => AdvancedFilterExpression.Compile(expr, Headers).Predicate(row);
 
+        [Theory]
+        [InlineData("name startswith \"김\"", "김철수", true)]
+        [InlineData("name startswith \"김\"", " 김영희", true)]
+        [InlineData("name startswith \"김\"", "이김철", false)]
+        [InlineData("name endswith \"수\"", "김철수", true)]
+        [InlineData("name endswith \"수\"", "수지", false)]
+        public void Prefix_and_suffix_operators(string expr, string name, bool expected)
+        {
+            Assert.Equal(expected, Eval(expr, name, "1", "x"));
+        }
+
         [Fact]
         public void Numeric_greater_than()
         {

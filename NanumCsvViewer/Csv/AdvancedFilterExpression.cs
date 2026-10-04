@@ -230,6 +230,12 @@ namespace NanumCsvViewer.Csv
                                 row[column], value,
                                 CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace) >= 0;
                         };
+                    case "startswith":
+                        return row => column < row.Length && CultureInfo.InvariantCulture.CompareInfo.IsPrefix(
+                            row[column].TrimStart(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
+                    case "endswith":
+                        return row => column < row.Length && CultureInfo.InvariantCulture.CompareInfo.IsSuffix(
+                            row[column].TrimEnd(), value, CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace);
                     case "==":
                     case "=":
                         return row => column < row.Length && row[column] == value;

@@ -50,7 +50,7 @@ namespace NanumCsvViewer.Agent.Tools
                 "Filter the grid with an expression, e.g. age > 30 AND city = \"Seoul\"; [col_a] >= [col_b] compares columns. Visible to the user.",
                 """
                 {"type":"object","properties":{
-                "expression":{"type":"string","description":"Syntax: column op value; op is = != < <= > >= contains; combine with AND, OR and parentheses; quote text values; [col] on the right compares columns."},
+                "expression":{"type":"string","description":"Syntax: column op value; op is = != < <= > >= contains startswith endswith; combine with AND, OR and parentheses; quote text values; [col] on the right compares columns."},
                 "mode":{"type":"string","enum":["replace","and"],"description":"replace (default) clears every existing filter first; and narrows the current view."}
                 },"required":["expression"],"additionalProperties":false}
                 """),
