@@ -444,7 +444,8 @@ namespace NanumCsvViewer.Agent
                 Project = ProjectName,
                 Cwd = _workDir,
                 Pid = _client?.ProcessId ?? 0,
-                Approval = AgentApprovalPolicy.ToOmp(_options.ApprovalMode),
+                Approval = AgentApprovalPolicy.ToOmp(_options.EffectiveApprovalMode),
+                ApprovalLocked = _options.ForcedApproval is { } forced ? ApprovalTexts.Locked(forced.Flag, Korean) : "",
             };
             if (!force && s == _lastStatus) return;
             _lastStatus = s;

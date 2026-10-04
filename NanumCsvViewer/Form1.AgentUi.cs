@@ -284,6 +284,13 @@ namespace NanumCsvViewer
             var approval = dlg.AddCombo(LT("Approval mode", "승인 모드"),
                 Enum.GetValues<AgentApprovalMode>().Select(m => ApprovalTexts.Label(m, ko)).ToArray(),
                 (int)AgentApprovalPolicy.Parse(_settings.AgentApprovalMode));
+            // omp 추가 인자(--approval-mode·--yolo·--auto-approve)가 모드를 고정하면 선택을 막고 이유를 보여 준다.
+            if (AgentApprovalPolicy.ForcedByArgs(_settings.AgentExtraArgs) is { } forced)
+            {
+                approval.SelectedIndex = (int)forced.Mode;
+                approval.Enabled = false;
+                dlg.AddNote(ApprovalTexts.Locked(forced.Flag, ko));
+            }
             var localPython = dlg.AddCheckedList(LT("Local Python analysis", "로컬 Python 분석"),
                 new[] { LT("Allow local Python analysis", "로컬 Python 분석 허용") }, 1);
             localPython.CheckOnClick = true;
@@ -301,7 +308,8 @@ namespace NanumCsvViewer
 
             bool wantPython = localPython.GetItemChecked(0);
             if (wantPython && !_settings.AgentAllowLocalPython && !ConfirmLocalPython()) wantPython = false;
-            ApplyApprovalChoice((AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2));
+            if (approval.Enabled && AgentApprovalPolicy.ForcedByArgs(extra.Text) is null)
+                ApplyApprovalChoice((AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2));
 
             string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
             _settings.AgentDataPolicy = ((AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2)).ToString();

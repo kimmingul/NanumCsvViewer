@@ -27,5 +27,11 @@ namespace NanumCsvViewer.Agent
         bool ApprovalNoticePending = false)
     {
         public bool IsKorean => !string.Equals(Language, "en", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>추가 인자(--approval-mode·--yolo·--auto-approve)가 승인 모드를 고정하면 그 모드와 원인 인자, 아니면 null.</summary>
+        public (AgentApprovalMode Mode, string Flag)? ForcedApproval => AgentApprovalPolicy.ForcedByArgs(ExtraArgs);
+
+        /// <summary>실제로 적용되는 모드: 추가 인자가 고정하면 그 값(omp 명령줄이 host.yml보다 우선), 아니면 선택한 모드.</summary>
+        public AgentApprovalMode EffectiveApprovalMode => ForcedApproval?.Mode ?? ApprovalMode;
     }
 }

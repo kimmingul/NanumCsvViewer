@@ -249,7 +249,11 @@
     approval.hidden = !msg.approval;
     if (msg.approval) approval.value = msg.approval;
     approval.classList.toggle('yolo', approval.value === 'yolo');
-    approval.disabled = !msg.connected;
+    // Locked by an extra omp argument (--approval-mode / --yolo): disabled, and the reason shows on hover.
+    // A disabled <select> gets no hover events, so the reason tooltip lives on the wrapper.
+    approval.disabled = !msg.connected || !!msg.approvalLocked;
+    approval.classList.toggle('locked', !!msg.approvalLocked);
+    $('approval-wrap').title = msg.approvalLocked || '';
     input.placeholder = msg.busy && !msg.shell ? T('page.composer.busyPlaceholder') : T('page.composer.placeholder');
     const pct = msg.context >= 0 ? Math.min(100, msg.context) : 0;
     $('ctx-arc').setAttribute('stroke-dasharray', (pct / 100 * 50.3).toFixed(1) + ' 50.3');

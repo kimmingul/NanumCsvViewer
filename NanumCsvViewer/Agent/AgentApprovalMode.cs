@@ -50,5 +50,25 @@ namespace NanumCsvViewer.Agent
             (AgentApprovalMode.Yolo, ApprovalKind.FileSave) => true,
             _ => false,
         };
+
+        /// <summary>
+        /// omp 추가 인자에서 승인 모드를 고정하는 인자를 찾는다: <c>--yolo</c>·<c>--auto-approve</c>(= yolo),
+        /// <c>--approval-mode X</c>·<c>--approval-mode=X</c>. 여러 개면 마지막 것이 이긴다(omp 명령줄 규칙과 같게).
+        /// 값이 잘못된 --approval-mode는 무시한다(omp도 거부하므로 고정으로 보지 않음).
+        /// </summary>
+        public static (AgentApprovalMode Mode, string Flag)? ForcedByArgs(string? extraArgs)
+        {
+            if (string.IsNullOrWhiteSpace(extraArgs)) return null;
+            var args = Rpc.OmpLaunch.SplitArguments(extraArgs);
+            (AgentApprovalMode, string)? found = null;
+            for (int i = 0; i < args.Count; i++)
+            {
+                string a = args[i];
+                if (a is "--yolo" or "--auto-approve") found = (AgentApprovalMode.Yolo, a);
+                else if (a == "--approval-mode" && i + 1 < args.Count && TryParse(args[i + 1], out var m1)) { found = (m1, a + " " + args[i + 1]); i++; }
+                else if (a.StartsWith("--approval-mode=", StringComparison.Ordinal) && TryParse(a["--approval-mode=".Length..], out var m2)) found = (m2, a);
+            }
+            return found;
+        }
     }
 }

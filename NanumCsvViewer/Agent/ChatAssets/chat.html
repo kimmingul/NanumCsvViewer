@@ -45,11 +45,11 @@
         <button id="send-btn" title="Send (Enter)" data-i18n-title="page.composer.sendTitle" disabled>↑</button>
       </div>
       <div class="composer-footer">
-        <select id="approval-select" hidden title="Approval mode" data-i18n-title="page.composer.approvalTitle">
+        <span id="approval-wrap"><select id="approval-select" hidden title="Approval mode" data-i18n-title="page.composer.approvalTitle">
           <option value="always-ask" data-i18n="page.composer.approvalAlwaysAsk">Always ask</option>
           <option value="write" data-i18n="page.composer.approvalWrite">Accept edits</option>
           <option value="yolo" data-i18n="page.composer.approvalYolo">Bypass permissions</option>
-        </select>
+        </select></span>
         <span class="spacer"></span>
         <button id="model-btn" class="footer-btn" type="button"></button>
         <select id="thinking-select" title="Thinking level" data-i18n-title="page.composer.thinkingTitle"></select>

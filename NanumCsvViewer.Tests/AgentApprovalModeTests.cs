@@ -59,6 +59,60 @@ namespace NanumCsvViewer.Tests
             Assert.False(new AppSettings().AgentApprovalNoticeShown);
         }
 
+        // ---- 추가 인자로 고정 -----------------------------------------------------------------------------------
+
+        [Theory]
+        [InlineData("--yolo", AgentApprovalMode.Yolo, "--yolo")]
+        [InlineData("--model x --auto-approve", AgentApprovalMode.Yolo, "--auto-approve")]
+        [InlineData("--approval-mode always-ask", AgentApprovalMode.AlwaysAsk, "--approval-mode always-ask")]
+        [InlineData("--approval-mode=write --thinking low", AgentApprovalMode.Write, "--approval-mode=write")]
+        [InlineData("--yolo --approval-mode write", AgentApprovalMode.Write, "--approval-mode write")]
+        public void Extra_arguments_that_fix_the_mode_are_detected(string args, AgentApprovalMode mode, string flag)
+        {
+            var forced = AgentApprovalPolicy.ForcedByArgs(args);
+            Assert.NotNull(forced);
+            Assert.Equal(mode, forced!.Value.Mode);
+            Assert.Equal(flag, forced.Value.Flag);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("--model anthropic/x")]
+        [InlineData("--approval-mode bogus")]
+        [InlineData("\"--yolo-ish\"")]
+        public void Other_arguments_do_not_fix_the_mode(string? args) => Assert.Null(AgentApprovalPolicy.ForcedByArgs(args));
+
+        [Fact]
+        public async Task A_mode_fixed_by_extra_arguments_locks_the_dropdown_and_explains_why()
+        {
+            using var rig = new ControllerRig(Options(AgentApprovalMode.AlwaysAsk) with { ExtraArgs = "--yolo" });
+            await rig.StartAsync();
+            await rig.Proc.WaitForTypeAsync("get_available_thinking_levels");
+
+            // 실제로 적용되는 모드(yolo)를 보여 주고, 잠금 이유를 함께 보낸다.
+            await rig.WaitUntilAsync(() => rig.Page.Parsed("status").Last().Str("approval") == "yolo");
+            Assert.Contains("--yolo", rig.Page.Parsed("status").Last().Str("approvalLocked"));
+
+            // 선택을 바꾸려 해도 바뀌지 않고 재시작하지 않으며 이유를 알린다.
+            Assert.False(rig.OnUi(() => rig.Controller.TrySetApprovalMode(AgentApprovalMode.Write)));
+            Assert.Single(rig.Factory.Processes);
+            Assert.Contains(Notices(rig), t => t.Contains("--yolo") && t.Contains("Extra omp arguments"));
+
+            // 앱 카드도 실제 모드(yolo)를 따른다: 파일 저장 자동 승인.
+            Task<bool> answer = default!;
+            rig.OnUi(() => answer = rig.Controller.ApproveAsync("Save", "", Array.Empty<string>(), CancellationToken.None, ApprovalKind.FileSave));
+            Assert.True(await answer.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+
+        [Fact]
+        public async Task Without_a_fixing_argument_the_lock_reason_is_empty()
+        {
+            using var rig = await ConnectedAsync(AgentApprovalMode.Write);
+            await rig.WaitUntilAsync(() => rig.Page.Parsed("status").Count > 0);
+            Assert.Equal("", rig.Page.Parsed("status").Last().Str("approvalLocked"));
+        }
+
         // ---- host.yml --------------------------------------------------------------------------------------------
 
         [Theory]

@@ -26,6 +26,11 @@ namespace NanumCsvViewer.Agent
             : "Approval mode: allow everything (yolo). Python and shell commands and file writes run on this PC without asking. " +
               "Change it to 'Always ask' or 'Auto-approve edits' with the selector under the message box or in View ▸ AI agent settings….";
 
+        /// <summary>추가 인자로 고정됐을 때 드롭다운 툴팁·알림 문구.</summary>
+        public static string Locked(string flag, bool korean) => korean
+            ? $"승인 모드가 omp 추가 인자 '{flag}'로 고정되어 바꿀 수 없습니다. 바꾸려면 보기 ▸ AI 에이전트 설정…의 'omp 추가 인자'에서 이 인자를 지우세요."
+            : $"The approval mode is fixed by the extra omp argument '{flag}'. To change it, remove that argument in View ▸ AI Agent Settings… ▸ 'Extra omp arguments'.";
+
         public static string AutoApproved(string target, AgentApprovalMode mode, bool korean) => korean
             ? $"자동 승인: {target} (모드: {AgentApprovalPolicy.ToOmp(mode)})"
             : $"Auto-approved: {target} (mode: {AgentApprovalPolicy.ToOmp(mode)})";
@@ -56,6 +61,13 @@ namespace NanumCsvViewer.Agent
         public bool TrySetApprovalMode(AgentApprovalMode mode)
         {
             if (_disposed) return false;
+            if (_options.ForcedApproval is { } forced)
+            {
+                // omp 추가 인자가 모드를 고정했다: 선택을 바꾸지 않고 이유를 알린다.
+                _stream.Emit(ChatPageMessages.Notice("warn", ApprovalTexts.Locked(forced.Flag, Korean)));
+                RefreshStatus(force: true);
+                return false;
+            }
             if (mode == _options.ApprovalMode) { RefreshStatus(force: true); return true; }
             if (mode == AgentApprovalMode.Yolo && !Dialogs.Confirm(ApprovalTexts.YoloTitle(Korean), ApprovalTexts.YoloConfirm(Korean)))
             {
@@ -79,7 +91,7 @@ namespace NanumCsvViewer.Agent
         /// <summary>앱 카드가 현재 모드에서 자동 승인되는 종류면 카드 없이 알림만 남기고 true.</summary>
         private bool TryAutoApprove(string target, ApprovalKind kind)
         {
-            var mode = _options.ApprovalMode;
+            var mode = _options.EffectiveApprovalMode;
             if (!AgentApprovalPolicy.AutoApproves(mode, kind)) return false;
             string text = ApprovalTexts.AutoApproved(target, mode, Korean);
             _log.Note(text);
