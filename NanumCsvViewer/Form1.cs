@@ -977,10 +977,12 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- Sort (Phase 3)
 
+        private System.Windows.Forms.Timer? _pendingHeaderSort;
+
         private void OnColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (_doc is null || !_doc.IndexingComplete || _busy || e.ColumnIndex < 0) return;
-            if (_sheetEditing && e.Clicks >= 2) return; // 시트 편집 모드의 헤더 더블클릭 = 컬럼 이름 변경(두 번째 클릭은 정렬하지 않는다)
+            if (_sheetEditing && e.Clicks >= 2) { _pendingHeaderSort?.Stop(); return; } // 시트 편집 모드의 헤더 더블클릭 = 컬럼 이름 변경(정렬하지 않는다)
             // 우측 깔때기 영역(약 18px) 클릭은 정렬 대신 필터 팝오버. 그 외는 정렬.
             if (e.Button == MouseButtons.Left && IsFilterableColumn(e.ColumnIndex) &&
                 e.X >= grid.Columns[e.ColumnIndex].Width - 18)
@@ -989,6 +991,20 @@ namespace NanumCsvViewer
                 return;
             }
             bool additive = (ModifierKeys & Keys.Shift) == Keys.Shift;
+            if (_sheetEditing)
+            {
+                // 시트 편집 모드: 더블클릭(이름 변경)인지 알 수 있을 때까지 정렬을 미룬다.
+                _pendingHeaderSort?.Dispose();
+                int col = e.ColumnIndex;
+                _pendingHeaderSort = new System.Windows.Forms.Timer { Interval = SystemInformation.DoubleClickTime + 20 };
+                _pendingHeaderSort.Tick += (_, _) =>
+                {
+                    _pendingHeaderSort?.Stop();
+                    if (!IsDisposed && _doc is not null && !_busy) ToggleSortColumn(col, additive);
+                };
+                _pendingHeaderSort.Start();
+                return;
+            }
             ToggleSortColumn(e.ColumnIndex, additive);
         }
 

@@ -344,6 +344,7 @@ namespace NanumCsvViewer
         private void OnEditHeaderDoubleClick(object? sender, DataGridViewCellMouseEventArgs e)
         {
             if (!_sheetEditing || e.ColumnIndex < 0 || e.Button != MouseButtons.Left) return;
+            _pendingHeaderSort?.Stop();
             RenameColumn(e.ColumnIndex);
         }
 

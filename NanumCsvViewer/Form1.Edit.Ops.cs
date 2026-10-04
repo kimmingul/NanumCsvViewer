@@ -73,6 +73,7 @@ namespace NanumCsvViewer
                 RefreshRowCount();
             }
             grid.Invalidate();
+            UpdateDetailPanel();
             MarkAnalysisWindowsStale();
             UpdateEditTitle();
             UpdateEditStateMenusOnly();
