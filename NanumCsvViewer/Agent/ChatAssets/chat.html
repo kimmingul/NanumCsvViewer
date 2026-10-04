@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<!-- Ported from RAD Agent (MIT, Nanum Space Co., Ltd.). See NOTICE.txt. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nanum CSV Viewer Chat</title>
+  <link rel="stylesheet" href="chat.css">
+  <link rel="stylesheet" href="activity.css">
+  <link rel="stylesheet" href="chrome.css">
+  <link rel="stylesheet" href="brands.css">
+  <link rel="stylesheet" href="panels.css">
+</head>
+<body>
+  <div id="topbar">
+    <button id="title-btn" class="icon-btn" title="Session list" data-i18n-title="page.topbar.sessionListTitle" data-i18n="page.topbar.newChat">New chat</button>
+    <span id="project-chip" class="chip" hidden></span>
+    <span class="spacer"></span>
+    <button id="new-btn" class="icon-btn" title="New session" data-i18n-title="page.topbar.newSessionTitle">＋</button>
+    <button id="export-btn" class="icon-btn" title="Export to HTML" data-i18n-title="page.topbar.exportTitle">⤓</button>
+    <button id="settings-btn" class="icon-btn" title="Settings" data-i18n-title="page.topbar.settingsTitle">⚙</button>
+  </div>
+  <div id="banner" hidden></div>
+  <div id="log"></div>
+  <button id="scroll-bottom-btn" aria-label="New messages" data-i18n-aria-label="page.chat.newMessages" data-i18n="page.chat.scrollBottom">↓ New messages</button>
+  <div id="sheet" hidden>
+    <div class="sheet-head">
+      <span id="sheet-title" class="sheet-title"></span>
+      <span class="spacer"></span>
+      <button id="sheet-close" class="icon-btn" title="Close (Esc)" data-i18n-title="page.sheet.closeTitle">×</button>
+    </div>
+    <div id="sheet-body" class="markdown-body"></div>
+  </div>
+  <div id="composer">
+    <div class="composer-col">
+      <div id="slash-menu" class="popup" hidden></div>
+      <div id="usage-pop" class="popup" hidden></div>
+      <div id="model-menu" class="popup" hidden>
+        <input id="model-search" type="search" spellcheck="false" placeholder="Search models" data-i18n-placeholder="page.modelpicker.search">
+        <div id="model-list"></div>
+      </div>
+      <div id="chips"></div>
+      <div class="composer-box">
+        <textarea id="input" rows="1" spellcheck="false" placeholder="Type a message · / for commands" data-i18n-placeholder="page.composer.placeholder"></textarea>
+        <button id="send-btn" title="Send (Enter)" data-i18n-title="page.composer.sendTitle" disabled>↑</button>
+      </div>
+      <div class="composer-footer">
+        <select id="approval-select" hidden title="Approval mode" data-i18n-title="page.composer.approvalTitle">
+          <option value="always-ask" data-i18n="page.composer.approvalAlwaysAsk">Always ask</option>
+          <option value="write" data-i18n="page.composer.approvalWrite">Accept edits</option>
+          <option value="yolo" data-i18n="page.composer.approvalYolo">Bypass permissions</option>
+        </select>
+        <span class="spacer"></span>
+        <button id="model-btn" class="footer-btn" type="button"></button>
+        <select id="thinking-select" title="Thinking level" data-i18n-title="page.composer.thinkingTitle"></select>
+        <svg id="ctx-ring" viewBox="0 0 20 20" role="button"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="3"/><circle id="ctx-arc" cx="10" cy="10" r="8" fill="none" stroke="var(--muted)" stroke-width="3" stroke-dasharray="0 50.3" transform="rotate(-90 10 10)"/></svg>
+        <span id="conn-dot" class="off" title="Connecting" data-i18n-title="page.composer.connectingTitle"></span>
+      </div>
+    </div>
+  </div>
+  <script src="brands.js"></script>
+  <script src="markdown.js"></script>
+  <script src="activity.js"></script>
+  <script src="tools.js"></script>
+  <script src="approval.js"></script>
+  <script src="turntime.js"></script>
+  <script src="queue.js"></script>
+  <script src="topbar.js"></script>
+  <script src="modelpicker.js"></script>
+  <script src="composer.js"></script>
+  <script src="panels.js"></script>
+  <script src="clicks.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

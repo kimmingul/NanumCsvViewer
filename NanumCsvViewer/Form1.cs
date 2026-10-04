@@ -269,6 +269,7 @@ namespace NanumCsvViewer
             themeToggleButton.Image = theme == AppTheme.Dark ? UiIcons.Sun() : UiIcons.Moon();
             if (_doc is not null) { _detailTimer.Stop(); UpdateDetailPanel(); } // 상세 패널 색 갱신
             _qualityPanel?.ApplyPalette(_palette); // 품질 패널은 서브아이템 색이 고정돼 별도 재적용 필요(이슈 #26)
+            ApplyAgentTheme();
             grid.Invalidate();
         }
 
@@ -351,6 +352,7 @@ namespace NanumCsvViewer
             Text = $"{ProgramName}  -  {title}";
             StartIndexing();
             UpdateFeatureState();
+            PostAgentContext();
         }
 
         private void BuildColumns(string[] header)
@@ -1402,6 +1404,7 @@ namespace NanumCsvViewer
             // Leave the initial FormClosing callback before closing again, even
             // when there are no workers. The message loop stays alive while readers drain.
             await Task.Yield();
+            ShutdownAgent();
             await CancelAndDrainAsync();
             if (IsDisposed) return;
             _closeReady = true;

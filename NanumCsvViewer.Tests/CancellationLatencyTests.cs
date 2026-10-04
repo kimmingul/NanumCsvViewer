@@ -36,13 +36,16 @@ namespace NanumCsvViewer.Tests
             KMeansClustering.ChunkProbe = probe;
             using var cts = new CancellationTokenSource();
             long cancelledAt = 0;
-            cts.Token.Register(() => Interlocked.Exchange(ref cancelledAt, Stopwatch.GetTimestamp()));
             bool finished = false;
             var canceller = Task.Run(() =>
             {
                 var spin = new SpinWait();
                 while (!Volatile.Read(ref finished) && Interlocked.Read(ref probe[0]) < cancelAfterChunks) spin.SpinOnce(-1);
-                if (!Volatile.Read(ref finished)) cts.Cancel();
+                if (Volatile.Read(ref finished)) return;
+                // Cancel()은 플래그를 먼저 세우고 콜백을 나중에 돌린다. 등록 콜백으로 시각을 찍으면 작업이 먼저 반환해
+                // 0을 읽는 경합이 있으므로 Cancel 직전에 찍는다.
+                Interlocked.Exchange(ref cancelledAt, Stopwatch.GetTimestamp());
+                cts.Cancel();
             });
             try
             {

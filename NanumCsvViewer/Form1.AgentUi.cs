@@ -1,0 +1,236 @@
+using System.IO;
+using System.Text.Json;
+using NanumCsvViewer.Agent;
+
+namespace NanumCsvViewer
+{
+    // v2: 오른쪽에 도킹되는 AI 에이전트 채팅 패널(omp RPC 호스트). 설계: docs/AGENT_INTEGRATION_PLAN.md
+    public partial class Form1
+    {
+        private SplitContainer? _agentSplit;
+        private AgentChatPanel? _agentPanel;
+        private ChatController? _agentController;
+        private ToolStripButton? _agentButton;
+        private ToolStripMenuItem? _agentPanelMenu, _agentSettingsMenu;
+        private bool _syncingAgentToggle;
+
+        // Form1.Features.BuildFeatureMenus에서 호출.
+        private void BuildAgentFeatures()
+        {
+            // 기존 본문(outerSplit)을 왼쪽에, 채팅 패널을 오른쪽에 두는 분할. 패널은 처음 열 때 만든다.
+            _agentSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                FixedPanel = FixedPanel.Panel2,
+                Panel2Collapsed = true,
+            };
+            int index = Controls.GetChildIndex(outerSplit);
+            Controls.Remove(outerSplit);
+            _agentSplit.Panel1.Controls.Add(outerSplit);
+            Controls.Add(_agentSplit);
+            Controls.SetChildIndex(_agentSplit, index);
+
+            _agentPanelMenu = MakeItem("AI Agent Panel", "AI 에이전트 패널", (_, _) => SetAgentPanelVisible(!AgentPanelVisible));
+            _agentPanelMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.A;
+            _agentSettingsMenu = MakeItem("AI Agent Settings…", "AI 에이전트 설정…", (_, _) => ShowAgentSettings());
+            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            viewToolStripMenuItem.DropDownItems.Add(_agentPanelMenu);
+            viewToolStripMenuItem.DropDownItems.Add(_agentSettingsMenu);
+
+            _agentButton = new ToolStripButton
+            {
+                Text = "✦ AI",
+                CheckOnClick = true,
+                Alignment = ToolStripItemAlignment.Right,
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                Overflow = ToolStripItemOverflow.Never,
+            };
+            _agentButton.CheckedChanged += (_, _) =>
+            {
+                if (!_syncingAgentToggle) SetAgentPanelVisible(_agentButton.Checked);
+            };
+            toolStrip1.Items.Add(_agentButton);
+            LocalizeAgentUi();
+        }
+
+        private bool AgentPanelVisible => _agentSplit is { Panel2Collapsed: false };
+
+        private void LocalizeAgentUi()
+        {
+            if (_agentButton is not null)
+                _agentButton.ToolTipText = LT("AI agent panel (Ctrl+Shift+A)", "AI 에이전트 패널 (Ctrl+Shift+A)");
+            string lang = Loc.CurrentLanguage == "ko" ? "ko" : "en";
+            _agentPanel?.SetLanguage(lang);
+            if (_agentController is not null) _agentController.Options = AgentOptions();
+        }
+
+        private AgentHostOptions AgentOptions() => new(
+            OmpPath: string.IsNullOrWhiteSpace(_settings.AgentOmpPath) ? null : _settings.AgentOmpPath,
+            ExtraArgs: string.IsNullOrWhiteSpace(_settings.AgentExtraArgs) ? null : _settings.AgentExtraArgs,
+            Language: Loc.CurrentLanguage == "ko" ? "ko" : "en",
+            DataPolicy: Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) ? p : AgentDataPolicy.SummaryOnly,
+            MaxRowsPerRequest: Math.Clamp(_settings.AgentMaxRows, 1, 5000),
+            AppVersion: AppInfo.Version);
+
+        private void SetAgentPanelVisible(bool visible)
+        {
+            if (_agentSplit is null) return;
+            _syncingAgentToggle = true;
+            try
+            {
+                if (_agentButton is not null) _agentButton.Checked = visible;
+                if (_agentPanelMenu is not null) _agentPanelMenu.Checked = visible;
+            }
+            finally { _syncingAgentToggle = false; }
+
+            if (!visible)
+            {
+                _agentSplit.Panel2Collapsed = true;
+                return;
+            }
+            EnsureAgentPanel();
+            _placingAgentSplitter = true;
+            try { _agentSplit.Panel2Collapsed = false; }
+            finally { _placingAgentSplitter = false; }
+            // 최소 크기는 분할이 실제 크기를 가진 뒤에만 지정할 수 있다(생성 시 지정하면 SplitterDistance 범위 오류).
+            // 저장 폭은 96 DPI 기준 논리 단위. 고해상도 화면에서도 같은 체감 폭이 되도록 장치 픽셀로 바꾼다.
+            int total = _agentSplit.Width;
+            int min = LogicalToDeviceUnits(320);
+            int width = Math.Clamp(LogicalToDeviceUnits(_settings.AgentPanelWidth), min, Math.Max(min, total - LogicalToDeviceUnits(300)));
+            int distance = total - width - _agentSplit.SplitterWidth;
+            if (distance > _agentSplit.Panel1MinSize)
+            {
+                _placingAgentSplitter = true;
+                try { _agentSplit.SplitterDistance = distance; }
+                finally { _placingAgentSplitter = false; }
+                if (_agentSplit.Panel2MinSize < min && total - _agentSplit.SplitterDistance - _agentSplit.SplitterWidth >= min)
+                    _agentSplit.Panel2MinSize = min;
+            }
+            _agentPanel!.FocusInput();
+        }
+
+        /// <summary>폼에 직접 붙은 본문(Fill) 컨트롤. 에이전트 분할이 있으면 그것, 없으면 outerSplit. 띠·패널의 z-순서 기준.</summary>
+        private Control MainContent => _agentSplit ?? (Control)outerSplit;
+        private bool _placingAgentSplitter;
+
+        private void EnsureAgentPanel()
+        {
+            if (_agentPanel is not null) return;
+            _agentPanel = new AgentChatPanel { Dock = DockStyle.Fill };
+            _agentSplit!.Panel2.Controls.Add(_agentPanel);
+            _agentSplit.SplitterMoved += (_, _) =>
+            {
+                if (!AgentPanelVisible || _placingAgentSplitter) return;
+                int logical = (int)Math.Round(_agentSplit.Panel2.Width * 96.0 / DeviceDpi);
+                if (logical < 320) return; // 접힘·배치 중간값은 저장하지 않는다
+                _settings.AgentPanelWidth = logical;
+                _settings.Save();
+            };
+            _agentPanel.ApplyTheme(_theme == AppTheme.Dark, Font);
+            _agentPanel.SetLanguage(Loc.CurrentLanguage == "ko" ? "ko" : "en");
+
+            var options = AgentOptions();
+            _agentController = new ChatController(_agentPanel, new CsvHostTools(this, AgentOptions), options);
+            _agentController.PageMessageUnhandled += OnAgentPageMessage;
+            _agentController.StatusChanged += _ => { };
+            _ = _agentController.StartAsync(AgentWorkingDirectory());
+            PostAgentContext();
+        }
+
+        /// <summary>omp의 작업 폴더: 열린 파일의 폴더, 없으면 문서 폴더.</summary>
+        private string AgentWorkingDirectory()
+        {
+            string? dir = _currentPath is null ? null : Path.GetDirectoryName(_currentPath);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) return dir;
+            return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+
+        // LoadDocument·편집 변경 시: 채팅 입력창 위 파일 칩.
+        private void PostAgentContext()
+        {
+            if (_agentPanel is null) return;
+            int edits = _doc is null || _doc.Edits.IsEmpty ? 0 : 1;
+            _agentPanel.Post(JsonSerializer.Serialize(new
+            {
+                t = "context",
+                file = _currentPath is null ? "" : Path.GetFileName(_currentPath),
+                path = _currentPath ?? "",
+                edits = HasUnsavedEdits ? Math.Max(edits, 1) : 0,
+            }));
+        }
+
+        private void OnAgentPageMessage(JsonElement msg)
+        {
+            string t = msg.TryGetProperty("t", out var tv) && tv.ValueKind == JsonValueKind.String ? tv.GetString() ?? "" : "";
+            switch (t)
+            {
+                case "settings":
+                    ShowAgentSettings();
+                    break;
+                case "listColumns":
+                    var names = _doc is null ? Array.Empty<string>() : AdvHeaders();
+                    _agentPanel?.Post(JsonSerializer.Serialize(new { t = "files", items = names }));
+                    break;
+                case "openFile":
+                    string path = msg.TryGetProperty("path", out var pv) && pv.ValueKind == JsonValueKind.String ? pv.GetString() ?? "" : "";
+                    OpenFileFromAgent(path);
+                    break;
+                // setApproval·context 등은 이 호스트에서 쓰지 않는다(승인 선택은 숨김).
+            }
+        }
+
+        private void OpenFileFromAgent(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            string full = Path.IsPathRooted(path) ? path : Path.Combine(AgentWorkingDirectory(), path);
+            if (!File.Exists(full))
+            {
+                MessageBox.Show(this, LT($"File not found: {full}", $"파일을 찾을 수 없습니다: {full}"), Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (string.Equals(Path.GetFullPath(full), _currentPath is null ? null : Path.GetFullPath(_currentPath), StringComparison.OrdinalIgnoreCase))
+                return;
+            _ = OpenFileAsync(full);
+        }
+
+        private void ShowAgentSettings()
+        {
+            using var dlg = new ParamDialog(LT("AI Agent Settings", "AI 에이전트 설정"), _palette);
+            var policy = dlg.AddCombo(LT("Data sharing with the AI", "AI와의 데이터 공유"), new[]
+            {
+                LT("Summary only (no raw rows)", "요약만 (원시 행 보내지 않음)"),
+                LT("Rows with approval", "행 값 — 요청마다 승인"),
+                LT("Rows allowed (up to the limit)", "행 값 — 승인 없이(상한까지)"),
+            }, (int)AgentOptions().DataPolicy);
+            var maxRows = dlg.AddNumeric(LT("Row limit per request", "요청당 행 상한"), 1, 5000, Math.Clamp(_settings.AgentMaxRows, 1, 5000));
+            var ompPath = dlg.AddText(LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"), _settings.AgentOmpPath ?? "");
+            var extra = dlg.AddText(LT("Extra omp arguments", "omp 추가 인자"), _settings.AgentExtraArgs ?? "");
+            dlg.AddNote(LT(
+                "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits and saves always ask for approval in the chat.",
+                "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집과 저장은 항상 채팅에서 승인을 받습니다."));
+            if (!dlg.ShowOk(this)) return;
+
+            string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
+            _settings.AgentDataPolicy = ((AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2)).ToString();
+            _settings.AgentMaxRows = (int)maxRows.Value;
+            _settings.AgentOmpPath = ompPath.Text.Trim();
+            _settings.AgentExtraArgs = extra.Text.Trim();
+            _settings.Save();
+            if (_agentController is null) return;
+            _agentController.Options = AgentOptions();
+            if (oldPath != _settings.AgentOmpPath || oldArgs != _settings.AgentExtraArgs)
+                _ = _agentController.RestartAsync();
+        }
+
+        // 테마 변경(ApplyTheme)에서 호출.
+        private void ApplyAgentTheme() => _agentPanel?.ApplyTheme(_theme == AppTheme.Dark, Font);
+
+        // 종료(OnFormClosing)에서 호출.
+        private void ShutdownAgent()
+        {
+            _agentController?.Dispose();
+            _agentController = null;
+        }
+    }
+}

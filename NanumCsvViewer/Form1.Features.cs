@@ -90,6 +90,7 @@ namespace NanumCsvViewer
             _advFilterMenu = MakeItem("Advanced Filter…", "고급 필터…", (_, _) => ShowAdvancedFilter());
             editToolStripMenuItem.DropDownItems.Add(_advFilterMenu);
             BuildEditFeatures();
+            BuildAgentFeatures();
 
             // View ▸ 컬럼 / 저장된 뷰 / 성능 / 인덱스 캐시
             viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
@@ -300,6 +301,7 @@ namespace NanumCsvViewer
                 _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
             _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
             LocalizeEditButtons();
+            LocalizeAgentUi();
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
@@ -1144,7 +1146,7 @@ namespace NanumCsvViewer
                 };
                 Controls.Add(_chipsBar);
                 // outerSplit(=Fill) 바로 앞에 두어, 메뉴·툴바 아래·콘텐츠 위의 띠가 되게 한다.
-                Controls.SetChildIndex(_chipsBar, Controls.GetChildIndex(outerSplit) + 1);
+                Controls.SetChildIndex(_chipsBar, Controls.GetChildIndex(MainContent) + 1);
             }
 
             _chipsBar.SuspendLayout();
@@ -2517,7 +2519,7 @@ namespace NanumCsvViewer
             _qualityPanel.CloseRequested += () => SetQualityPanelVisible(false);
             // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
             Controls.Add(_qualityPanel);
-            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(outerSplit) + 1);
+            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(MainContent) + 1);
         }
 
         private void SetQualityPanelVisible(bool visible)

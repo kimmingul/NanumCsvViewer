@@ -101,7 +101,13 @@ namespace NanumCsvViewer
             Controls.Add(bottom);
             AcceptButton = close;
             CancelButton = close;
-
+            // 첫 포커스에서 TextBox가 본문 전체를 선택하므로(키보드 포커스 규칙) 표시 직후 선택을 지운다.
+            Shown += (_, _) =>
+            {
+                text.SelectionStart = 0;
+                text.SelectionLength = 0;
+                text.ScrollToCaret();
+            };
         }
 
         protected override void Dispose(bool disposing)
