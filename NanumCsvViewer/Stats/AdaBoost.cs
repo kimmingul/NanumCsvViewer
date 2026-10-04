@@ -80,35 +80,42 @@ namespace NanumCsvViewer.Stats
                 return pred;
             }
             double neg = -1.0 / (k - 1);
-            for (int i = 0; i < n; i++)
+            // 행 범위를 병렬로 처리(행별 독립이라 스레드 수와 무관하게 결과 동일). 다중 클래스 점수 버퍼는 범위당 1개.
+            int parts = Math.Clamp(n / 4096, 1, Environment.ProcessorCount);
+            Parallel.For(0, parts, new ParallelOptions { CancellationToken = cancellation }, part =>
             {
-                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
-                if (k == 2)
+                int from = (int)((long)n * part / parts), to = (int)((long)n * (part + 1) / parts);
+                var score = new double[k];
+                for (int i = from; i < to; i++)
                 {
-                    double score = 0;
-                    for (int m = 0; m < EstimatorsUsed; m++)
+                    if (((i - from) & 4095) == 0) cancellation.ThrowIfCancellationRequested();
+                    if (k == 2)
                     {
-                        int c = trees[m].PredictRow(x, i);
-                        // SAMME 이진: 클래스 1이면 +w, 클래스 0이면 -w. 동점(0)은 클래스 0.
-                        score += c == 1 ? w[m] : -w[m];
+                        double s2 = 0;
+                        for (int m = 0; m < EstimatorsUsed; m++)
+                        {
+                            int c = trees[m].PredictRow(x, i);
+                            // SAMME 이진: 클래스 1이면 +w, 클래스 0이면 -w. 동점(0)은 클래스 0.
+                            s2 += c == 1 ? w[m] : -w[m];
+                        }
+                        pred[i] = s2 > 0 ? 1 : 0;
                     }
-                    pred[i] = score > 0 ? 1 : 0;
-                }
-                else
-                {
-                    var score = new double[k];
-                    for (int m = 0; m < EstimatorsUsed; m++)
+                    else
                     {
-                        int c = trees[m].PredictRow(x, i);
-                        for (int t = 0; t < k; t++)
-                            score[t] += t == c ? w[m] : neg * w[m];
+                        Array.Clear(score);
+                        for (int m = 0; m < EstimatorsUsed; m++)
+                        {
+                            int c = trees[m].PredictRow(x, i);
+                            for (int t = 0; t < k; t++)
+                                score[t] += t == c ? w[m] : neg * w[m];
+                        }
+                        int best = 0;
+                        for (int t = 1; t < k; t++)
+                            if (score[t] > score[best]) best = t;
+                        pred[i] = best;
                     }
-                    int best = 0;
-                    for (int t = 1; t < k; t++)
-                        if (score[t] > score[best]) best = t;
-                    pred[i] = best;
                 }
-            }
+            });
             return pred;
         }
 
@@ -921,6 +928,7 @@ namespace NanumCsvViewer.Stats
             var ord = new int[nNode];
             var leftCounts = new double[classCount];
             double bestProxy = double.NegativeInfinity;
+            double[]? suffix = null;
             bool found = false;
             for (int f = 0; f < p; f++)
             {
@@ -933,6 +941,20 @@ namespace NanumCsvViewer.Stats
                 Array.Sort(vals, ord, 0, nNode);
                 if ((float)vals[nNode - 1] <= (float)vals[0] + FeatureThreshold) continue;
                 Array.Clear(leftCounts, 0, classCount);
+                // 큰 노드: 오른쪽 가중 도수를 역방향 누적합으로 한 번에 만든다(임계값마다 재합산하면 O(n²)).
+                // 작은 노드는 기존 순서 합산을 유지해 sklearn 참조와 같은 반올림을 보존한다.
+                bool fast = nNode > FastSplitNodeSize;
+                if (fast)
+                {
+                    suffix ??= new double[(nNode + 1) * classCount];
+                    Array.Clear(suffix, 0, (nNode + 1) * classCount);
+                    for (int t = nNode - 1; t >= 0; t--)
+                    {
+                        int row = idx[start + ord[t]];
+                        Array.Copy(suffix, (t + 1) * classCount, suffix, t * classCount, classCount);
+                        suffix[t * classCount + y[row]] += w[row];
+                    }
+                }
                 int leftN = 0;
                 double lw = 0;
                 int s = 0;
@@ -956,7 +978,9 @@ namespace NanumCsvViewer.Stats
                     if (lw <= 0 || rw <= 0) continue;
                     double lImp = Impurity(leftCounts, lw, criterion);
                     // 오른쪽 가중 도수는 부모에서 왼쪽을 뺀다.
-                    double rImp = RightImpurity(y, w, idx, start, ord, nNode, classCount, leftCounts, rw, criterion, s);
+                    double rImp = fast
+                        ? Impurity(new ReadOnlySpan<double>(suffix, s * classCount, classCount), rw, criterion)
+                        : RightImpurity(y, w, idx, start, ord, nNode, classCount, leftCounts, rw, criterion, s);
                     double proxy = -(lw * lImp + rw * rImp);
                     if (proxy > bestProxy)
                     {
@@ -994,7 +1018,13 @@ namespace NanumCsvViewer.Stats
             return Impurity(right, rightW, criterion);
         }
 
+        /// <summary>이 크기를 넘는 노드는 역방향 누적합으로 분할 후보를 평가한다.</summary>
+        const int FastSplitNodeSize = 2048;
+
         static double Impurity(double[] counts, double sum, TreeCriterion criterion)
+            => Impurity(new ReadOnlySpan<double>(counts), sum, criterion);
+
+        static double Impurity(ReadOnlySpan<double> counts, double sum, TreeCriterion criterion)
         {
             if (sum <= 0) return 0;
             if (criterion == TreeCriterion.Entropy)

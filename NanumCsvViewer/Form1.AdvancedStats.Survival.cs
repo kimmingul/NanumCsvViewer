@@ -132,7 +132,7 @@ namespace NanumCsvViewer
             }
             catch (DesignMatrixException ex)
             {
-                return ex.Message;
+                return Stats.ErrorText.Localize(ex.Message);
             }
             return null;
         }

@@ -31,6 +31,9 @@ namespace NanumCsvViewer.Csv
         private readonly RecordIndex _index = new();
         private readonly RowCache _cache = new(RowCacheCapacity);
 
+        /// <summary>셀 편집 덮개. 변경되면 행 캐시를 비워 다음 읽기에 반영한다.</summary>
+        public CellEdits Edits { get; } = new();
+
         private Encoding _encoding;
         private readonly int _preamble;
         private byte _delim; // 실제 사용 구분자 바이트(Initialize에서 감지)
@@ -64,6 +67,7 @@ namespace NanumCsvViewer.Csv
         private VirtualCsvDocument(string path, EncodingDetectionResult det)
         {
             _path = path;
+            Edits.Changed += _cache.Clear;
             _encoding = det.Encoding;
             _preamble = det.PreambleLength;
             EncodingName = det.DisplayName;
@@ -288,7 +292,20 @@ namespace NanumCsvViewer.Csv
         /// <summary>캐시를 조회하지도 채우지도 않는 디코드. 필터/정렬의 대량 스캔용(LRU 오염·락 경합 방지).</summary>
         public string[] GetDataRowUncached(int dataRow) => ParseDataRow(dataRow);
 
+        // 모든 읽기(그리드·필터·정렬·분석·내보내기)의 단일 경로: 원본 파싱 + 셀 편집 덮개.
         private string[] ParseDataRow(int dataRow)
+        {
+            var fields = ParseRawDataRow(dataRow);
+            return Edits.IsEmpty ? fields : Edits.Apply(dataRow, fields);
+        }
+
+        /// <summary>편집 덮개를 적용하지 않은 원본 행(편집 전 값 확인·되돌림 비교용).</summary>
+        public string[] GetOriginalDataRow(int dataRow) => ParseRawDataRow(dataRow);
+
+        /// <summary>표시 행 → 0-based 데이터 행. 범위 밖이면 -1.</summary>
+        public int GetDataRowIndex(int viewIndex) => TryMapToDataRow(viewIndex, out int r) ? r : -1;
+
+        private string[] ParseRawDataRow(int dataRow)
         {
             long rec = dataRow + 1L; // 0번 레코드는 헤더
             long count = _index.Count;
@@ -296,6 +313,80 @@ namespace NanumCsvViewer.Csv
             long start = _index[rec];
             long end = (rec + 1 < count) ? _index[rec + 1] : FileLength;
             return DecodeAndParse(start, end);
+        }
+
+        /// <summary>
+        /// 편집 내용을 새 파일로 저장(원본은 절대 덮어쓰지 않는다). 편집되지 않은 행은 원본 바이트를 그대로 복사하고,
+        /// 편집된 행만 같은 인코딩·구분자·줄바꿈으로 다시 쓴다(값은 문자열 그대로 — 선행 0 보존).
+        /// 인덱싱이 끝난 뒤에만 호출한다. 실패·취소 시 부분 파일을 남기지 않는다.
+        /// </summary>
+        public void SaveWithEdits(string destinationPath, IProgress<int>? progress, CancellationToken ct)
+        {
+            if (!IndexingComplete) throw new InvalidOperationException("Indexing is not complete.");
+            string full = Path.GetFullPath(destinationPath);
+            if (string.Equals(full, Path.GetFullPath(_path), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The original file is never overwritten. Choose a different file name.");
+
+            string tmp = full + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20))
+                {
+                    var src = (IRandomByteSource?)_ramBuffer ?? _diskSource;
+                    long count = _index.Count;
+                    var rows = Edits.EditedRows();
+                    int next = 0;
+                    var chunk = new byte[1 << 20];
+                    long first = count > 1 ? _index[1] : FileLength; // 헤더(+BOM)는 원본 그대로
+                    CopyRange(src, fs, 0, first, chunk, ct);
+                    char delim = (char)_delim;
+                    for (long rec = 1; rec < count; rec++)
+                    {
+                        if ((rec & 0x3FFF) == 0)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            progress?.Report((int)(rec * 100 / count));
+                        }
+                        long start = _index[rec];
+                        long end = rec + 1 < count ? _index[rec + 1] : FileLength;
+                        int dataRow = (int)(rec - 1);
+                        while (next < rows.Length && rows[next] < dataRow) next++;
+                        if (next < rows.Length && rows[next] == dataRow)
+                        {
+                            // 원본 레코드의 끝 줄바꿈을 보존하고, 필드만 다시 직렬화한다.
+                            int len = (int)(end - start);
+                            var raw = new byte[len];
+                            src.Read(start, raw);
+                            int n = len;
+                            while (n > 0 && (raw[n - 1] == 0x0A || raw[n - 1] == 0x0D)) n--;
+                            var fields = ParseDataRow(dataRow);
+                            byte[] body = _encoding.GetBytes(CellEdits.JoinRecord(fields, delim));
+                            fs.Write(body, 0, body.Length);
+                            fs.Write(raw, n, len - n);
+                        }
+                        else CopyRange(src, fs, start, end, chunk, ct);
+                    }
+                }
+                File.Move(tmp, full, overwrite: true);
+                progress?.Report(100);
+            }
+            catch
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 부분 파일은 남기지 않는다. */ }
+                throw;
+            }
+        }
+
+        private static void CopyRange(IRandomByteSource src, Stream dst, long from, long to, byte[] chunk, CancellationToken ct)
+        {
+            for (long pos = from; pos < to;)
+            {
+                ct.ThrowIfCancellationRequested();
+                int take = (int)Math.Min(chunk.Length, to - pos);
+                src.Read(pos, chunk.AsSpan(0, take));
+                dst.Write(chunk, 0, take);
+                pos += take;
+            }
         }
 
         private string[] DecodeAndParse(long start, long end)

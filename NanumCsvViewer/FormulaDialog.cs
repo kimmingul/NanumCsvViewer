@@ -215,8 +215,8 @@ namespace NanumCsvViewer
                     foreach (var v in parsed.PredictorVariables) StatValue.ResolveColumn(_headers, v);
                     error = _extraValidation?.Invoke(parsed);
                 }
-                catch (FormulaParseException ex) { error = ex.Message; }
-                catch (DesignMatrixException ex) { error = ex.Message; }
+                catch (FormulaParseException ex) { error = Stats.ErrorText.Localize(ex.Message); }
+                catch (DesignMatrixException ex) { error = Stats.ErrorText.Localize(ex.Message); }
             }
             _status.ForeColor = error is null ? _palette.Text : Color.FromArgb(200, 60, 60);
             _status.Text = error ?? "✓ " + parsed!;

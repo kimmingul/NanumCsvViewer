@@ -299,6 +299,7 @@ namespace NanumCsvViewer
         private async Task OpenFileAsync(string path)
         {
             if (_closing) return;
+            if (!ConfirmDiscardEdits()) return; // 저장하지 않은 셀 편집이 있으면 확인
             try
             {
                 // 진행 중인 인덱싱/필터/정렬/검색을 취소하고 완료까지 기다린 뒤에야 옛 문서를 해제한다.
@@ -341,6 +342,7 @@ namespace NanumCsvViewer
         // 실제 문서(파일/임시 CSV) 하나를 열고 인덱싱을 시작한다. 일반 열기·시트 전환 공용.
         private void LoadDocument(string filePath, string title)
         {
+            ResetEditUi(); // 새 문서는 항상 보기 모드
             _doc = VirtualCsvDocument.Open(filePath);
             _currentPath = filePath;
             BuildColumns(_doc.Header);
@@ -1369,6 +1371,7 @@ namespace NanumCsvViewer
         {
             if (_closeReady) { base.OnFormClosing(e); return; }
             if (_closing) { e.Cancel = true; return; }
+            if (!ConfirmDiscardEdits()) { e.Cancel = true; return; }
             base.OnFormClosing(e);
             if (e.Cancel) return;
             e.Cancel = true;

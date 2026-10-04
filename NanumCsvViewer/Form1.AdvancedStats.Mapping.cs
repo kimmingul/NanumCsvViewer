@@ -36,7 +36,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                ShowResult(title, ex.Message);
+                ShowResult(title, Stats.ErrorText.Localize(ex.Message));
                 return;
             }
 
@@ -53,7 +53,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                ShowResult(title, ex.Message);
+                ShowResult(title, Stats.ErrorText.Localize(ex.Message));
                 return;
             }
 

@@ -182,6 +182,7 @@ namespace NanumCsvViewer.Stats
                 GradientBoostingModel gb => Boosting(bundle, gb),
                 AdaBoostModel ada => ExportAda(bundle, ada),
                 LinearScoreModel score => ExportScore(bundle, score),
+                LinearDiscriminantModel lda => ExportLda(bundle, lda),
                 _ => throw new OnnxNotExportableException(Refuse(bundle)),
             };
         }
@@ -190,11 +191,34 @@ namespace NanumCsvViewer.Stats
         {
             ModelTypes.Knn => "KNN is not exportable to ONNX. It stores the training rows and has no fixed graph.",
             ModelTypes.NaiveBayes => "Naive Bayes is not exportable to ONNX. Gaussian and categorical likelihoods are not in the supported operator set.",
-            ModelTypes.Lda => "LDA is not exportable to ONNX. This export covers linear, logistic, trees, forests, and gradient boosting only.",
+            ModelTypes.Lda => "LDA is not exportable to ONNX for this model.",
             ModelTypes.Svm => "SVM is not exportable to ONNX. Kernel and linear SVM decision functions are not in the supported operator set.",
             ModelTypes.AdaBoost => "AdaBoost regression is not exportable to ONNX. The prediction is a weighted median, which TreeEnsemble cannot reproduce.",
             _ => $"{bundle.ModelType} is not exportable to ONNX.",
         };
+
+        // LDA: 클래스 점수 = x·Coefᵀ + Intercept(앱과 같은 판별식), 확률 = Softmax, 라벨 = ArgMax(첫 최댓값).
+        static Built ExportLda(ModelBundle bundle, LinearDiscriminantModel lda)
+        {
+            int p = lda.FeatureCount, k = lda.ClassCount;
+            if (p != bundle.Features.Count) throw new OnnxNotExportableException("The LDA feature count does not match the bundle.");
+            var proto = NewModel();
+            string x = MaybeScale(proto, bundle, p);
+            var w = new float[p * k]; // [p, K] 행 우선
+            for (int j = 0; j < p; j++)
+                for (int c = 0; c < k; c++) w[j * k + c] = (float)lda.Coef[c, j];
+            var b = new float[k];
+            for (int c = 0; c < k; c++) b[c] = (float)lda.Intercept[c];
+            proto.Tensor("lda_w", new[] { p, k }, w);
+            proto.Tensor("lda_b", new[] { k }, b);
+            proto.Node("", "MatMul", new[] { x, "lda_w" }, new[] { "lda_xw" }, _ => { });
+            proto.Node("", "Add", new[] { "lda_xw", "lda_b" }, new[] { "scores" }, _ => { });
+            proto.Node("", "Softmax", new[] { "scores" }, new[] { "probabilities" }, a => a.Int("axis", 1));
+            proto.Node("", "ArgMax", new[] { "scores" }, new[] { "label" }, a => { a.Int("axis", 1); a.Int("keepdims", 0); });
+            proto.ValueOut("label", Int64Type, -1);
+            proto.ValueOut("probabilities", FloatType, -1, k);
+            return Finish(proto, "LDA as MatMul + Add (class scores), Softmax probabilities, ArgMax label (first maximum). Same discriminant as the app (sklearn svd solver).", new[] { "label", "probabilities" }, "SOFTMAX");
+        }
 
         static Built Glm(ModelBundle bundle, GeneralizedLinearFit glm)
         {

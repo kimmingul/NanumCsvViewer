@@ -173,6 +173,8 @@ else if (mode == "advstats")
     Time("Random forest", () => $"done={NanumCsvViewer.Stats.RandomForest.EvaluateClassification(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
     Time("SVM (RBF, capped)", () => $"done={NanumCsvViewer.Stats.SupportVectorMachine.Evaluate(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
     Time("Gradient boosting", () => $"done={NanumCsvViewer.Stats.GradientBoosting.Evaluate(fm!.X, fm.ClassLabels!, 3) is not null}");
+    Time("AdaBoost (holdout)", () => $"done={NanumCsvViewer.Stats.AdaBoost.EvaluateClassification(fm!.X, fm.ClassLabels!, 3, eval) is not null}");
+    Time("AutoML (classification)", () => $"done={NanumCsvViewer.Stats.AutoMl.Search(fm!.X, fm.ClassLabels!, 3) is not null}");
     Console.WriteLine($"peak working set: {Process.GetCurrentProcess().PeakWorkingSet64 / 1024 / 1024} MiB");
 
     static double Normal(Random r) => Math.Sqrt(-2 * Math.Log(1 - r.NextDouble())) * Math.Cos(2 * Math.PI * r.NextDouble());

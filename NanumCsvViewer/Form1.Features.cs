@@ -89,6 +89,7 @@ namespace NanumCsvViewer
             editToolStripMenuItem.DropDownItems.Add(_gotoRowMenu);
             _advFilterMenu = MakeItem("Advanced Filter…", "고급 필터…", (_, _) => ShowAdvancedFilter());
             editToolStripMenuItem.DropDownItems.Add(_advFilterMenu);
+            BuildEditFeatures();
 
             // View ▸ 컬럼 / 저장된 뷰 / 성능 / 인덱스 캐시
             viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
@@ -298,6 +299,7 @@ namespace NanumCsvViewer
             if (_fieldLabelsToggleButton is not null)
                 _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
             _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
+            LocalizeEditButtons();
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
@@ -330,6 +332,7 @@ namespace NanumCsvViewer
             if (_qualityMenu is not null) _qualityMenu.Enabled = ready;
             if (_advMenu is not null) _advMenu.Enabled = ready;
             if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
+            UpdateEditState();
             // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
             bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
             if (_fieldLabelsMenu is not null) _fieldLabelsMenu.Enabled = labelToggleReady;
@@ -725,7 +728,7 @@ namespace NanumCsvViewer
                     MessageBox.Show(this, ex is AnalysisMemoryLimitException
                         ? LT("The complete analysis data exceeds the memory budget. Filter the rows and retry. No partial result was produced.",
                             "전체 분석 데이터가 메모리 예산을 초과했습니다. 행 필터를 적용한 뒤 다시 시도하세요. 일부 행만 분석한 결과는 생성하지 않았습니다.")
-                        : ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        : Stats.ErrorText.Localize(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }
             finally
@@ -1257,6 +1260,7 @@ namespace NanumCsvViewer
         {
             if (_workbook is null || _busy) return;
             if (index < 0 || index >= _workbook.SheetNames.Count) return;
+            if (index != _currentSheetIndex && !ConfirmDiscardEdits()) return;
             await CancelAndDrainAsync();
             var old = _doc; _doc = null; old?.Dispose();
             ResetView();

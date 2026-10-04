@@ -33,7 +33,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -71,7 +71,7 @@ namespace NanumCsvViewer
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
