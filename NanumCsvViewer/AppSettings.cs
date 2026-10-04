@@ -21,6 +21,16 @@ namespace NanumCsvViewer
         /// <summary>CSV를 닫을 때(다른 파일 열기·종료) 해당 파일의 영속 인덱스 캐시를 삭제할지 여부.</summary>
         public bool DeleteIndexOnClose { get; set; } = false;
 
+        // ---- v2 AI 에이전트
+        /// <summary>omp 실행 파일 경로. 비우면 자동 탐색.</summary>
+        public string? AgentOmpPath { get; set; }
+        /// <summary>omp 명령줄에 덧붙일 인자.</summary>
+        public string? AgentExtraArgs { get; set; }
+        /// <summary>AgentDataPolicy 이름(SummaryOnly | RowsWithApproval | RowsAllowed).</summary>
+        public string AgentDataPolicy { get; set; } = "SummaryOnly";
+        public int AgentMaxRows { get; set; } = 200;
+        public int AgentPanelWidth { get; set; } = 460;
+
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");
         private static string FilePath => Path.Combine(Dir, "settings.json");

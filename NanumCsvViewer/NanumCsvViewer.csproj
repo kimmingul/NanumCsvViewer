@@ -20,12 +20,17 @@
     <AssemblyVersion>1.20.0.0</AssemblyVersion>
     <!-- 릴리즈 날짜: release.ps1이 publish 시 -p:ReleaseDate로 주입. 미지정(dev 빌드)이면 빌드일. -->
     <ReleaseDate Condition="'$(ReleaseDate)' == ''">$([System.DateTime]::Now.ToString("yyyy-MM-dd"))</ReleaseDate>
+    <!-- Microsoft.Web.WebView2는 WinForms 프로젝트에도 Wpf.dll 참조를 가져와 WindowsBase 버전 충돌 경고(MSB3277)가 난다. 동작에는 영향 없음. -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <!-- WebView2 NuGet의 XML 문서 파일(~0.8MB)이 publish 출력·단일 exe에 섞이지 않게 한다. -->
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Curiosity.SPSS" Version="1.3.2" />
     <PackageReference Include="ExcelDataReader" Version="3.9.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="SasReader" Version="1.0.6" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
   </ItemGroup>
@@ -33,6 +38,13 @@
   <ItemGroup>
     <!-- ALGLIB Commercial(순수 C#, 이슈 #27). 소스는 로컬 전용 ExternalLibs/ALGLIB — 단일 exe에 번들된다. -->
     <ProjectReference Include="..\NanumCsvViewer.Alglib\NanumCsvViewer.Alglib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- v2 에이전트 채팅 페이지(RAD Agent에서 이식, MIT). exe에 내장했다가 %LOCALAPPDATA%\NanumCsvViewer\chat\<버전+해시>로 풀어 WebView2에 매핑한다. -->
+    <EmbeddedResource Include="Agent\ChatAssets\**\*" LogicalName="ChatAssets/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <!-- omp append-system-prompt용 에이전트 가이드(OmpProcess가 이름 끝 "AgentGuide.md"로 찾아 읽는다). -->
+    <EmbeddedResource Include="Agent\AgentGuide.md" Condition="Exists('Agent\AgentGuide.md')" />
   </ItemGroup>
 
   <ItemGroup>

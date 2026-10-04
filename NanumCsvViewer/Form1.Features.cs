@@ -90,6 +90,7 @@ namespace NanumCsvViewer
             _advFilterMenu = MakeItem("Advanced Filter…", "고급 필터…", (_, _) => ShowAdvancedFilter());
             editToolStripMenuItem.DropDownItems.Add(_advFilterMenu);
             BuildEditFeatures();
+            BuildAgentFeatures();
 
             // View ▸ 컬럼 / 저장된 뷰 / 성능 / 인덱스 캐시
             viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
@@ -300,6 +301,7 @@ namespace NanumCsvViewer
                 _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
             _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
             LocalizeEditButtons();
+            LocalizeAgentUi();
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
