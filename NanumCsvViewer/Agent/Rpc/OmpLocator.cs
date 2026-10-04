@@ -107,6 +107,17 @@ namespace NanumCsvViewer.Agent.Rpc
         /// <summary>`omp --version`을 실행해 첫 줄을 돌려준다(실패·시간 초과는 null).</summary>
         public static async Task<string?> RunVersionAsync(string exePath, TimeSpan timeout, CancellationToken cancellation = default)
         {
+            string? output = await RunAsync(exePath, new[] { "--version" }, null, timeout, requireSuccess: false, cancellation).ConfigureAwait(false);
+            return output?.Split('\n')[0].Trim();
+        }
+
+        /// <summary>
+        /// omp를 짧은 별도 프로세스로 실행해 표준 출력 전체를 돌려준다(창 없음, stdin 닫음). 시작 실패·시간 초과는 null,
+        /// requireSuccess면 종료 코드가 0이 아닐 때도 null. 호출 스레드를 막지 않는다.
+        /// </summary>
+        public static async Task<string?> RunAsync(string exePath, IReadOnlyList<string> args, string? workingDirectory,
+            TimeSpan timeout, bool requireSuccess = true, CancellationToken cancellation = default)
+        {
             var psi = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
@@ -116,7 +127,8 @@ namespace NanumCsvViewer.Agent.Rpc
                 RedirectStandardInput = true,
                 StandardOutputEncoding = new UTF8Encoding(false),
             };
-            psi.ArgumentList.Add("--version");
+            foreach (string a in args) psi.ArgumentList.Add(a);
+            if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory)) psi.WorkingDirectory = workingDirectory;
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             cts.CancelAfter(timeout);
             Process? p = null;
@@ -129,7 +141,7 @@ namespace NanumCsvViewer.Agent.Rpc
                 string output = await p.StandardOutput.ReadToEndAsync(cts.Token).ConfigureAwait(false);
                 await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
                 try { await err.ConfigureAwait(false); } catch { }
-                return output.Split('\n')[0].Trim();
+                return requireSuccess && p.ExitCode != 0 ? null : output;
             }
             catch (Exception ex) when (ex is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
             {

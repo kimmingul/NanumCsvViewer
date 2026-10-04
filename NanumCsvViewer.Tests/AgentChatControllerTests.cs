@@ -21,6 +21,9 @@ namespace NanumCsvViewer.Tests
         public string VersionText { get; set; } = "omp/18.4.4";
         public string? OmpPath { get; set; } = "C:\\fake\\omp.exe";
         public List<JsonElement> Unhandled { get; } = new();
+        /// <summary>`omp usage` 같은 CLI 호출 가짜. 기본은 실패(null).</summary>
+        public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> Cli { get; set; } =
+            (_, _, _, _) => Task.FromResult<string?>(null);
 
         public ControllerRig(AgentHostOptions? options = null, Action<FakeOmpProcess>? configure = null)
         {
@@ -36,6 +39,7 @@ namespace NanumCsvViewer.Tests
                 LocateOmp = _ => OmpPath,
                 RunVersion = (_, _) => Task.FromResult<string?>(VersionText),
                 ReadGuide = () => "# guide",
+                RunOmpCli = (exe, args, cwd, ct) => Cli(exe, args, cwd, ct),
             };
             Controller = new ChatController(Page, Tools, options ?? new AgentHostOptions(Language: "en", AppVersion: "1.2.3"), services);
             Controller.PageMessageUnhandled += e => { lock (Unhandled) Unhandled.Add(e); };

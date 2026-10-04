@@ -23,6 +23,11 @@ namespace NanumCsvViewer.Agent
             (path, ct) => OmpLocator.RunVersionAsync(path, TimeSpan.FromSeconds(10), ct);
         public bool CheckVersion { get; init; } = true;
         public Func<string?> ReadGuide { get; init; } = OmpLaunch.ReadGuideResource;
+        /// <summary>`omp usage --json` 같은 짧은 CLI 호출: (실행 파일, 인자, 작업 폴더) → 표준 출력, 실패는 null. 10초 제한. UI 스레드를 막지 않는다.</summary>
+        public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> RunOmpCli { get; init; } =
+            (exe, args, cwd, ct) => OmpLocator.RunAsync(exe, args, cwd, TimeSpan.FromSeconds(10), true, ct);
+        /// <summary>omp 세션 저장소 루트(null이면 ~/.omp/agent/sessions).</summary>
+        public string? SessionRoot { get; init; }
     }
 
     /// <summary>
@@ -62,6 +67,7 @@ namespace NanumCsvViewer.Agent
         private long? _abortAt;
         private long _abortTurn;
         private OmpVersion? _ompVersion;
+        private string? _ompExe;
         private int _pageReadyCount;
         private static int s_instances;
         /// <summary>임시 파일 이름 접미사: 첫 인스턴스는 프로세스 id, 이후는 id-순번(같은 프로세스의 인스턴스끼리 충돌 방지).</summary>
@@ -166,11 +172,14 @@ namespace NanumCsvViewer.Agent
 
             try
             {
-                string? exe = _svc.LocateOmp(_options.OmpPath);
+                string? exe = _ompExe = _svc.LocateOmp(_options.OmpPath);
                 if (exe == null)
                 {
                     Fail(T("omp (oh-my-pi) was not found. Install it on PATH or at %LOCALAPPDATA%\\omp\\omp.exe, or set its path in the settings.",
                            "omp(oh-my-pi)를 찾을 수 없습니다. PATH 또는 %LOCALAPPDATA%\\omp\\omp.exe에 설치하거나 설정에서 경로를 지정하세요."));
+                    _page.Post(ChatPageMessages.LinkNotice("info",
+                        T("The AI agent needs omp. The rest of the app works without it.", "AI 에이전트에는 omp가 필요합니다. 나머지 기능은 omp 없이도 그대로 동작합니다."),
+                        T("Install omp", "omp 설치 안내"), "https://github.com/can1357/oh-my-pi"));
                     return;
                 }
                 if (_svc.CheckVersion)

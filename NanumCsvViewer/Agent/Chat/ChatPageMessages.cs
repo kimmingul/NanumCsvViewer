@@ -192,7 +192,16 @@ namespace NanumCsvViewer.Agent.Chat
                 o["items"] = arr;
             });
 
-        public static string Usage(string error) => Build("usage", o => o["error"] = error);
+        /// <summary>사용량 패널: stats = get_session_stats 데이터(컨텍스트·토큰·비용), limits = 요금제 한도(UsageReport.Limits), provider = 표시 이름.</summary>
+        public static string Usage(JsonNode? stats, string provider, bool loading, string error, JsonNode? limits) =>
+            Build("usage", o =>
+            {
+                if (stats != null) o["stats"] = stats.DeepClone();
+                o["provider"] = provider;
+                o["loading"] = loading;
+                o["error"] = error;
+                if (limits != null) o["limits"] = limits.DeepClone();
+            });
 
         public static string Sheet(string title, string markdown) => Build("sheet", o => { o["title"] = title; o["text"] = markdown; });
 

@@ -392,7 +392,7 @@
         <div class="sec-head center reveal">
           <p class="sec-eyebrow" data-i18n="feat.eyebrow">기능</p>
           <h2 class="sec-title" data-i18n="feat.title">읽고, 거르고, 분석하는<br>모든 과정이 한 창 안에.</h2>
-          <p class="sec-lede" data-i18n="feat.lede">대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다.</p>
+          <p class="sec-lede" data-i18n="feat.lede">대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다(AI 에이전트를 켜면 고른 범위만 공유).</p>
         </div>
         <div class="features">
           <article class="card reveal">
@@ -467,6 +467,12 @@
             <p data-i18n="f12.p">적합한 모형을 파일로 저장해 새 데이터에 적용하고, 표준 ONNX(float32/float64)로 내보냅니다. 결과는 HTML·Excel·PDF(한글 폰트 내장, 프린터 불필요) 보고서로 저장합니다.</p>
             <div class="tags"><b data-i18n="f12.t1">모형 적용</b><b data-i18n="f12.t2">ONNX</b><b data-i18n="f12.t3">PDF · Excel</b></div>
           </article>
+          <article class="card reveal">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
+            <h3 data-i18n="f13.h">AI 에이전트 (omp)</h3>
+            <p data-i18n="f13.p">오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·품질 검사·셀 편집. 편집과 저장은 승인 카드로 묻고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.</p>
+            <div class="tags"><b data-i18n="f13.t1">Ctrl+Shift+A</b><b data-i18n="f13.t2">승인 카드</b><b data-i18n="f13.t3">요약만 공유</b></div>
+          </article>
         </div>
       </div>
     </section>
@@ -499,10 +505,10 @@
         <div class="band reveal">
           <div>
             <h2 data-i18n="band.title">당신의 CSV는 PC를 떠나지 않습니다.</h2>
-            <p data-i18n="band.p">로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다.</p>
+            <p data-i18n="band.p">로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다. 선택 기능인 AI 에이전트는 기본값이 "요약만"이라 스키마·집계·분석 결과만 모델로 보내고 원시 셀 값은 보내지 않습니다.</p>
           </div>
           <div class="ministats">
-            <div class="ms"><b>0</b><span data-i18n="band.ms1s">외부 전송 · 네트워크 의존성</span></div>
+            <div class="ms"><b>0</b><span data-i18n="band.ms1s">기본 외부 전송 · 네트워크 의존성(에이전트 끔)</span></div>
             <div class="ms"><b data-i18n="band.ms2b">EV 코드 서명</b><span data-i18n="band.ms2s">설치본·포터블·설치되는 exe 모두 서명·타임스탬프</span></div>
             <div class="ms"><b>.NET 10 · WinForms</b><span data-i18n="band.ms3s">외부 CSV 라이브러리 없이 직접 구현한 엔진</span></div>
           </div>
@@ -589,7 +595,7 @@
         'stat3.cap': { ko: '까지 표시. 적응형 메모리로 파일이 커도 사용량은 일정하게.', en: 'supported. Adaptive memory keeps usage steady no matter the size.' },
         'feat.eyebrow': { ko: '기능', en: 'Features' },
         'feat.title': { ko: '읽고, 거르고, 분석하는<br>모든 과정이 한 창 안에.', en: 'Read, filter, and analyze —<br>all in a single window.' },
-        'feat.lede': { ko: '대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다.', en: 'Every tool for large CSV work, built without external dependencies. Your data never leaves your PC.' },
+        'feat.lede': { ko: '대용량 CSV 작업에 필요한 도구를 외부 의존성 없이 직접 구현했습니다. 데이터는 PC를 떠나지 않습니다(AI 에이전트를 켜면 고른 범위만 공유).', en: 'Every tool for large CSV work, built without external dependencies. Your data never leaves your PC (with the AI agent on, only the scope you choose is shared).' },
         'f1.h': { ko: '대용량 즉시 열람', en: 'Large files, instantly' },
         'f1.p': { ko: '파일 전체를 메모리에 적재하지 않고 보이는 행만 디코딩합니다. 백그라운드 인덱싱 중에도 자유롭게 스크롤하세요.', en: 'Only the visible rows are decoded — the whole file never loads into memory. Scroll freely even while indexing runs in the background.' },
         'f1.t1': { ko: '가상 렌더링', en: 'Virtual rendering' },
@@ -644,13 +650,18 @@
         'f12.t1': { ko: '모형 적용', en: 'Apply models' },
         'f12.t2': { ko: 'ONNX', en: 'ONNX' },
         'f12.t3': { ko: 'PDF · Excel', en: 'PDF · Excel' },
+        'f13.h': { ko: 'AI 에이전트 (omp)', en: 'AI agent (omp)' },
+        'f13.p': { ko: '오른쪽 채팅 패널에 말로 요청하면 에이전트가 지금 열린 창을 직접 조작합니다 — 필터·정렬·통계·회귀·품질 검사·셀 편집. 편집과 저장은 승인 카드로 묻고, 기본 데이터 공유는 "요약만"입니다. 모델은 omp(oh-my-pi)에 설정한 것을 씁니다.', en: 'Ask in the chat panel and the agent operates the open window itself: filter, sort, statistics, regression, quality checks and cell edits. Edits and saves ask for approval, and data sharing defaults to "summary only". It uses the models you configured in omp (oh-my-pi).' },
+        'f13.t1': { ko: 'Ctrl+Shift+A', en: 'Ctrl+Shift+A' },
+        'f13.t2': { ko: '승인 카드', en: 'Approval cards' },
+        'f13.t3': { ko: '요약만 공유', en: 'Summary-only sharing' },
         'piv.eyebrow': { ko: '피벗 빌더', en: 'Pivot builder' },
         'piv.title': { ko: '필드를 끌어다 놓으면<br>표와 차트가 됩니다.', en: 'Assign fields,<br>get a table and a chart.' },
         'piv.lede1': { ko: '행·열·값·필터에 필드를 배정하고 다중 측정값과 날짜 그룹핑, 합계까지. 날짜 차원은 일/주/월/년 주기를, 값은 타입에 맞는 집계 함수를 칩 옆에서 바로 고릅니다.', en: 'Assign fields to Rows, Columns, Values, and Filters — with multiple measures, date grouping, and totals. Pick a day/week/month/year period for date dimensions and a type-aware aggregation for values, right on each chip.' },
         'piv.lede2': { ko: '차트는 <b>외부 라이브러리 없이 GDI+로 직접</b> 그립니다 — 막대·묶은막대·누적·꺾은선, 범례와 호버 툴팁까지. 단일 실행 파일·코드 서명에 영향이 없습니다.', en: 'Charts are drawn <b>directly with GDI+, no external library</b> — bar, grouped, stacked, and line, with legends and hover tooltips. No impact on the single-file build or code signing.' },
         'band.title': { ko: '당신의 CSV는 PC를 떠나지 않습니다.', en: 'Your CSV never leaves your PC.' },
-        'band.p': { ko: '로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다.', en: "It's a local desktop app. It reads only the files you open and builds indexes on your PC — no cloud needed to inspect or analyze your data." },
-        'band.ms1s': { ko: '외부 전송 · 네트워크 의존성', en: 'External transfers · network dependencies' },
+        'band.p': { ko: '로컬 데스크톱 앱입니다. 직접 연 파일만 읽고 인덱스를 PC에 만들 뿐, 데이터를 검사·분석하는 데 어떤 클라우드도 필요하지 않습니다. 선택 기능인 AI 에이전트는 기본값이 "요약만"이라 스키마·집계·분석 결과만 모델로 보내고 원시 셀 값은 보내지 않습니다.', en: "It's a local desktop app. It reads only the files you open and builds indexes on your PC — no cloud needed to inspect or analyze your data. The optional AI agent defaults to \"summary only\": it sends the schema, aggregates and analysis results to the model, never raw cell values." },
+        'band.ms1s': { ko: '기본 외부 전송 · 네트워크 의존성(에이전트 끔)', en: 'Default transfers · network dependencies (agent off)' },
         'band.ms2b': { ko: 'EV 코드 서명', en: 'EV code signing' },
         'band.ms2s': { ko: '설치본·포터블·설치되는 exe 모두 서명·타임스탬프', en: 'Installer, portable, and installed exe — all signed & timestamped' },
         'band.ms3s': { ko: '외부 CSV 라이브러리 없이 직접 구현한 엔진', en: 'Engine built from scratch, with no external CSV library' },

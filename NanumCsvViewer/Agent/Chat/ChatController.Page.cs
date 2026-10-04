@@ -54,7 +54,7 @@ namespace NanumCsvViewer.Agent
                     ShowSubagentLog(msg.Str("id"));
                     break;
                 case "usage":
-                    _page.Post(ChatPageMessages.Usage(T("Usage statistics are not available.", "사용량 정보는 아직 제공되지 않습니다.")));
+                    RequestUsage();
                     break;
                 case "approval":
                     ResolveApproval(msg.Str("id"), msg.Bool("ok") == true);
@@ -414,26 +414,31 @@ namespace NanumCsvViewer.Agent
             });
         }
 
+        /// <summary>
+        /// 세션 선택 창: omp가 이 작업 폴더에 저장한 대화를 최근 순으로, 맨 위에 "새 대화". 고르면 switch_session 뒤 기록을 다시 불러온다.
+        /// </summary>
         private void PickSession()
         {
             if (_client == null || !_connected || IsBusy) return;
-            string? dir = string.IsNullOrEmpty(_sessionFile) ? null : Path.GetDirectoryName(_sessionFile);
-            if (dir == null || !Directory.Exists(dir))
-            {
-                _stream.Emit(ChatPageMessages.Notice("info", T("No saved conversations were found.", "저장된 대화를 찾지 못했습니다.")));
-                return;
-            }
-            var labels = new List<string>();
+            string newLabel = T("+ New conversation", "+ 새 대화");
+            string currentMark = T("  (current)", "  (현재)");
+            var labels = new List<string> { newLabel };
             var paths = new Dictionary<string, string>();
-            foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc).Take(50))
+            string? dir = SessionCatalog.FindDirectory(_sessionFile, _workDir, _svc.SessionRoot);
+            if (dir != null)
             {
-                string label = $"{file.LastWriteTime:yyyy-MM-dd HH:mm}  {SessionTitle(file.FullName)}";
-                if (paths.ContainsKey(label)) label += " · " + Path.GetFileNameWithoutExtension(file.Name);
-                labels.Add(label);
-                paths[label] = file.FullName;
+                foreach (var s in SessionCatalog.List(dir, _sessionFile))
+                {
+                    bool isCurrent = string.Equals(s.Path, _sessionFile, StringComparison.OrdinalIgnoreCase);
+                    string label = SessionCatalog.Label(s, isCurrent, currentMark);
+                    if (paths.ContainsKey(label)) label += " · " + Path.GetFileNameWithoutExtension(s.Path);
+                    labels.Add(label);
+                    paths[label] = s.Path;
+                }
             }
-            string? choice = Dialogs.Select(T("Open a conversation", "대화 열기"), labels);
+            string? choice = Dialogs.Select(T("Conversations", "대화 목록"), labels);
             if (choice == null) return;
+            if (choice == newLabel) { StartNewSession(); return; }
             string path = paths[choice];
             if (string.Equals(path, _sessionFile, StringComparison.OrdinalIgnoreCase)) return;
             Ask("switch_session", o => o["sessionPath"] = path, data =>
@@ -444,30 +449,6 @@ namespace NanumCsvViewer.Agent
                 RequestState();
                 LoadHistory();
             });
-        }
-
-        /// <summary>세션 파일의 첫 사용자 메시지를 제목으로(실패하면 파일 이름).</summary>
-        private static string SessionTitle(string path)
-        {
-            string fallback = Path.GetFileNameWithoutExtension(path);
-            try
-            {
-                using var reader = new StreamReader(path, Encoding.UTF8);
-                for (int i = 0; i < 200; i++)
-                {
-                    string? line = reader.ReadLine();
-                    if (line == null) break;
-                    if (line.Length > 262144 || !line.Contains("\"user\"", StringComparison.Ordinal)) continue;
-                    using var doc = JsonDocument.Parse(line);
-                    var msg = doc.RootElement.Child("message");
-                    if (!msg.IsObject()) msg = doc.RootElement;
-                    if (msg.Str("role") != "user") continue;
-                    string text = AgentEventParser.CollapseWhitespace(msg.Child("content").ContentText());
-                    if (text.Length > 0) return text.Length > 60 ? text[..59] + "…" : text;
-                }
-            }
-            catch { /* 제목은 보기 좋게 하는 용도 */ }
-            return fallback;
         }
 
         /// <summary>get_messages_page를 끝까지 읽어 history 메시지로 보낸다(세션 전환 뒤 화면 복원).</summary>
