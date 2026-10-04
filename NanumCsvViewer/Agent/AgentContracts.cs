@@ -44,4 +44,19 @@ namespace NanumCsvViewer.Agent
         /// <summary>승인 없이 상한까지 행 값 전송.</summary>
         RowsAllowed,
     }
+
+    /// <summary>
+    /// 채팅 페이지(WebView2) 경계. 메시지 형식은 RAD Agent 채팅 페이지와 같다: 객체마다 문자열 필드 "t"가 종류
+    /// (host→page: strings, theme, user, assistantDelta, assistantEnd, toolStart, toolUpdate, toolEnd, status, catalog,
+    /// commands, submitted, notice, approval, approvalResult, thinkingDelta, thinkingEnd, todos, queue, turnEnd, clear, history …;
+    /// page→host: ready, submit, abort, newSession, setModel, setThinking, approval, copy, openUrl, runCommand, cancelQueued …).
+    /// 페이지가 "ready"를 보내기 전에 Post된 메시지는 패널이 쌓아 두었다가 ready 뒤에 순서대로 보낸다.
+    /// </summary>
+    public interface IChatPage
+    {
+        /// <summary>host→page JSON 객체 1개(직렬화된 문자열). UI 스레드에서 호출.</summary>
+        void Post(string json);
+        /// <summary>page→host 메시지. UI 스레드에서 발생.</summary>
+        event Action<JsonElement> Received;
+    }
 }
