@@ -84,7 +84,7 @@ namespace NanumCsvViewer
 
             // Edit ▸ 이동 / 고급 필터
             editToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            _gotoRowMenu = MakeItem("Go to Row…", "행으로 이동…", (_, _) => GoToRow());
+            _gotoRowMenu = MakeItem("Go to Cell…", "셀로 이동…", (_, _) => GoToRow());
             _gotoRowMenu.ShortcutKeys = Keys.Control | Keys.G;
             editToolStripMenuItem.DropDownItems.Add(_gotoRowMenu);
             _advFilterMenu = MakeItem("Advanced Filter…", "고급 필터…", (_, _) => ShowAdvancedFilter());
@@ -1600,16 +1600,13 @@ namespace NanumCsvViewer
         private async void GoToRow()
         {
             if (_doc is null || _doc.DisplayRowCount == 0) return;
-            using var dlg = new ParamDialog(LT("Go to Row", "행으로 이동"), _palette);
-            var input = dlg.AddText(LT("Source row #", "원본 행번호"));
+            using var dlg = new ParamDialog(LT("Go to Cell", "셀로 이동"), _palette);
+            var input = dlg.AddText(LT("Cell (row, R12C3, C3, Name:12)", "셀 (행, R12C3, C3, 이름:12)"));
+            dlg.AddNote(LT("120 = row 120 (row-header number) · R120C3 = row 120, column 3 · C3 = column 3 · Name:120 or [Name]120 = column by name + row",
+                           "120 = 120행(행 머리글 번호) · R120C3 = 120행 3열 · C3 = 3열 · 이름:120 또는 [이름]120 = 컬럼 이름 + 행"));
             if (!dlg.ShowOk(this)) return;
-            if (!long.TryParse(input.Text.Trim(), out long target) || target < 1)
-            {
-                statusLabel.Text = LT("Enter a valid row number", "유효한 행번호를 입력하세요");
-                return;
-            }
-
-            await JumpToSourceRowAsync(target); // 품질 패널 "행 이동"과 공용(이슈 #26)
+            try { await GoToAddressAsync(input.Text); } // 잘못된 입력은 상태 표시줄에 이유를 알린다
+            catch (Exception ex) { statusLabel.Text = ex.Message; }
         }
 
         /// <summary>원본 행번호(1-based)로 그리드 이동. 필터 중이면 뷰맵을 스캔해 찾는다.</summary>

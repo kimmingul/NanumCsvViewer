@@ -174,7 +174,7 @@ UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
 • 툴바 우측의 테마 토글로 밝은/어두운 모드를 전환합니다.
 
 [단축키]
-Ctrl+O 열기 · Ctrl+Q 종료 · Ctrl+F 찾기 · F3 다음 찾기 · Ctrl+G 행으로 이동
+Ctrl+O 열기 · Ctrl+Q 종료 · Ctrl+F 찾기 · F3 다음 찾기 · Ctrl+G 셀로 이동(행 · R12C3 · C3 · 이름:12)
 Ctrl+B 셀 값으로 필터 · Ctrl+Shift+L 필터 해제 · Ctrl+Shift+S 정렬 해제
 F4 상세 패널 · F6 패싯 패널 · F1 이 도움말</value></data>
 </root>

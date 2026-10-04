@@ -11,13 +11,16 @@ namespace NanumCsvViewer.Agent
     /// <param name="DataPolicy">모델로 보낼 수 있는 데이터 범위.</param>
     /// <param name="MaxRowsPerRequest">csv.get_rows 한 번에 돌려주는 행 상한.</param>
     /// <param name="AppVersion">앱 버전(가이드·rpc.log 머리말·/version 표시용).</param>
+    /// <param name="AllowLocalPython">로컬 Python 분석 허용(기본 꺼짐). 켜면 omp 작업 폴더가 분석 결과 폴더가 되고, 에이전트가
+    /// 현재 뷰를 로컬 파일로 내보내 omp eval(Python)로 분석하며 가이드에 Python 절이 추가된다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
         string Language = "ko",
         AgentDataPolicy DataPolicy = AgentDataPolicy.SummaryOnly,
         int MaxRowsPerRequest = 200,
-        string AppVersion = "")
+        string AppVersion = "",
+        bool AllowLocalPython = false)
     {
         public bool IsKorean => !string.Equals(Language, "en", StringComparison.OrdinalIgnoreCase);
     }

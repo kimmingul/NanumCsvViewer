@@ -1,0 +1,11 @@
+/* Standalone Markdown report page (MarkdownViewerForm). Reuses chat.css variables and .markdown-body rules. */
+html, body { height: auto; min-height: 100%; overflow: auto; display: block; }
+body { font-size: calc(var(--fontSize) * 1.08); }
+#doc { max-width: 980px; margin: 0 auto; padding: 18px 28px 64px; }
+#doc h1 { font-size: 1.7em; }
+#doc h2 { font-size: 1.4em; }
+#doc h3 { font-size: 1.15em; }
+#doc table { font-size: 0.95em; }
+#doc .chat-img { max-width: 100%; height: auto; cursor: zoom-in; }
+#doc a.chat-link { color: var(--link); text-decoration: underline; cursor: pointer; }
+#doc .file-ref { color: var(--link); cursor: pointer; border-bottom: 1px dotted var(--link); }

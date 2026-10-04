@@ -357,7 +357,7 @@ namespace NanumCsvViewer
 
         private void BuildColumns(string[] header)
         {
-            cellAddressLabel.Text = "";
+            cellAddressBox.Text = "";
             cellValueTextBox.Text = "";
             grid.Columns.Clear();
             filterColumnCombo.Items.Clear();
@@ -564,7 +564,7 @@ namespace NanumCsvViewer
         {
             if (_doc is null || grid.CurrentCell is null)
             {
-                cellAddressLabel.Text = "";
+                cellAddressBox.Text = "";
                 cellValueTextBox.Text = "";
                 return;
             }
@@ -577,7 +577,7 @@ namespace NanumCsvViewer
                 // TextBox 멀티라인은 CRLF를 줄바꿈으로 인식
                 cellValueTextBox.Text = val.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
                 string colName = c < grid.Columns.Count ? grid.Columns[c].HeaderText : "";
-                cellAddressLabel.Text = Loc.F("CellAddr_Fmt", _doc.GetSourceRowNumber(r).ToString("N0"), colName);
+                if (!cellAddressBox.Focused) cellAddressBox.Text = Loc.F("CellAddr_Fmt", _doc.GetSourceRowNumber(r).ToString("N0"), colName);
             }
             catch (Exception ex) { Debug.WriteLine($"[CurrentCellChanged] {ex}"); }
 

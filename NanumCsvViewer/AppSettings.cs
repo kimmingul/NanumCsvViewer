@@ -30,6 +30,8 @@ namespace NanumCsvViewer
         public string AgentDataPolicy { get; set; } = "SummaryOnly";
         public int AgentMaxRows { get; set; } = 200;
         public int AgentPanelWidth { get; set; } = 460;
+        /// <summary>로컬 Python 분석 허용(기본 꺼짐). 켜면 에이전트가 현재 뷰를 로컬 파일로 내보내 Python(omp eval)으로 분석할 수 있다.</summary>
+        public bool AgentAllowLocalPython { get; set; } = false;
 
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");

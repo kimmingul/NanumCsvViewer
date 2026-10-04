@@ -174,7 +174,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Use the theme toggle at the right of the toolbar to switch light/dark.
 
 [Shortcuts]
-Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Row
+Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Cell (row · R12C3 · C3 · Name:12)
 Ctrl+B Filter by Cell · Ctrl+Shift+L Clear Filter · Ctrl+Shift+S Clear Sort
 F4 Detail Panel · F6 Facets Panel · F1 This help</value></data>
 </root>

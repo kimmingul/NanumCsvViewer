@@ -70,6 +70,13 @@ namespace NanumCsvViewer.Agent.Chat
         public static string LinkNotice(string level, string text, string linkText, string url) =>
             Build("notice", o => { o["level"] = level; o["text"] = text; o["linkText"] = linkText; o["url"] = url; });
 
+        /// <summary>채팅 줄에 그림 썸네일 한 개. url은 결과 폴더 가상 호스트의 주소, path는 열 때 호스트로 돌려보내는 전체 경로.</summary>
+        public static string Image(string url, string name, string path, string? caption) =>
+            Build("image", o => { o["url"] = url; o["name"] = name; o["path"] = path; o["caption"] = caption ?? ""; });
+
+        /// <summary>답변 마크다운의 상대 경로 그림(![제목](a.png))을 풀 주소 기준. 빈 값이면 그림을 글자로만 보인다.</summary>
+        public static string ImageBase(string url) => Build("imageBase", o => o["url"] = url);
+
         public static string ModelNotice(string level, string text, params string[] models) =>
             Build("notice", o =>
             {

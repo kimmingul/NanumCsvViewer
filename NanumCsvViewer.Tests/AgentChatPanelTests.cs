@@ -96,6 +96,51 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public void Assets_ViewerHtmlReferencesOnlyExistingFilesAndReusesTheChatRenderer()
+        {
+            var names = ChatAssetStore.ResourceNames(App).Select(ChatAssetStore.RelativePath).ToHashSet();
+            var html = Text("viewer.html");
+            var refs = Regex.Matches(html, "(?:src|href)=\"([^\"]+)\"").Select(m => m.Groups[1].Value).ToList();
+            Assert.Contains("markdown.js", refs);
+            Assert.Contains("viewer.js", refs);
+            foreach (var r in refs) Assert.Contains(r, names);
+        }
+
+        // ── 결과 폴더 그림(요청 가로채기) ─────────────────────────────────────────
+
+        [Fact]
+        public void OutputPictures_AreServedOnlyFromTheOutputFolder()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ncv-out-" + Guid.NewGuid().ToString("N"));
+            var dir = Path.Combine(root, "a_분석결과");
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(dir, "sub dir"));
+                File.WriteAllBytes(Path.Combine(dir, "fig.png"), new byte[] { 1, 2, 3 });
+                File.WriteAllBytes(Path.Combine(dir, "sub dir", "차트.SVG"), new byte[] { 4 });
+                File.WriteAllText(Path.Combine(dir, "notes.txt"), "x");
+                File.WriteAllBytes(Path.Combine(root, "outside.png"), new byte[] { 9 });
+                var host = "https://" + ChatController.OutputHost + "/";
+
+                var png = AgentChatPanel.ReadOutputPicture(dir, host + "fig.png?v=123");
+                Assert.Equal((200, "image/png"), (png.Status, png.ContentType));
+                Assert.Equal(new byte[] { 1, 2, 3 }, png.Body);
+                var svg = AgentChatPanel.ReadOutputPicture(dir, host + "sub%20dir/" + Uri.EscapeDataString("차트.SVG"));
+                Assert.Equal((200, "image/svg+xml"), (svg.Status, svg.ContentType));
+
+                // 그림이 아닌 파일, 없는 파일, 폴더 밖(인코딩된 ..도 포함), 다른 호스트, 폴더 없음은 모두 404.
+                foreach (var uri in new[]
+                {
+                    host + "notes.txt", host + "missing.png", host + "..%2Foutside.png", host + "%2e%2e%2Foutside.png",
+                    host + "sub%20dir/..%2F..%2Foutside.png", host + "C%3A%5CWindows%5Cwin.ini", "https://example.com/fig.png",
+                })
+                    Assert.Equal(404, AgentChatPanel.ReadOutputPicture(dir, uri).Status);
+                Assert.Equal(404, AgentChatPanel.ReadOutputPicture(null, host + "fig.png").Status);
+            }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        }
+
+        [Fact]
         public void Assets_EveryBrandRuleHasItsSvg()
         {
             var names = ChatAssetStore.ResourceNames(App).Select(ChatAssetStore.RelativePath).ToHashSet();

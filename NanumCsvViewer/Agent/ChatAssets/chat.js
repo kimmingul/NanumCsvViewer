@@ -301,6 +301,29 @@
     scrollToBottom(false);
   }
 
+  // A picture the agent put in front of the user (csv.show_image / PostImage): thumbnail in the log; a click opens the viewer.
+  function handleImage(msg) {
+    if (!msg.url) return;
+    const wasNear = isNearBottom();
+    const fig = document.createElement('figure');
+    fig.className = 'chat-figure';
+    const img = document.createElement('img');
+    img.className = 'chat-img';
+    img.src = msg.url + '?v=' + Date.now();
+    img.alt = msg.name || '';
+    img.title = msg.path || msg.name || '';
+    img.setAttribute('data-path', msg.path || '');
+    img.addEventListener('load', () => handleNewContent(wasNear), { once: true });
+    fig.appendChild(img);
+    const cap = document.createElement('figcaption');
+    cap.textContent = msg.caption || msg.name || '';
+    fig.appendChild(cap);
+    closeAssistantBlock();
+    global.ChatTools.endGroup();
+    ensureAssistantTurn().appendChild(fig);
+    handleNewContent(wasNear);
+  }
+
   function handle(msg) {
     if (!msg || typeof msg !== 'object') return;
     switch (msg.t) {
@@ -335,6 +358,8 @@
       case 'notice': handleNotice(msg.level, msg.text, msg.models, msg); break;
       case 'model': handleModel(msg.model); break;
       case 'turnEnd': handleTurnEnd(msg); break;
+      case 'image': handleImage(msg); break;
+      case 'imageBase': global.Markdown.imageBase = msg.url || ''; break;
       case 'clear': handleClear(); break;
       case 'history': handleHistory(msg.items); break;
       case 'sheet': global.ChatPanels.sheet(msg); break;

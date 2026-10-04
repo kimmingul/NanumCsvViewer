@@ -12,7 +12,7 @@ namespace NanumCsvViewer.Agent
     /// 페이지의 <c>ready</c> 전에 Post된 메시지는 쌓아 두었다가 ready 뒤에 순서대로 보낸다.
     /// WebView2 런타임이 없으면 설치 안내 라벨을 보인다.
     /// </summary>
-    public sealed class AgentChatPanel : UserControl, IChatPage
+    public sealed class AgentChatPanel : UserControl, IChatPage, IChatOutputHost
     {
         private const string PageUrl = "https://" + ChatTheme.HostName + "/chat.html";
         private const string RuntimeInstallUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
@@ -28,6 +28,7 @@ namespace NanumCsvViewer.Agent
         private string? _strings;
         private string? _theme;
         private bool _dark = true;
+        private string? _outputFolder;
 
         public AgentChatPanel()
         {
@@ -94,6 +95,57 @@ namespace NanumCsvViewer.Agent
             Post("{\"t\":\"focusInput\"}");
         }
 
+        // ── 결과 폴더(채팅 안 그림) ───────────────────────────────────────────────
+
+        /// <summary>
+        /// 채팅 페이지가 그림을 읽을 수 있는 폴더(null이면 없음). 페이지의 그림 주소 https://nanumcsv-out.local/&lt;상대 경로&gt;는 네트워크로 가지 않고
+        /// 여기서 가로채 이 폴더 안의 그림 파일만 돌려준다(폴더 밖·그림이 아닌 파일은 404). 폴더는 언제든 바뀔 수 있다.
+        /// (WebView2 가상 호스트 매핑은 페이지를 연 뒤에 추가하면 적용되지 않아 실제 WebView2에서 확인하고 이 방식으로 바꿨다.)
+        /// </summary>
+        public void SetOutputFolder(string? folder)
+        {
+            if (InvokeRequired) { BeginInvoke(() => SetOutputFolder(folder)); return; }
+            _outputFolder = string.IsNullOrWhiteSpace(folder) ? null : folder;
+        }
+
+        private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+        {
+            var core = _web?.CoreWebView2;
+            if (core is null) return;
+            var (status, reason, bytes, type) = ReadOutputPicture(_outputFolder, e.Request.Uri);
+            Stream? body = bytes is null ? null : new MemoryStream(bytes, writable: false);
+            e.Response = core.Environment.CreateWebResourceResponse(body, status, reason,
+                (type is null ? "" : "Content-Type: " + type + "\r\n") + "Cache-Control: no-store");
+        }
+
+        private static readonly Dictionary<string, string> PictureTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg", [".gif"] = "image/gif",
+            [".bmp"] = "image/bmp", [".webp"] = "image/webp", [".svg"] = "image/svg+xml",
+        };
+
+        /// <summary>그림 요청 주소 → (상태, 문구, 본문, 형식). 출력 폴더 안의 그림 파일만 200, 그 밖은 404.</summary>
+        internal static (int Status, string Reason, byte[]? Body, string? ContentType) ReadOutputPicture(string? outputFolder, string requestUri)
+        {
+            const int MaxBytes = 50 * 1024 * 1024;
+            try
+            {
+                if (outputFolder is null || !Uri.TryCreate(requestUri, UriKind.Absolute, out var uri)
+                    || !string.Equals(uri.Host, ChatController.OutputHost, StringComparison.OrdinalIgnoreCase))
+                    return (404, "Not Found", null, null);
+                string relative = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
+                string? full = AgentWorkspace.ResolveInside(outputFolder, relative);
+                if (full is null || !PictureTypes.TryGetValue(Path.GetExtension(full), out var type) || !File.Exists(full))
+                    return (404, "Not Found", null, null);
+                var bytes = ViewerSupport.ReadShared(full, MaxBytes);
+                return bytes is null ? (404, "Not Found", null, null) : (200, "OK", bytes, type);
+            }
+            catch (Exception)
+            {
+                return (404, "Not Found", null, null);
+            }
+        }
+
         // ── 초기화 ─────────────────────────────────────────────────────────────────
 
         protected override void OnHandleCreated(EventArgs e)
@@ -141,6 +193,8 @@ namespace NanumCsvViewer.Agent
                 s.IsGeneralAutofillEnabled = false;
 
                 core.SetVirtualHostNameToFolderMapping(ChatTheme.HostName, assetDir, CoreWebView2HostResourceAccessKind.DenyCors);
+                core.AddWebResourceRequestedFilter("https://" + ChatController.OutputHost + "/*", CoreWebView2WebResourceContext.All);
+                core.WebResourceRequested += OnWebResourceRequested;
                 core.NavigationStarting += OnNavigationStarting;
                 core.NewWindowRequested += OnNewWindowRequested;
                 core.WebMessageReceived += OnWebMessageReceived;

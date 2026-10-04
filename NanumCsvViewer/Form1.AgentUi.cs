@@ -70,7 +70,8 @@ namespace NanumCsvViewer
             Language: Loc.CurrentLanguage == "ko" ? "ko" : "en",
             DataPolicy: Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) ? p : AgentDataPolicy.SummaryOnly,
             MaxRowsPerRequest: Math.Clamp(_settings.AgentMaxRows, 1, 5000),
-            AppVersion: AppInfo.Version);
+            AppVersion: AppInfo.Version,
+            AllowLocalPython: _settings.AgentAllowLocalPython);
 
         private void SetAgentPanelVisible(bool visible)
         {
@@ -133,6 +134,7 @@ namespace NanumCsvViewer
             _agentController = new ChatController(_agentPanel, new CsvHostTools(this, AgentOptions), options);
             _agentController.PageMessageUnhandled += OnAgentPageMessage;
             _agentController.StatusChanged += _ => { };
+            _agentController.SetDataFile(_currentPath);
             _ = _agentController.StartAsync(AgentWorkingDirectory());
             PostAgentContext();
         }
@@ -148,6 +150,7 @@ namespace NanumCsvViewer
         // LoadDocument·편집 변경 시: 채팅 입력창 위 파일 칩.
         private void PostAgentContext()
         {
+            _agentController?.SetDataFile(_currentPath);
             if (_agentPanel is null) return;
             int edits = _doc is null || _doc.Edits.IsEmpty ? 0 : 1;
             _agentPanel.Post(JsonSerializer.Serialize(new
@@ -172,6 +175,7 @@ namespace NanumCsvViewer
                     _agentPanel?.Post(JsonSerializer.Serialize(new { t = "files", items = names }));
                     break;
                 case "openFile":
+                case "openImage":
                     string path = msg.TryGetProperty("path", out var pv) && pv.ValueKind == JsonValueKind.String ? pv.GetString() ?? "" : "";
                     OpenFileFromAgent(path);
                     break;
@@ -179,19 +183,63 @@ namespace NanumCsvViewer
             }
         }
 
+        /// <summary>
+        /// 채팅에서 연 파일 경로를 실제 파일로. 절대 경로는 그대로, 상대 경로는 분석 결과 폴더(로컬 Python이 켜진 때) → 열린 파일의 폴더 순.
+        /// 없으면 null.
+        /// </summary>
+        private string? ResolveAgentFile(string path)
+        {
+            if (Path.IsPathRooted(path)) return File.Exists(path) ? path : null;
+            var bases = new List<string>();
+            if (_agentController?.OutputFolder is { } output) bases.Add(output);
+            bases.Add(AgentWorkingDirectory());
+            foreach (string dir in bases)
+            {
+                string candidate = Path.Combine(dir, path);
+                if (File.Exists(candidate)) return candidate;
+            }
+            return null;
+        }
+
+        private void ShowViewerResult(ViewerShowResult result)
+        {
+            if (!result.Ok) MessageBox.Show(this, result.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         private void OpenFileFromAgent(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
-            string full = Path.IsPathRooted(path) ? path : Path.Combine(AgentWorkingDirectory(), path);
-            if (!File.Exists(full))
+            string? full = ResolveAgentFile(path);
+            if (full == null)
             {
-                MessageBox.Show(this, LT($"File not found: {full}", $"파일을 찾을 수 없습니다: {full}"), Text,
+                MessageBox.Show(this, LT($"File not found: {path}", $"파일을 찾을 수 없습니다: {path}"), Text,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            // 보고서·그림·pdf는 데이터 파일이 아니라 보기 창으로 연다.
+            string ext = Path.GetExtension(full).ToLowerInvariant();
+            if (ext is ".md" or ".markdown") { ShowViewerResult(MarkdownViewerForm.ShowFile(this, full, _palette)); return; }
+            if (AgentWorkspace.IsImageFile(full) || ext == ".pdf") { ShowViewerResult(ImageViewerForm.ShowFile(this, full, _palette)); return; }
             if (string.Equals(Path.GetFullPath(full), _currentPath is null ? null : Path.GetFullPath(_currentPath), StringComparison.OrdinalIgnoreCase))
                 return;
             _ = OpenFileAsync(full);
+        }
+
+        /// <summary>로컬 Python 분석을 켤 때 한 번 보이는 알림. 취소하면 켜지 않는다.</summary>
+        private bool ConfirmLocalPython()
+        {
+            bool summaryOnly = !Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) || p == AgentDataPolicy.SummaryOnly;
+            string text = LT(
+                "Local Python analysis lets the AI agent export the current view to a file in the analysis folder (<file name>_분석결과, next to the data file) and run Python on it on this PC.\n\n" +
+                "Everything a script prints is read by the AI model: the data policy only controls what the app itself sends." +
+                (summaryOnly ? " With 'Summary only' the agent is instructed to print aggregates only, but this cannot be fully enforced for code the agent writes." : "") +
+                "\n\nThe first Python run of each conversation asks for your approval. Turn it on?",
+                "로컬 Python 분석을 켜면 AI 에이전트가 현재 보기를 분석 폴더(데이터 파일 옆의 <파일 이름>_분석결과)에 파일로 내보내 이 PC에서 Python으로 분석할 수 있습니다.\n\n" +
+                "스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. 데이터 정책은 앱이 직접 보내는 내용만 제어합니다." +
+                (summaryOnly ? " '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다." : "") +
+                "\n\n대화마다 첫 Python 실행은 승인을 묻습니다. 켤까요?");
+            return MessageBox.Show(this, text, LT("Local Python analysis", "로컬 Python 분석"),
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
         }
 
         private void ShowAgentSettings()
@@ -206,16 +254,27 @@ namespace NanumCsvViewer
             var maxRows = dlg.AddNumeric(LT("Row limit per request", "요청당 행 상한"), 1, 5000, Math.Clamp(_settings.AgentMaxRows, 1, 5000));
             var ompPath = dlg.AddText(LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"), _settings.AgentOmpPath ?? "");
             var extra = dlg.AddText(LT("Extra omp arguments", "omp 추가 인자"), _settings.AgentExtraArgs ?? "");
+            var localPython = dlg.AddCheckedList(LT("Local Python analysis", "로컬 Python 분석"),
+                new[] { LT("Allow local Python analysis", "로컬 Python 분석 허용") }, 1);
+            localPython.CheckOnClick = true;
+            localPython.SetItemChecked(0, _settings.AgentAllowLocalPython);
+            dlg.AddNote(LT(
+                "When on, the agent may export the current view to a file in the analysis folder (<file name>_분석결과, next to the data file) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
+                "켜면 에이전트가 현재 보기를 분석 폴더(데이터 파일 옆의 <파일 이름>_분석결과)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
             dlg.AddNote(LT(
                 "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits and saves always ask for approval in the chat.",
                 "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집과 저장은 항상 채팅에서 승인을 받습니다."));
             if (!dlg.ShowOk(this)) return;
+
+            bool wantPython = localPython.GetItemChecked(0);
+            if (wantPython && !_settings.AgentAllowLocalPython && !ConfirmLocalPython()) wantPython = false;
 
             string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
             _settings.AgentDataPolicy = ((AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2)).ToString();
             _settings.AgentMaxRows = (int)maxRows.Value;
             _settings.AgentOmpPath = ompPath.Text.Trim();
             _settings.AgentExtraArgs = extra.Text.Trim();
+            _settings.AgentAllowLocalPython = wantPython;
             _settings.Save();
             if (_agentController is null) return;
             _agentController.Options = AgentOptions();

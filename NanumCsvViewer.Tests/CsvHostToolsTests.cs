@@ -12,7 +12,7 @@ namespace NanumCsvViewer.Tests
 {
     // csv.* host tool: 가짜 호스트(메모리 표)로 인자 검증·데이터 정책·승인·편집·저장·기록을, 실제 VirtualCsvDocument로
     // "필터 → 분석" 경로의 숫자를 검증한다. 네트워크·모델 호출 없음.
-    public sealed class CsvHostToolsTests : IDisposable
+    public sealed partial class CsvHostToolsTests : IDisposable
     {
         private readonly string _dir = Path.Combine(Path.GetTempPath(), "csvtools-" + Guid.NewGuid().ToString("N"));
 
@@ -58,6 +58,20 @@ namespace NanumCsvViewer.Tests
             public virtual AgentEditResult ApplyEdits(IReadOnlyList<AgentCellEdit> edits, string description) => throw new NotSupportedException();
             public virtual AgentUndoResult UndoAgentEdit() => throw new NotSupportedException();
             public virtual Task<AgentSaveResult> SaveEditsAsAsync(string fullPath, CancellationToken c) => throw new NotSupportedException();
+            public virtual Task<AgentRowNumbers> GetViewRowNumbersAsync(int cap, CancellationToken c) => throw new NotSupportedException();
+            public virtual AgentStructureResult InsertRows(long rowNumber, int count, string description) => throw new NotSupportedException();
+            public virtual AgentStructureResult DeleteRows(IReadOnlyList<long> rowNumbers, string description) => throw new NotSupportedException();
+            public virtual AgentColumnChange AddColumn(string name, string? fill, string description) => throw new NotSupportedException();
+            public virtual AgentColumnChange DeleteColumn(int column, string description) => throw new NotSupportedException();
+            public virtual IReadOnlyDictionary<string, string> ConditionalFormatProblems() => throw new NotSupportedException();
+            public virtual IReadOnlyList<ConditionalFormatRule> ListConditionalFormats() => throw new NotSupportedException();
+            public virtual ConditionalFormatRule AddConditionalFormat(ConditionalFormatRule draft) => throw new NotSupportedException();
+            public virtual bool RemoveConditionalFormat(string id) => throw new NotSupportedException();
+            public virtual int ClearConditionalFormats() => throw new NotSupportedException();
+            public virtual Task<ConditionalFormatCount> CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken c) => throw new NotSupportedException();
+            public virtual ViewerShowResult ShowMarkdown(string fullPath) => throw new NotSupportedException();
+            public virtual ViewerShowResult ShowImage(string fullPath) => throw new NotSupportedException();
+            public virtual bool PostInlineImage(string fullPath, string? caption) => throw new NotSupportedException();
         }
 
         /// <summary>메모리 표 호스트: 필터·정렬·편집(한 단계씩 쌓이는 이력)·저장 경로를 흉내 낸다.</summary>
@@ -105,8 +119,8 @@ namespace NanumCsvViewer.Tests
             private AgentEditState State()
             {
                 string? top = Steps.Count > 0 ? Steps[^1].Description : null;
-                return new AgentEditState(Overlay.Count, 0, 0, 0, Steps.Count > 0, Steps.Count > 0, top,
-                    top is not null && top.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal), SheetMode);
+                return new AgentEditState(Overlay.Count, 0, DeletedRowCount, AddedRowCount, Steps.Count > 0, Steps.Count > 0, top,
+                    top is not null && top.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal), SheetMode, AddedColumnCount, DeletedColumnCount);
             }
 
             public override AgentDocumentInfo? GetInfo()
@@ -234,6 +248,11 @@ namespace NanumCsvViewer.Tests
                 var (desc, before) = Steps[^1];
                 if (desc is null || !desc.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal))
                     throw new AgentToolException("The latest edit step was not made by the agent.");
+                if (Snapshots.Remove(Steps.Count - 1, out var snap))
+                {
+                    Rows = snap.Rows; Headers = snap.Headers; Types = snap.Types;
+                    View = Enumerable.Range(0, Rows.Count).ToList();
+                }
                 foreach (var (key, old) in before) { if (old is null) Overlay.Remove(key); else Overlay[key] = old; }
                 Steps.RemoveAt(Steps.Count - 1);
                 return new AgentUndoResult(desc[AgentEditTag.Prefix.Length..], State());
@@ -244,11 +263,133 @@ namespace NanumCsvViewer.Tests
                 SavedPath = fullPath;
                 return Task.FromResult(new AgentSaveResult(fullPath, $"{Overlay.Count} cell(s)"));
             }
+
+            // ---- 구조 편집: 한 단계 = 표 스냅샷(되돌리기용). Steps에는 빈 사전 + 설명만 쌓는다.
+            public readonly Dictionary<int, (List<string[]> Rows, string[] Headers, ColumnValueType[] Types)> Snapshots = new();
+            public int AddedRowCount, DeletedRowCount, AddedColumnCount, DeletedColumnCount;
+            public bool NoStructure;
+
+            private void Step(string description)
+            {
+                Snapshots[Steps.Count] = (Rows.Select(r => (string[])r.Clone()).ToList(), (string[])Headers.Clone(), (ColumnValueType[])Types.Clone());
+                Steps.Add((description, new Dictionary<(int, int), string?>()));
+            }
+
+            private AgentStructureResult Done(long first, int count)
+            {
+                View = Enumerable.Range(0, Rows.Count).ToList();
+                return new AgentStructureResult(first, count, Rows.Count, State());
+            }
+
+            public override Task<AgentRowNumbers> GetViewRowNumbersAsync(int cap, CancellationToken c)
+                => Task.FromResult(new AgentRowNumbers(View.Take(cap).Select(i => (long)i + 1).ToList(), View.Count > cap));
+
+            public override AgentStructureResult InsertRows(long rowNumber, int count, string description)
+            {
+                Calls.Add($"insert:{rowNumber}:{count}");
+                Step(description);
+                for (int i = 0; i < count; i++) Rows.Insert((int)rowNumber - 1 + i, new string[Headers.Length].Select(_ => "").ToArray());
+                AddedRowCount += count;
+                return Done(rowNumber, count);
+            }
+
+            public override AgentStructureResult DeleteRows(IReadOnlyList<long> rowNumbers, string description)
+            {
+                Calls.Add("delete:" + string.Join(",", rowNumbers));
+                Step(description);
+                foreach (long r in rowNumbers.OrderByDescending(x => x)) Rows.RemoveAt((int)r - 1);
+                DeletedRowCount += rowNumbers.Count;
+                return Done(0, rowNumbers.Count);
+            }
+
+            public override AgentColumnChange AddColumn(string name, string? fill, string description)
+            {
+                Calls.Add($"addcol:{name}:{fill}");
+                Step(description);
+                Headers = Headers.Append(name).ToArray();
+                Types = Types.Append(ColumnValueType.String).ToArray();
+                for (int i = 0; i < Rows.Count; i++) Rows[i] = Rows[i].Append(fill ?? "").ToArray();
+                AddedColumnCount++;
+                return new AgentColumnChange(Headers.Length - 1, name, Headers.Length, State());
+            }
+
+            public override AgentColumnChange DeleteColumn(int column, string description)
+            {
+                Calls.Add($"delcol:{column}");
+                Step(description);
+                string name = Headers[column];
+                Headers = Headers.Where((_, i) => i != column).ToArray();
+                Types = Types.Where((_, i) => i != column).ToArray();
+                for (int i = 0; i < Rows.Count; i++) Rows[i] = Rows[i].Where((_, k) => k != column).ToArray();
+                DeletedColumnCount++;
+                return new AgentColumnChange(column, name, Headers.Length, State());
+            }
+
+            // ---- 조건부 서식
+            public readonly List<ConditionalFormatRule> Rules = new();
+            private int _nextRule = 1;
+            public bool FailCount;
+
+            public readonly Dictionary<string, string> RuleProblems = new();
+            public override IReadOnlyDictionary<string, string> ConditionalFormatProblems() => RuleProblems;
+            public override IReadOnlyList<ConditionalFormatRule> ListConditionalFormats() => Rules.ToList();
+
+            public override ConditionalFormatRule AddConditionalFormat(ConditionalFormatRule draft)
+            {
+                var rule = draft with { Id = "cf" + _nextRule++ };
+                Rules.Add(rule);
+                return rule;
+            }
+
+            public override bool RemoveConditionalFormat(string id) => Rules.RemoveAll(r => r.Id == id) > 0;
+
+            public override int ClearConditionalFormats() { int n = Rules.Count; Rules.Clear(); return n; }
+
+            public override Task<ConditionalFormatCount> CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken c)
+            {
+                if (FailCount) throw new AgentToolException("The viewer is busy.");
+                var rule = draft ?? Rules.First(r => r.Id == id);
+                if (rule.Kind == ConditionalFormatKind.ColorScale)
+                {
+                    int col = Array.IndexOf(Headers, rule.Column);
+                    long numeric = View.Count(i => double.TryParse(Current(i)[col], out _));
+                    return Task.FromResult(new ConditionalFormatCount(View.Count, numeric, 0));
+                }
+                var pred = AdvancedFilterExpression.Compile(rule.Expression, Headers).Predicate;
+                long hit = View.Count(i => pred(Current(i)));
+                return Task.FromResult(new ConditionalFormatCount(View.Count, hit, 0));
+            }
+
+            // ---- 뷰어
+            public readonly List<string> ShownMarkdown = new(), ShownImages = new();
+            public readonly List<(string Path, string? Caption)> InlinePosts = new();
+            public string? ViewerFailure;
+            public bool InlineOk = true;
+
+            public override ViewerShowResult ShowMarkdown(string fullPath)
+            {
+                if (ViewerFailure is not null) return new ViewerShowResult(false, ViewerFailure);
+                ShownMarkdown.Add(fullPath);
+                return new ViewerShowResult(true, "opened");
+            }
+
+            public override ViewerShowResult ShowImage(string fullPath)
+            {
+                if (ViewerFailure is not null) return new ViewerShowResult(false, ViewerFailure);
+                ShownImages.Add(fullPath);
+                return new ViewerShowResult(true, "opened");
+            }
+
+            public override bool PostInlineImage(string fullPath, string? caption)
+            {
+                InlinePosts.Add((fullPath, caption));
+                return InlineOk;
+            }
         }
 
         private static CsvHostTools Tools(ICsvAgentHost host, AgentDataPolicy policy = AgentDataPolicy.SummaryOnly, int maxRows = 200,
-            IAgentToolLog? log = null, string language = "en")
-            => new(host, () => new AgentHostOptions(Language: language, DataPolicy: policy, MaxRowsPerRequest: maxRows), log ?? new MemoryLog());
+            IAgentToolLog? log = null, string language = "en", bool python = false)
+            => new(host, () => new AgentHostOptions(Language: language, DataPolicy: policy, MaxRowsPerRequest: maxRows, AllowLocalPython: python), log ?? new MemoryLog());
 
         private static Task<HostToolResult> Call(CsvHostTools tools, string tool, string argsJson, IAgentApprovals? approvals = null)
         {
@@ -272,6 +413,9 @@ namespace NanumCsvViewer.Tests
             {
                 "csv.info", "csv.column_stats", "csv.get_rows", "csv.set_filter", "csv.clear_filter", "csv.sort", "csv.goto",
                 "csv.run_analysis", "csv.quality_scan", "csv.edit_cells", "csv.undo", "csv.save_edits_as", "csv.regex_count", "csv.regex_replace",
+                "csv.insert_rows", "csv.delete_rows", "csv.add_column", "csv.delete_column",
+                "csv.format_add", "csv.format_list", "csv.format_remove", "csv.format_clear",
+                "csv.export_view", "csv.show_markdown", "csv.show_image",
             };
             Assert.Equal(expected.OrderBy(x => x), defs.Select(d => d.Name).OrderBy(x => x));
 

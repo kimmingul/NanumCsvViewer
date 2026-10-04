@@ -43,7 +43,14 @@ A tool result that says it was refused, truncated or limited is authoritative: w
 - `csv.edit_cells` changes cell values in a non-destructive edit overlay (the original file is never modified;
   the user can undo with Ctrl+Z). Each call shows the user an approval card with the proposed changes. State the
   reason for the change before calling it, and keep batches reviewable.
-- `csv.undo` reverts your most recent edits (`csv.edit_cells` or `csv.regex_replace`).
+- **Structure edits** use the same overlay, approval card and undo: `csv.insert_rows` (`before_row`, `count`; omit
+  `before_row` to append; new rows are empty — fill them with `csv.edit_cells`), `csv.delete_rows` (exactly one of
+  `rows`, `from`+`to`, or `in_view: true` after a `csv.set_filter`), `csv.add_column` (`name`, optional constant
+  `fill`; appended at the end) and `csv.delete_column`. Deleting rows shifts the later row numbers up and deleting a
+  column shifts the later columns left, so re-read `csv.info` before the next edit and never reuse old row numbers.
+  Each call is ONE undo step. Check what a filter selects (`csv.info`, `csv.regex_count`) before `in_view` deletes.
+- `csv.undo` reverts your most recent edit step (`csv.edit_cells`, `csv.regex_replace`, insert/delete rows,
+  add/delete column). It never undoes the user's own edits.
 - `csv.save_edits_as` writes a **new file** and always requires approval. Never try to overwrite the source file.
 - If the user denies an approval or presses Stop, the tool fails with an error. Do not retry the same change; ask
   what they want instead.
@@ -71,11 +78,71 @@ Patterns are .NET regular expressions, case-insensitive unless `case_sensitive` 
   bounds; in a filter they count as non-matching). Tell the user and simplify the pattern (avoid nested quantifiers
   such as `(a+)+`). An invalid pattern returns an error; fix it rather than retrying unchanged.
 
+## Formatting the view
+
+- `csv.format_add` adds a **conditional-format rule** (view only, no approval; the data and edits are unchanged, and
+  the user can remove it). `kind: "expression"` colours the whole row (`target: "row"`, default) or one column's cell
+  (`target: "cell"` + `column`) where the filter-style expression matches, e.g. `score >= 90`, `status matches "^ERR"`,
+  `[end] < [start]`. Give `back_color` and/or `fore_color` (`#RRGGBB` or a CSS name such as `gold`) and/or `bold`.
+  `kind: "color_scale"` shades a numeric `column` from `scale_min_color` to `scale_max_color` (optional
+  `scale_mid_color`). The result gives the rule `id` and how many rows of the **current view** match; a rule that
+  matches 0 rows usually has a wrong column name or spelling.
+- Earlier rules win per style property; the amber colour of edited cells stays visible. `csv.format_list` shows the
+  rules, `csv.format_remove` removes one by id, `csv.format_clear` removes all. Tell the user what you highlighted and
+  keep the number of rules small (a handful).
+
+## Cursor
+
+`csv.goto` takes `cell` (`120`, `R120C3`, `C3`, `age:120`, `[age]120`, `age:`) or `row` / `column`. Row numbers are the
+numbers in the row header (the same numbers `csv.get_rows` and `csv.edit_cells` use).
+
+## Local Python analysis (only when the user allowed it)
+
+When the app's setting "Allow local Python analysis" is on, you can do analyses the app does not have (pandas,
+statsmodels, scipy, matplotlib, seaborn, ...) with omp's own `eval` Python tool. This section of the guide is a
+general recipe; the data file, the output folder and the current rules are appended at the end of this guide when the
+setting is on. When it is off, `csv.export_view` is refused: do not try other routes to the data file.
+
+1. **Export** the current view: `csv.export_view` (filters, sort, cell edits, inserted/deleted rows and added/deleted
+   columns are applied). It writes `data/<name>.csv` (UTF-8, header row, empty cell = missing) and
+   `data/<name>.schema.json` (column names, inferred types, row count, source file, filter text) into the output
+   folder and returns the paths and counts, **never cell values**. Filter first when only a subset is needed. Read it
+   in Python with `pd.read_csv(path, encoding="utf-8")`, and use the schema for dtypes (dates, categories).
+2. **Keep scripts as `.py` files** in the output folder (write them with the `write` tool, run them from `eval` or
+   `bash`) so the Python language server checks them; fix reported diagnostics before relying on a result. Do not leave
+   throw-away code only inside `eval` cells for anything the user may want to rerun.
+3. **Figures**: save with `plt.savefig("figures/<name>.png", dpi=200, bbox_inches="tight")` (or `.pdf`) into the output
+   folder, never into the source file's folder. Korean text needs a Korean font or it renders as boxes: set
+   `plt.rcParams["font.family"] = "Malgun Gothic"` and `plt.rcParams["axes.unicode_minus"] = False` before plotting
+   (seaborn: call `sns.set_theme(font="Malgun Gothic")` after the theme).
+4. **Report**: write a Markdown file (`<name>_report.md`) in the output folder with the question, the method, the
+   key numbers (tables as Markdown), and figures as relative links (`![](figures/hist.png)`).
+5. **Show** the results: `csv.show_markdown` opens the report, `csv.show_image` opens a figure (PNG/JPG/GIF/BMP/SVG;
+   a PDF opens in the system PDF viewer) and posts a preview in the chat. Both accept only files inside the output
+   folder (or the data file's folder); relative paths resolve against the output folder. Then summarise the finding
+   in the chat in a few sentences.
+
+Rules for Python work:
+
+- **The data policy still applies to what your scripts print.** Script output is read by you, so under *Summary only*
+  print aggregates only (counts, means, model summaries, p-values) — never raw rows, row-level values or identifiers
+  (no `df.head()`, `print(df)`, or `df.loc[...]` dumps). Under *rows with approval* / *rows allowed* print only what the
+  question needs. The app cannot enforce this for script output; you must.
+- Prefer the built-in tools when they can do the job (`csv.run_analysis`, `csv.column_stats`); use Python for what
+  they cannot (non-parametric tests, survival curves, plots, multiple-comparison corrections, custom models).
+- State the assumptions and the number of rows used (and dropped) in the report. Do not report a model result you did
+  not look at.
+- The first `eval` call of a conversation asks the user for approval; later calls in the same conversation run without
+  asking. Keep each script focused and its output short.
+- Never modify the source file; write only into the output folder. Do not install packages without asking the user.
+- `csv.export_view` is a snapshot. After the user edits, filters or you edit again, export again to analyse the new
+  state.
+
 ## Other tools
 
-You also have omp's general tools (`read`, `write`, `bash`, ...) in the folder of the open file. Use them only when the
-user asks for file or shell work; they have their own approval prompts. Do not use them to read the data file around
-the data policy.
+You also have omp's general tools (`read`, `write`, `bash`, ...) in the working folder. Use them only when the
+user asks for file or shell work, or for the Python workflow above; they have their own approval prompts. Do not use
+them to read the data file around the data policy.
 
 ## Style
 

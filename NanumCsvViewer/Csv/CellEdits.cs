@@ -17,7 +17,8 @@ namespace NanumCsvViewer.Csv
         int[] Deleted,
         AddedRow[] Added,
         string[]? AppendedColumns = null,
-        int AppendBase = -1);
+        int AppendBase = -1,
+        int[]? DeletedColumns = null);
 
     /// <summary>
     /// 편집 덮개(overlay). 원본 파일은 절대 바꾸지 않고 다음을 보관한다:
@@ -26,6 +27,9 @@ namespace NanumCsvViewer.Csv
     ///  - 행 삭제 집합 + 추가 행(앵커 기반 위치)
     ///  - 추가 컬럼(정규식 추출 등): 헤더 이름 + (행 id, 컬럼) 셀 값. 값이 비어 있지 않은 셀만 저장하므로 메모리는 O(비어 있지 않은 값)이다.
     ///    추가 컬럼의 번호는 AppendBase(원본 컬럼 수)부터 이어 붙는다. 읽기 경로는 모든 행을 전체 너비로 맞춘다(ExpandRaw).
+    ///  - 컬럼 삭제: "물리 컬럼"(원본 + 추가, 삭제해도 번호가 밀리지 않는 공간)에 삭제 표시만 한다. 읽기 경로(ParseDataRow/헤더)가 삭제된 칸을 걷어내므로
+    ///    문서·그리드·필터·분석·내보내기·저장은 모두 "보이는 컬럼"(삭제 제외)만 본다. 이 클래스의 공개 셀·헤더 API는 보이는 컬럼 번호를 받아
+    ///    내부에서 물리 번호로 바꿔 기록하므로, 뒤에 컬럼을 삭제·복원해도 이력의 되돌리기가 어긋나지 않는다(LIFO).
     /// 모든 변경은 되돌리기/다시 실행 이력에 단계(step)로 쌓인다 — 한 번의 커밋·붙여넣기·삭제 = 한 단계.
     /// </summary>
     public sealed class CellEdits
@@ -45,6 +49,7 @@ namespace NanumCsvViewer.Csv
         private int _baseRows = -1;
         private readonly List<string> _appended = new(); // 추가 컬럼 이름(_gate로 보호)
         private int _appendBase = -1;                     // 첫 추가 컬럼이 놓이는 인덱스 = 원본 컬럼 수
+        private volatile int[] _delCols = Array.Empty<int>(); // 삭제된 물리 컬럼(오름차순, 복사-후-교체라 락 없이 읽는다)
 
         private readonly List<EditStep> _undo = new();
         private readonly List<EditStep> _redo = new();
@@ -62,7 +67,7 @@ namespace NanumCsvViewer.Csv
         public int HeaderEditCount => _headers.Count;
         public int DeletedCount { get { lock (_gate) return _deleted.Count; } }
         public int AddedCount { get { lock (_gate) return _added.Count; } }
-        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits && !HasAppendedColumns;
+        public bool IsEmpty => _cells.IsEmpty && _headers.IsEmpty && !HasStructureEdits && !HasAppendedColumns && !HasDeletedColumns;
 
         /// <summary>행 삭제/추가가 있는가(행 구조가 원본과 다른가).</summary>
         public bool HasStructureEdits { get { lock (_gate) return _deleted.Count > 0 || _added.Count > 0; } }
@@ -71,6 +76,70 @@ namespace NanumCsvViewer.Csv
         public int AppendedColumnCount { get { lock (_gate) return _appended.Count; } }
         public bool HasAppendedColumns { get { lock (_gate) return _appended.Count > 0; } }
 
+        /// <summary>삭제한 컬럼 수 / 있는가.</summary>
+        public int DeletedColumnCount => _delCols.Length;
+        public bool HasDeletedColumns => _delCols.Length > 0;
+
+        /// <summary>삭제된 물리 컬럼 번호(오름차순). 저널·테스트용.</summary>
+        public int[] DeletedColumns() => (int[])_delCols.Clone();
+
+        /// <summary>보이는 컬럼 번호 → 물리 컬럼 번호(삭제된 칸을 건너뜀).</summary>
+        public int ToPhysical(int visibleColumn)
+        {
+            int p = visibleColumn;
+            foreach (int d in _delCols) { if (d <= p) p++; else break; }
+            return p;
+        }
+
+        /// <summary>물리 컬럼 번호 → 보이는 컬럼 번호. 삭제된 컬럼이면 -1.</summary>
+        public int ToVisible(int physicalColumn)
+        {
+            int n = 0;
+            foreach (int d in _delCols)
+            {
+                if (d == physicalColumn) return -1;
+                if (d < physicalColumn) n++; else break;
+            }
+            return physicalColumn - n;
+        }
+
+        /// <summary>물리 너비(원본 + 추가 컬럼). rawColumnCount = 파일의 원본 컬럼 수.</summary>
+        public int PhysicalWidth(int rawColumnCount) { lock (_gate) return rawColumnCount + _appended.Count; }
+
+        /// <summary>보이는 컬럼들의 물리 번호(왼쪽부터). 그리드 컬럼 동기화용.</summary>
+        public int[] VisiblePhysicalColumns(int rawColumnCount)
+        {
+            int width = PhysicalWidth(rawColumnCount);
+            var del = _delCols;
+            var result = new List<int>(Math.Max(0, width - del.Length));
+            int di = 0;
+            for (int p = 0; p < width; p++)
+            {
+                while (di < del.Length && del[di] < p) di++;
+                if (di < del.Length && del[di] == p) continue;
+                result.Add(p);
+            }
+            return result.ToArray();
+        }
+
+        /// <summary>물리 번호의 행에서 삭제된 컬럼 칸을 걷어낸다. 삭제가 없으면 입력 그대로.</summary>
+        public string[] DropDeletedColumns(string[] fields)
+        {
+            var del = _delCols;
+            if (del.Length == 0) return fields;
+            int inRange = 0;
+            foreach (int d in del) { if (d < fields.Length) inRange++; else break; }
+            if (inRange == 0) return fields;
+            var result = new string[fields.Length - inRange];
+            int di = 0, w = 0;
+            for (int i = 0; i < fields.Length; i++)
+            {
+                if (di < del.Length && del[di] == i) { di++; continue; }
+                result[w++] = fields[i];
+            }
+            return result;
+        }
+
         /// <summary>첫 추가 컬럼의 인덱스(= 추가 시점의 원본 컬럼 수). 추가 컬럼이 없으면 -1.</summary>
         public int AppendBase { get { lock (_gate) return _appended.Count > 0 ? _appendBase : -1; } }
 
@@ -78,7 +147,11 @@ namespace NanumCsvViewer.Csv
         public string[] AppendedColumnNames() { lock (_gate) return _appended.ToArray(); }
 
         /// <summary>col이 추가 컬럼의 인덱스인가.</summary>
-        public bool IsAppendedColumn(int col) { lock (_gate) return _appended.Count > 0 && col >= _appendBase && col < _appendBase + _appended.Count; }
+        public bool IsAppendedColumn(int col)
+        {
+            int p = ToPhysical(col);
+            lock (_gate) return _appended.Count > 0 && p >= _appendBase && p < _appendBase + _appended.Count;
+        }
 
         /// <summary>모든 변경에서 증가. 분석 결과 창의 "데이터가 바뀜" 판정과 디바운스용.</summary>
         public long Version { get; private set; }
@@ -90,68 +163,71 @@ namespace NanumCsvViewer.Csv
 
         // ------------------------------------------------------------ 셀
 
-        public bool Contains(int dataRow, int col) => _cells.ContainsKey((dataRow, col));
+        // 공개 셀·헤더 API의 col은 "보이는 컬럼 번호"(삭제 제외). 내부 저장·이력은 물리 번호.
+        public bool Contains(int dataRow, int col) => _cells.ContainsKey((dataRow, ToPhysical(col)));
 
         public bool HasRowEdits(int dataRow) => _rows.ContainsKey(dataRow);
 
-        public bool TryGet(int dataRow, int col, out string value) => _cells.TryGetValue((dataRow, col), out value!);
+        public bool TryGet(int dataRow, int col, out string value) => _cells.TryGetValue((dataRow, ToPhysical(col)), out value!);
 
         /// <summary>편집값 저장. original과 같으면 편집을 제거(되돌림)한다. 같은 값을 다시 넣으면 이력도 남기지 않는다.</summary>
         public void Set(int dataRow, int col, string value, string original)
         {
             if (string.Equals(value, original, StringComparison.Ordinal)) { Revert(dataRow, col); return; }
-            _cells.TryGetValue((dataRow, col), out string? old);
+            int p = ToPhysical(col);
+            _cells.TryGetValue((dataRow, p), out string? old);
             if (old is not null && string.Equals(old, value, StringComparison.Ordinal)) return;
-            Record(new CellChange(dataRow, col, old, value));
+            Record(new CellChange(dataRow, p, old, value));
         }
 
         public void Revert(int dataRow, int col)
         {
-            if (!_cells.TryGetValue((dataRow, col), out string? old)) return;
-            Record(new CellChange(dataRow, col, old, null));
+            int p = ToPhysical(col);
+            if (!_cells.TryGetValue((dataRow, p), out string? old)) return;
+            Record(new CellChange(dataRow, p, old, null));
         }
-
-        /// <summary>편집된 행이면 복사본에 덮어쓴 새 배열(컬럼이 모자라면 확장), 아니면 원본 그대로.</summary>
+        /// <summary>편집된 행이면 복사본에 덮어쓴 새 배열(컬럼이 모자라면 확장), 아니면 원본 그대로. 삭제한 컬럼 칸은 걷어낸다(보이는 컬럼 기준 행).</summary>
         public string[] Apply(int dataRow, string[] fields)
         {
-            if (_rows.IsEmpty || !_rows.TryGetValue(dataRow, out var cols)) return fields;
+            if (_rows.IsEmpty || !_rows.TryGetValue(dataRow, out var cols)) return DropDeletedColumns(fields);
             int width = fields.Length;
             foreach (var kv in cols) if (kv.Key >= width) width = kv.Key + 1;
             var copy = new string[width];
             Array.Copy(fields, copy, fields.Length);
             for (int i = fields.Length; i < width; i++) copy[i] = string.Empty;
             foreach (var kv in cols) copy[kv.Key] = kv.Value;
-            return copy;
+            return DropDeletedColumns(copy);
         }
 
         // ------------------------------------------------------------ 헤더
 
-        public bool TryGetHeader(int col, out string name) => _headers.TryGetValue(col, out name!);
+        public bool TryGetHeader(int col, out string name) => _headers.TryGetValue(ToPhysical(col), out name!);
 
         /// <summary>컬럼 이름 변경. original(파일의 원래 이름)과 같으면 변경을 제거한다.</summary>
         public void SetHeader(int col, string name, string original)
         {
+            int p = ToPhysical(col);
             if (string.Equals(name, original, StringComparison.Ordinal))
             {
-                if (_headers.TryGetValue(col, out string? cur)) Record(new HeaderChange(col, cur, null));
+                if (_headers.TryGetValue(p, out string? cur)) Record(new HeaderChange(p, cur, null));
                 return;
             }
-            _headers.TryGetValue(col, out string? old);
+            _headers.TryGetValue(p, out string? old);
             if (old is not null && string.Equals(old, name, StringComparison.Ordinal)) return;
-            Record(new HeaderChange(col, old, name));
+            Record(new HeaderChange(p, old, name));
         }
 
-        /// <summary>원본 헤더에 추가 컬럼 이름과 이름 변경을 반영한 새 배열(변경이 없으면 원본 그대로).</summary>
+        /// <summary>원본 헤더에 추가 컬럼 이름과 이름 변경을 반영하고 삭제한 컬럼을 뺀 새 배열(변경이 없으면 원본 그대로).</summary>
         public string[] ApplyHeader(string[] raw)
         {
             string[] appended;
             lock (_gate) appended = _appended.ToArray();
-            if (_headers.IsEmpty && appended.Length == 0) return raw;
+            if (_headers.IsEmpty && appended.Length == 0 && _delCols.Length == 0) return raw;
             var copy = new string[raw.Length + appended.Length];
             Array.Copy(raw, copy, raw.Length);
             Array.Copy(appended, 0, copy, raw.Length, appended.Length);
             foreach (var kv in _headers) if (kv.Key >= 0 && kv.Key < copy.Length) copy[kv.Key] = kv.Value;
-            return copy;
+            return DropDeletedColumns(copy);
         }
 
         /// <summary>
@@ -194,7 +270,31 @@ namespace NanumCsvViewer.Csv
                 index = rawColumnCount + _appended.Count;
             }
             using (BeginStep(description)) Record(new ColumnChange(name, rawColumnCount, true));
-            return index;
+            return index - _delCols.Length; // 보이는 컬럼 번호(삭제된 컬럼은 모두 새 컬럼보다 앞)
+        }
+
+        /// <summary>
+        /// 보이는 컬럼 하나를 삭제 표시한다(한 단계, 원본·추가 컬럼 모두). 그 컬럼의 셀 편집·이름 변경은 같은 단계에서 함께 버려지고
+        /// 되돌리기로 모두 복원된다. 남는 컬럼이 없어지게는 못 한다. 삭제한 컬럼의 (원래) 이름을 돌려준다.
+        /// visibleColumnCount = 지금 보이는 컬럼 수, rawColumnCount = 파일의 원본 컬럼 수.
+        /// </summary>
+        public int DeleteColumn(int visibleColumn, int visibleColumnCount, int rawColumnCount, string? description = null)
+        {
+            if (visibleColumn < 0 || visibleColumn >= visibleColumnCount) throw new ArgumentOutOfRangeException(nameof(visibleColumn));
+            if (visibleColumnCount <= 1) throw new InvalidOperationException("The last remaining column cannot be deleted.");
+            int p = ToPhysical(visibleColumn);
+            lock (_gate)
+            {
+                if (_appended.Count > 0 && _appendBase != rawColumnCount) throw new InvalidOperationException("Raw column count changed.");
+            }
+            using (BeginStep(description))
+            {
+                foreach (var kv in _cells.ToArray())
+                    if (kv.Key.Col == p) Record(new CellChange(kv.Key.Row, p, kv.Value, null));
+                if (_headers.TryGetValue(p, out string? name)) Record(new HeaderChange(p, name, null));
+                Record(new ColumnDeleteChange(p, true));
+            }
+            return p;
         }
 
         // ------------------------------------------------------------ 행 구조
@@ -249,7 +349,8 @@ namespace NanumCsvViewer.Csv
                 _baseRows = baseRows;
                 id = baseRows + _added.Count;
             }
-            var values = new string[Math.Max(0, columnCount)];
+            // columnCount = 보이는 컬럼 수. 행 값은 물리 너비(삭제한 컬럼 칸 포함)로 만든다 — 읽기 경로가 삭제된 칸을 걷어낸다.
+            var values = new string[Math.Max(0, columnCount) + _delCols.Length];
             Array.Fill(values, string.Empty);
             using (BeginStep(description)) Record(new RowChange(new AddedRow(anchorId, values), true));
             return id;
@@ -404,6 +505,7 @@ namespace NanumCsvViewer.Csv
                 lock (_gate) { deleted = _deleted.ToArray(); added = _added.ToArray(); }
                 foreach (int id in deleted) Record(new DeleteChange(id, true, false));
                 for (int i = added.Length - 1; i >= 0; i--) Record(new RowChange(added[i], false)); // 뒤에서부터 제거
+                foreach (int d in _delCols) Record(new ColumnDeleteChange(d, false)); // 추가 컬럼을 지우기 전에 삭제 표시를 푼다
                 string[] columns;
                 int appendBase;
                 lock (_gate) { columns = _appended.ToArray(); appendBase = _appendBase; }
@@ -429,7 +531,8 @@ namespace NanumCsvViewer.Csv
                 Array.Sort(deleted);
                 return new EditSnapshot(_baseRows, cells, headers, deleted,
                     _added.Select(a => new AddedRow(a.Anchor, (string[])a.Values.Clone())).ToArray(),
-                    _appended.Count > 0 ? _appended.ToArray() : null, _appended.Count > 0 ? _appendBase : -1);
+                    _appended.Count > 0 ? _appended.ToArray() : null, _appended.Count > 0 ? _appendBase : -1,
+                    _delCols.Length > 0 ? (int[])_delCols.Clone() : null);
             }
         }
 
@@ -465,6 +568,11 @@ namespace NanumCsvViewer.Csv
                     throw new InvalidDataException("Recovery data has a column outside the table.");
             foreach (int id in s.Deleted)
                 if (id < 0 || id >= total) throw new InvalidDataException("Recovery data has an invalid deleted row.");
+            int[] delCols = s.DeletedColumns is { Length: > 0 } dc ? dc.Distinct().OrderBy(x => x).ToArray() : Array.Empty<int>();
+            foreach (int d in delCols)
+                if (d < 0 || d >= columnCount + appendedCount) throw new InvalidDataException("Recovery data has an invalid deleted column.");
+            if (delCols.Length >= columnCount + appendedCount && delCols.Length > 0)
+                throw new InvalidDataException("Recovery data deletes every column.");
 
             lock (_gate)
             {
@@ -474,6 +582,8 @@ namespace NanumCsvViewer.Csv
                 if (s.Added.Length > 0 || s.Deleted.Length > 0) StructureVersion++;
                 if (appendedCount > 0) { _appendBase = columnCount; _appended.AddRange(s.AppendedColumns!); }
             }
+            _delCols = delCols;
+            if (delCols.Length > 0) HeaderVersion++;
             foreach (var (row, col, value) in s.Cells) RawCell(row, col, value);
             foreach (var (col, name) in s.Headers) RawHeader(col, name);
             if (s.Headers.Length > 0 || appendedCount > 0) HeaderVersion++;
@@ -555,6 +665,18 @@ namespace NanumCsvViewer.Csv
             HeaderVersion++;
         }
 
+        private void RawSetColumnDeleted(int physical, bool deleted)
+        {
+            lock (_gate)
+            {
+                var list = new List<int>(_delCols);
+                if (deleted) { if (!list.Contains(physical)) list.Add(physical); } else list.Remove(physical);
+                list.Sort();
+                _delCols = list.ToArray();
+            }
+            HeaderVersion++;
+        }
+
         private abstract class EditChange
         {
             public abstract void Apply(CellEdits e, bool forward);
@@ -593,6 +715,11 @@ namespace NanumCsvViewer.Csv
             {
                 if (forward == added) e.RawAppendColumn(name, rawColumnCount); else e.RawRemoveLastColumn();
             }
+        }
+
+        private sealed class ColumnDeleteChange(int physical, bool deleted) : EditChange
+        {
+            public override void Apply(CellEdits e, bool forward) => e.RawSetColumnDeleted(physical, forward ? deleted : !deleted);
         }
 
         private sealed record EditStep(string? Description, List<EditChange> Changes);

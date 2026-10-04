@@ -15,6 +15,8 @@ namespace NanumCsvViewer.Agent
         private readonly Dictionary<string, string> _approvalByUiId = new();
         private int _approvalCounter;
         private string _lastExtensionStatus = "";
+        /// <summary>Python eval 승인 기억(대화마다 한 번). 새 대화·세션 전환·(재)시작에서 지운다.</summary>
+        private readonly EvalApprovalMemory _evalApproval = new();
 
         // ---- IAgentApprovals -----------------------------------------------------------------------------------
 
@@ -166,7 +168,33 @@ namespace NanumCsvViewer.Agent
                     }
                     var lines = titleLines.Skip(1).ToList();
                     if (message.Length > 0) lines.AddRange(message.Split('\n'));
-                    bool ok = await ApproveCore(first, "", lines.Select(l => l.TrimEnd('\r')).ToList(), CancellationToken.None, id);
+                    // omp 승인 본문은 diff가 아니라 원문(예: 쓸 파일 내용)이다. 카드가 "+ "/"- "로 시작하는 줄을 추가/삭제로 색칠하지 않도록
+                    // 문맥 접두("  ")를 붙여 그대로 보이게 한다(마크다운 목록 "- …"이 빨간 삭제 줄로 보이던 문제).
+                    var cardLines = lines.Select(l => l.TrimEnd('\r'))
+                        .Select(l => l.StartsWith("+ ", StringComparison.Ordinal) || l.StartsWith("- ", StringComparison.Ordinal) ? "  " + l : l)
+                        .ToList();
+
+                    // Python 실행(omp eval, language python)은 대화마다 한 번만 묻는다: 한 번 승인하면 이 대화의 이후 질문은 자동 승인.
+                    if (OmpApprovalPrompt.IsPythonEval(title))
+                    {
+                        if (_evalApproval.Approved)
+                        {
+                            if (!_evalApproval.NoticePosted)
+                            {
+                                _evalApproval.MarkNoticePosted();
+                                _stream.Emit(ChatPageMessages.Notice("info", T("Python run approved (this conversation)", "Python 실행 승인됨(이 대화)")));
+                            }
+                            if (ReferenceEquals(client, _client)) client.Send(RpcProtocol.UiValue(id, approve));
+                            return;
+                        }
+                        bool pyOk = await ApproveCore(first, T("Approving also allows later Python runs in this conversation without asking.",
+                            "승인하면 이 대화의 이후 Python 실행은 다시 묻지 않습니다."), cardLines, CancellationToken.None, id);
+                        if (pyOk && ReferenceEquals(client, _client)) _evalApproval.Remember();
+                        if (ReferenceEquals(client, _client)) client.Send(RpcProtocol.UiValue(id, pyOk ? approve : deny));
+                        return;
+                    }
+
+                    bool ok = await ApproveCore(first, "", cardLines, CancellationToken.None, id);
                     if (ReferenceEquals(client, _client)) client.Send(RpcProtocol.UiValue(id, ok ? approve : deny));
                     return;
                 }

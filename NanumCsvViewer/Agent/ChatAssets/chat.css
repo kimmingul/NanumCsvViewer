@@ -303,3 +303,11 @@ details[open] > .tool-summary::before { transform: rotate(90deg); }
 #scroll-bottom-btn.visible { display: block; }
 #scroll-bottom-btn:hover { filter: brightness(1.1); }
 
+
+/* Pictures: figures the agent shows (csv.show_image) and ![title](x.png) in answers/reports. */
+.markdown-body img { max-width: 100%; height: auto; }
+.chat-img { cursor: zoom-in; border-radius: 6px; border: 1px solid var(--border); background: #fff; }
+.chat-figure { margin: 8px 0; max-width: 100%; }
+.chat-figure img { display: block; max-width: 100%; max-height: 280px; object-fit: contain; }
+.chat-figure figcaption { color: var(--muted); font-size: 0.9em; margin-top: 2px; word-break: break-all; }
+.img-missing { color: var(--muted); font-style: italic; }

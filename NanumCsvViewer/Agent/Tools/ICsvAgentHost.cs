@@ -28,9 +28,13 @@ namespace NanumCsvViewer.Agent.Tools
 
     public sealed record AgentEditState(
         int Cells, int RenamedColumns, int DeletedRows, int AddedRows,
-        bool Unsaved, bool CanUndo, string? UndoDescription, bool AgentCanUndo, bool SheetEditMode)
+        bool Unsaved, bool CanUndo, string? UndoDescription, bool AgentCanUndo, bool SheetEditMode,
+        int AddedColumns = 0, int DeletedColumns = 0)
     {
         public static readonly AgentEditState None = new(0, 0, 0, 0, false, false, null, false, false);
+
+        /// <summary>저장할 편집이 하나라도 있는가(셀·컬럼 이름·행·컬럼 구조).</summary>
+        public bool HasAny => Cells + RenamedColumns + DeletedRows + AddedRows + AddedColumns + DeletedColumns > 0;
     }
 
     public sealed record AgentCursor(long? SourceRow, string? Column);
@@ -98,6 +102,14 @@ namespace NanumCsvViewer.Agent.Tools
     /// <summary>정규식 바꾸기 계획(아직 적용 전). Truncated면 상한을 넘는 변경이 더 있다.</summary>
     public sealed record AgentRegexPlan(IReadOnlyList<AgentRegexChange> Changes, long RowsScanned, long CellsMatched, long CellsTimedOut, bool Truncated);
 
+    public sealed record AgentRowNumbers(IReadOnlyList<long> Rows, bool Truncated);
+
+    /// <summary>구조 편집 결과. FirstRow는 새로 들어간 첫 행 번호(삽입), Count는 영향받은 행 수.</summary>
+    public sealed record AgentStructureResult(long FirstRow, int Count, long TotalRows, AgentEditState State);
+
+    /// <summary>컬럼 추가·삭제 결과. Column은 뷰(변경 후)의 0-based 인덱스(삭제면 삭제 전 인덱스).</summary>
+    public sealed record AgentColumnChange(int Column, string Name, int ColumnCount, AgentEditState State);
+
     public interface ICsvAgentHost
     {
         /// <summary>열린 문서가 없으면 null.</summary>
@@ -144,5 +156,41 @@ namespace NanumCsvViewer.Agent.Tools
 
         /// <summary>편집을 새 파일로 저장(.csv/.tsv/.txt/.xlsx). 경로 정책은 호출자가 이미 검증했다.</summary>
         Task<AgentSaveResult> SaveEditsAsAsync(string fullPath, CancellationToken cancellation);
+
+        // ---- 구조 편집(편집 덮개 한 단계, 시트 편집 모드와 무관). 행 번호는 행 머리글 번호이며 삭제 뒤에는 뒤 행 번호가 당겨진다.
+
+        /// <summary>현재 뷰 행의 행 번호(뷰 순서). cap을 넘으면 Truncated.</summary>
+        Task<AgentRowNumbers> GetViewRowNumbersAsync(int cap, CancellationToken cancellation);
+
+        /// <summary>count개의 빈 행을 넣어 첫 새 행이 rowNumber번 행이 되게 한다(rowNumber = 행 수 + 1이면 맨 끝에 추가).</summary>
+        AgentStructureResult InsertRows(long rowNumber, int count, string description);
+
+        AgentStructureResult DeleteRows(IReadOnlyList<long> rowNumbers, string description);
+
+        /// <summary>맨 끝에 컬럼을 추가한다. fill이 비어 있지 않으면 모든 행에 그 문자열을 채운다.</summary>
+        AgentColumnChange AddColumn(string name, string? fill, string description);
+
+        /// <summary>컬럼 삭제(원본·추가 컬럼 모두). 뒤 컬럼 인덱스가 하나씩 당겨진다.</summary>
+        AgentColumnChange DeleteColumn(int column, string description);
+
+        // ---- 조건부 서식(보기 상태, 되돌리기 이력 없음)
+
+        /// <summary>적용되지 않는 규칙(컬럼이 삭제된 경우 등)의 id → 이유.</summary>
+        IReadOnlyDictionary<string, string> ConditionalFormatProblems();
+        IReadOnlyList<ConditionalFormatRule> ListConditionalFormats();
+        ConditionalFormatRule AddConditionalFormat(ConditionalFormatRule draft);
+        bool RemoveConditionalFormat(string id);
+        int ClearConditionalFormats();
+
+        /// <summary>현재 뷰에서 규칙(id) 또는 초안이 일치하는 행 수.</summary>
+        Task<ConditionalFormatCount> CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken cancellation);
+
+        // ---- 뷰어 창
+
+        ViewerShowResult ShowMarkdown(string fullPath);
+        ViewerShowResult ShowImage(string fullPath);
+
+        /// <summary>채팅 패널에 이미지 미리보기를 올린다. 실패(파일 없음·출력 폴더 밖·패널 없음)면 false.</summary>
+        bool PostInlineImage(string fullPath, string? caption);
     }
 }

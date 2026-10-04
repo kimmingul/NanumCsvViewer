@@ -66,7 +66,7 @@ namespace NanumCsvViewer
             outerSplit = new SplitContainer();
             splitContainer1 = new SplitContainer();
             cellValueTextBox = new TextBox();
-            cellAddressLabel = new Label();
+            cellAddressBox = new TextBox();
             grid = new DataGridView();
             detailRichText = new RichTextBox();
             detailHeaderLabel = new Label();
@@ -449,7 +449,7 @@ namespace NanumCsvViewer
             // splitContainer1.Panel1
             // 
             splitContainer1.Panel1.Controls.Add(cellValueTextBox);
-            splitContainer1.Panel1.Controls.Add(cellAddressLabel);
+            splitContainer1.Panel1.Controls.Add(cellAddressBox);
             splitContainer1.Panel1MinSize = 22;
             // 
             // splitContainer1.Panel2
@@ -473,17 +473,15 @@ namespace NanumCsvViewer
             cellValueTextBox.Size = new Size(858, 329);
             cellValueTextBox.TabIndex = 0;
             // 
-            // cellAddressLabel
+            // cellAddressBox (Excel 이름 상자처럼 편집 가능: 120 · R120C3 · C3 · 이름:120)
             // 
-            cellAddressLabel.BackColor = SystemColors.Control;
-            cellAddressLabel.BorderStyle = BorderStyle.Fixed3D;
-            cellAddressLabel.Dock = DockStyle.Left;
-            cellAddressLabel.Location = new Point(0, 0);
-            cellAddressLabel.Name = "cellAddressLabel";
-            cellAddressLabel.Padding = new Padding(5, 0, 0, 0);
-            cellAddressLabel.Size = new Size(150, 329);
-            cellAddressLabel.TabIndex = 1;
-            cellAddressLabel.TextAlign = ContentAlignment.MiddleLeft;
+            cellAddressBox.BackColor = SystemColors.Window;
+            cellAddressBox.BorderStyle = BorderStyle.FixedSingle;
+            cellAddressBox.Dock = DockStyle.Left;
+            cellAddressBox.Location = new Point(0, 0);
+            cellAddressBox.Name = "cellAddressBox";
+            cellAddressBox.Size = new Size(190, 23);
+            cellAddressBox.TabIndex = 1;
             // 
             // grid
             // 
@@ -678,7 +676,7 @@ namespace NanumCsvViewer
 
         private SplitContainer outerSplit;
         private SplitContainer splitContainer1;
-        private Label cellAddressLabel;
+        private TextBox cellAddressBox;
         private TextBox cellValueTextBox;
         private Label detailHeaderLabel;
         private RichTextBox detailRichText;

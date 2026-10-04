@@ -6,6 +6,17 @@ namespace NanumCsvViewer.Agent.Tools
     /// </summary>
     internal static class ToolDefinitions
     {
+        public const string InsertRows = "csv.insert_rows";
+        public const string DeleteRows = "csv.delete_rows";
+        public const string AddColumn = "csv.add_column";
+        public const string DeleteColumn = "csv.delete_column";
+        public const string FormatAdd = "csv.format_add";
+        public const string FormatList = "csv.format_list";
+        public const string FormatRemove = "csv.format_remove";
+        public const string FormatClear = "csv.format_clear";
+        public const string ExportView = "csv.export_view";
+        public const string ShowMarkdown = "csv.show_markdown";
+        public const string ShowImage = "csv.show_image";
         public const string Info = "csv.info";
         public const string ColumnStats = "csv.column_stats";
         public const string GetRows = "csv.get_rows";
@@ -73,9 +84,10 @@ namespace NanumCsvViewer.Agent.Tools
                 """),
 
             new HostToolDefinition(Goto,
-                "Move the grid cursor to a row (the number shown in the row header, as in get_rows) and/or column.",
+                "Move the grid cursor to a cell. Give 'cell' (an address like 120, R120C3, C3, age:120, [age]120 or age:) or 'row' (number in the row header, as in get_rows) and/or 'column'.",
                 """
                 {"type":"object","properties":{
+                "cell":{"type":"string","description":"Address: 120 (row), R120C3 (row 120, column 3), C3 (column 3, 1-based), age:120 or [age]120 (column name + row), age: (column only). Not combinable with row/column."},
                 "row":{"type":"integer","minimum":1,"description":"Row number as shown in the row header."},
                 "column":{"type":"string"}
                 },"additionalProperties":false}
@@ -148,8 +160,106 @@ namespace NanumCsvViewer.Agent.Tools
                 },"required":["pattern","replacement","columns"],"additionalProperties":false}
                 """),
 
+            new HostToolDefinition(InsertRows,
+                "Insert empty rows after the user approves. The first new row becomes row 'before_row' (rows below shift down); omit before_row to append at the end. ONE undo step in the edit overlay; the original file is untouched. Fill the new cells with csv.edit_cells.",
+                """
+                {"type":"object","properties":{
+                "before_row":{"type":"integer","minimum":1,"description":"Row number (as in the row header) the first new row takes. Default: append at the end."},
+                "count":{"type":"integer","minimum":1,"maximum":10000,"description":"Rows to insert. Default 1."}
+                },"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(DeleteRows,
+                "Delete rows after the user approves a card listing them. Choose ONE selector: 'rows' (row numbers as in the row header), 'from'+'to' (inclusive range) or in_view:true (every row of the current view, e.g. after csv.set_filter). ONE undo step; later row numbers shift up; the original file is untouched.",
+                """
+                {"type":"object","properties":{
+                "rows":{"type":"array","minItems":1,"maxItems":2000,"items":{"type":"integer","minimum":1},"description":"Row numbers to delete."},
+                "from":{"type":"integer","minimum":1,"description":"First row of an inclusive range."},
+                "to":{"type":"integer","minimum":1,"description":"Last row of the range (default: same as from)."},
+                "in_view":{"type":"boolean","description":"Delete all rows in the current (filtered) view."}
+                },"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(AddColumn,
+                "Append a new column at the end after the user approves. Optionally fill every row with one constant text; set individual cells later with csv.edit_cells. ONE undo step; the original file is untouched; the column is included when the user saves edits.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string","description":"Unique, non-empty column name."},
+                "fill":{"type":"string","description":"Constant text for every row (default: empty cells)."}
+                },"required":["name"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(DeleteColumn,
+                "Delete a column (original or added) after the user approves. It disappears from the grid, filters, analyses and saved files; later column positions shift left. ONE undo step; the original file is untouched.",
+                """
+                {"type":"object","properties":{
+                "column":{"type":"string"}
+                },"required":["column"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(FormatAdd,
+                "Add a conditional-format rule (view only, no approval). kind expression: rows/cells matching a filter expression get colours/bold; color_scale: numeric column gradient. Earlier rules win. Returns rule id and matched rows in the current view.",
+                """
+                {"type":"object","properties":{
+                "kind":{"type":"string","enum":["expression","color_scale"],"description":"Default expression."},
+                "name":{"type":"string","description":"Label shown in the rule list."},
+                "expression":{"type":"string","description":"expression kind: filter syntax as csv.set_filter, e.g. score > 90 or status matches \"^ERR\"."},
+                "target":{"type":"string","enum":["row","cell"],"description":"expression kind: color the whole row (default) or only the cell of 'column'."},
+                "column":{"type":"string","description":"Required for target cell and for color_scale (numeric column)."},
+                "back_color":{"type":"string","description":"#RRGGBB or CSS colour name, e.g. #FFE0E0, gold."},
+                "fore_color":{"type":"string","description":"Text colour, same format."},
+                "bold":{"type":"boolean"},
+                "scale_min_color":{"type":"string","description":"color_scale: colour of the minimum (default #63BE7B)."},
+                "scale_mid_color":{"type":"string","description":"color_scale: optional midpoint colour for a 3-colour scale."},
+                "scale_max_color":{"type":"string","description":"color_scale: colour of the maximum (default #F8696B)."}
+                },"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(FormatList,
+                "List the conditional-format rules in priority order (id, name, kind, expression, target, column, colours, enabled).",
+                NoArgs),
+
+            new HostToolDefinition(FormatRemove,
+                "Remove one conditional-format rule by id (see csv.format_list).",
+                """
+                {"type":"object","properties":{
+                "id":{"type":"string"}
+                },"required":["id"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(FormatClear,
+                "Remove all conditional-format rules.",
+                NoArgs),
+
+            new HostToolDefinition(ExportView,
+                "Export the current view (filters, sort, edits, added/deleted columns applied) as UTF-8 CSV plus a .schema.json into <output folder>\\data\\ for local Python analysis. Only when the user enabled local Python analysis. Returns paths and counts, never cell values.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string","description":"File base name (letters, digits, _ - . and Korean). Default <source name>_view."},
+                "columns":{"type":"array","items":{"type":"string"},"maxItems":500,"description":"Columns to include. Default: all."}
+                },"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(ShowMarkdown,
+                "Open a Markdown report (.md) in the app's viewer window for the user. The file must be inside the analysis output folder or the data file's folder. Write reports there with omp's write tool; reference figures by relative path.",
+                """
+                {"type":"object","properties":{
+                "path":{"type":"string","description":"Path to the .md file (relative paths resolve against the output folder)."}
+                },"required":["path"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(ShowImage,
+                "Show a figure (.png .jpg .jpeg .gif .bmp .svg) in the app's image viewer and a preview in the chat; .pdf opens in the system PDF viewer. The file must be inside the analysis output folder or the data file's folder.",
+                """
+                {"type":"object","properties":{
+                "path":{"type":"string","description":"Path to the image/PDF (relative paths resolve against the output folder)."},
+                "caption":{"type":"string","description":"Optional caption for the chat preview."},
+                "inline":{"type":"boolean","description":"Also post a preview in the chat (default true; images only)."}
+                },"required":["path"],"additionalProperties":false}
+                """),
+
             new HostToolDefinition(Undo,
-                "Undo the latest edit step if it was made by csv.edit_cells or csv.regex_replace (the user's own edits are never undone by the agent).",
+                "Undo the latest edit step if it was made by the agent (csv.edit_cells, csv.regex_replace, insert/delete rows, add/delete column); the user's own edits are never undone by the agent.",
                 NoArgs),
 
             new HostToolDefinition(SaveEditsAs,

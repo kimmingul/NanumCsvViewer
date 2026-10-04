@@ -14,9 +14,10 @@
     return escapeHtml(str);
   }
 
-  // Data files the viewer opens (csv/tsv/xlsx/sas7bdat/sav/json ...). Text is HTML-escaped before it gets here,
-  // so '&' and ';' are excluded from names. Groups: 1 absolute path, 2 its :row, 3 relative path, 4 its :row.
-  const FILE_EXT = 'csv|tsv|tab|txt|xlsx|xlsm|xls|sas7bdat|sav|zsav|json|jsonl|ndjson';
+  // Files the app opens when clicked: data files (csv/tsv/xlsx/sas7bdat/sav/json ...), reports (md) and pictures/pdf the agent
+  // writes into the analysis folder. Text is HTML-escaped before it gets here, so '&' and ';' are excluded from names.
+  // Groups: 1 absolute path, 2 its :row, 3 relative path, 4 its :row.
+  const FILE_EXT = 'csv|tsv|tab|txt|xlsx|xlsm|xls|sas7bdat|sav|zsav|json|jsonl|ndjson|md|markdown|png|jpg|jpeg|gif|bmp|webp|svg|pdf';
   const NAME_CH = '[^\\s\\\\/:*?"<>|()&;]';
   const FILE_END = '(?![\\p{L}\\p{N}_]|\\.[\\p{L}\\p{N}])';
   const FILE_REF_RE = new RegExp(
@@ -33,6 +34,30 @@
       const html = `<span class="file-ref" data-path="${path}" data-line="${line}">${match}</span>`;
       return wrap ? wrap(html) : html;
     });
+  }
+
+  // Pictures in answers/reports: ![title](figure.png). Only a relative path to a picture file under Markdown.imageBase
+  // (the analysis folder in the chat, the report's folder in the viewer) is shown. Web URLs, absolute paths and ".." are
+  // never loaded: a model-written answer must not make the page fetch from anywhere else. Anything else renders as [title].
+  const IMG_EXT_RE = /\.(png|jpe?g|gif|bmp|webp|svg)$/i;
+  function resolveImage(src) {
+    const base = Markdown.imageBase;
+    if (!base) return null;
+    let p = String(src).replace(/&amp;/g, '&');
+    try { p = decodeURIComponent(p); } catch (e) { return null; }
+    p = p.replace(/\\/g, '/');
+    if (/^[a-z][a-z0-9+.-]*:/i.test(p) || p.startsWith('/')) return null;
+    const parts = p.split('/').filter(s => s !== '' && s !== '.');
+    if (!parts.length || parts.some(s => s === '..') || !IMG_EXT_RE.test(parts[parts.length - 1])) return null;
+    const rel = parts.join('/');
+    const url = base + parts.map(encodeURIComponent).join('/') + (Markdown.imageVersion ? '?v=' + Markdown.imageVersion : '');
+    return { url, rel };
+  }
+
+  function renderImage(alt, src) {
+    const r = resolveImage(src);
+    if (!r) return `<span class="img-missing">[${alt}]</span>`;
+    return `<img class="chat-img" src="${r.url}" alt="${alt}" data-path="${escapeAttr(r.rel)}" loading="lazy">`;
   }
 
   // Light highlighting for the languages an analysis answer shows: comments, strings, numbers, keywords.
@@ -93,6 +118,9 @@
 
     // 1. Code spans `code`
     text = text.replace(/`([^`]+)`/g, (_, code) => pushPh(`<code>${linkFileRefs(code)}</code>`));
+
+    // 1b. Pictures ![title](figure.png) (before links, which would otherwise swallow the [title](...) part)
+    text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => pushPh(renderImage(alt, src)));
 
     // 2. Markdown links [text](url)
     text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => pushPh(`<a href="#" class="chat-link" data-url="${url}">${label}</a>`));
@@ -310,6 +338,9 @@
   }
 
   const Markdown = {
+    imageBase: '',
+    imageVersion: '',
+    resolveImage,
     escapeHtml,
     escapeAttr,
     linkFileRefs,

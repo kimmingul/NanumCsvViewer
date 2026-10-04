@@ -97,6 +97,7 @@ namespace NanumCsvViewer.Agent
             if (open) _stream.Emit(ChatPageMessages.TurnEnd(startedAt, _clock.UnixMs, stop));
             if (_connected) RequestState();
             RefreshStatus();
+            RunPendingWorkspaceRestart();
         }
 
         private void OnHostToolFinished(HostToolCall call, HostToolResult? result) => RefreshStatus();
@@ -127,6 +128,7 @@ namespace NanumCsvViewer.Agent
             if (id.Length > 0) _model = provider.Length > 0 ? provider + "/" + id : id;
             _thinking = data.Str("thinkingLevel", _thinking);
             _sessionFile = data.Str("sessionFile", _sessionFile);
+            _evalApproval.ObserveSessionFile(_sessionFile);
             _sessionName = data.Str("sessionName");
             var usage = data.Child("contextUsage");
             double percent = usage.Num("percent");

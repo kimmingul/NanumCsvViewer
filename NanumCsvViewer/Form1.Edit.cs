@@ -14,7 +14,8 @@ namespace NanumCsvViewer
     {
         private ToolStripMenuItem? _editCellMenu, _editSheetMenu, _saveEditsMenu, _revertCellMenu, _discardEditsMenu;
         private ToolStripMenuItem? _undoMenu, _redoMenu, _pasteMenu, _clearCellsMenu, _renameColumnMenu,
-            _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, _regexReplaceMenu, _extractColumnMenu;
+            _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, _regexReplaceMenu, _extractColumnMenu,
+            _insertColumnMenu, _deleteColumnMenu;
         private readonly List<ToolStripItem> _editContextItems = new();
         private ToolStripButton? _editCellButton, _editSheetButton;
         private bool _sheetEditing;
@@ -46,6 +47,8 @@ namespace NanumCsvViewer
             _regexReplaceMenu.ShortcutKeys = Keys.Control | Keys.H;
             _extractColumnMenu = MakeItem("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", async (_, _) => await ExtractColumnAsync());
             _renameColumnMenu = MakeItem("Rename Column…", "컬럼 이름 변경…", (_, _) => RenameCurrentColumn());
+            _insertColumnMenu = MakeItem("Insert Column…", "컬럼 삽입…", (_, _) => InsertColumnFromUi());
+            _deleteColumnMenu = MakeItem("Delete Column", "컬럼 삭제", (_, _) => { if (grid.CurrentCell is { ColumnIndex: >= 0 } c) DeleteColumnFromUi(c.ColumnIndex); });
             _insertAboveMenu = MakeItem("Insert Row Above", "위에 행 삽입", (_, _) => InsertRow(above: true));
             _insertBelowMenu = MakeItem("Insert Row Below", "아래에 행 삽입", (_, _) => InsertRow(above: false));
             _deleteRowsMenu = MakeItem("Delete Selected Rows", "선택한 행 삭제", (_, _) => DeleteSelectedRows());
@@ -56,6 +59,7 @@ namespace NanumCsvViewer
                      {
                          _undoMenu, _redoMenu, new ToolStripSeparator(),
                          _editCellMenu, _editSheetMenu, _pasteMenu, _clearCellsMenu, _regexReplaceMenu, _extractColumnMenu, _renameColumnMenu,
+                         _insertColumnMenu, _deleteColumnMenu,
                          _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, new ToolStripSeparator(),
                          _revertCellMenu, _saveEditsMenu, _discardEditsMenu,
                      })
@@ -73,6 +77,8 @@ namespace NanumCsvViewer
                          ("Delete Selected Rows", "선택한 행 삭제", DeleteSelectedRows),
                          ("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", () => _ = RegexReplaceAsync()),
                          ("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", () => _ = ExtractColumnAsync()),
+                         ("Insert Column…", "컬럼 삽입…", InsertColumnFromUi),
+                         ("Delete Column", "컬럼 삭제", () => { if (grid.CurrentCell is { ColumnIndex: >= 0 } c) DeleteColumnFromUi(c.ColumnIndex); }),
                      })
             {
                 var item = MakeItem(en, ko, (_, _) => act());
@@ -99,6 +105,9 @@ namespace NanumCsvViewer
 
             _settleTimer.Tick += async (_, _) => await SettleAfterEditAsync();
             _journalTimer.Tick += (_, _) => FlushJournal();
+            WireAddressBox();
+            BuildFormatFeatures();
+            Shown += (_, _) => grid.CellContextMenuStripNeeded += OnEditHeaderMenuNeeded; // 타입 메뉴(Features)가 만든 뒤에 항목을 덧붙이려면 그 핸들러보다 늦게 연결해야 한다
 
             if (_editWired) return;
             _editWired = true;
@@ -143,6 +152,9 @@ namespace NanumCsvViewer
             if (_regexReplaceMenu is not null) _regexReplaceMenu.Enabled = ready;
             if (_extractColumnMenu is not null) _extractColumnMenu.Enabled = ready;
             if (_renameColumnMenu is not null) _renameColumnMenu.Enabled = sheet && hasCell;
+            if (_insertColumnMenu is not null) _insertColumnMenu.Enabled = sheet;
+            if (_deleteColumnMenu is not null) _deleteColumnMenu.Enabled = sheet && hasCell && _doc!.ColumnCount > 1;
+            UpdateFormatState();
             if (_insertAboveMenu is not null) _insertAboveMenu.Enabled = structure;
             if (_insertBelowMenu is not null) _insertBelowMenu.Enabled = structure;
             if (_deleteRowsMenu is not null) _deleteRowsMenu.Enabled = structure && hasCell;
@@ -238,6 +250,7 @@ namespace NanumCsvViewer
             if (e.DeletedCount > 0) parts.Add(LT($"{e.DeletedCount:N0} deleted row(s)", $"삭제 행 {e.DeletedCount:N0}개"));
             if (e.AddedCount > 0) parts.Add(LT($"{e.AddedCount:N0} added row(s)", $"추가 행 {e.AddedCount:N0}개"));
             if (e.AppendedColumnCount > 0) parts.Add(LT($"{e.AppendedColumnCount:N0} new column(s)", $"새 컬럼 {e.AppendedColumnCount:N0}개"));
+            if (e.DeletedColumnCount > 0) parts.Add(LT($"{e.DeletedColumnCount:N0} deleted column(s)", $"삭제 컬럼 {e.DeletedColumnCount:N0}개"));
             return string.Join(LT(", ", ", "), parts);
         }
 
@@ -405,22 +418,60 @@ namespace NanumCsvViewer
             CommitCellEdit(e.RowIndex, e.ColumnIndex, Convert.ToString(e.Value, System.Globalization.CultureInfo.InvariantCulture) ?? "");
         }
 
-        // 편집된 셀 강조(앰버), 추가한 행은 연한 초록.
+        // 셀 배경 우선순위: 편집한 셀(앰버) > 추가 컬럼 값(연한 파랑) > 삽입 행(연한 초록) > 조건부 서식 규칙. 규칙의 글자색·굵게는 항상 적용(Form1.Format.cs).
         private void OnEditCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
         {
-            if (_doc is null || _doc.Edits.IsEmpty || e.RowIndex < 0 || e.ColumnIndex < 0 || e.CellStyle is null) return;
-            int rowId = _doc.GetRowId(e.RowIndex);
-            if (rowId < 0) return;
-            if (_doc.Edits.IsAppendedColumn(e.ColumnIndex))
+            if (_doc is null || e.RowIndex < 0 || e.ColumnIndex < 0 || e.CellStyle is null) return;
+            var cf = ConditionalFormatFor(_doc, e.RowIndex, e.ColumnIndex);
+            bool systemBack = false;
+            if (!_doc.Edits.IsEmpty)
             {
-                // 정규식 추출 등으로 만든 컬럼: 값이 있는 셀을 "편집됨" 앰버 대신 연한 파랑으로 구분한다.
-                if (_doc.Edits.Contains(rowId, e.ColumnIndex))
-                    e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(28, 58, 92) : Color.FromArgb(214, 232, 250);
+                int rowId = _doc.GetRowId(e.RowIndex);
+                if (rowId >= 0)
+                {
+                    if (_doc.Edits.IsAppendedColumn(e.ColumnIndex))
+                    {
+                        // 정규식 추출 등으로 만든 컬럼: 값이 있는 셀을 "편집됨" 앰버 대신 연한 파랑으로 구분한다.
+                        if (_doc.Edits.Contains(rowId, e.ColumnIndex))
+                        {
+                            e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(28, 58, 92) : Color.FromArgb(214, 232, 250);
+                            systemBack = true;
+                        }
+                    }
+                    else if (_doc.Edits.Contains(rowId, e.ColumnIndex))
+                    {
+                        e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(96, 78, 16) : Color.FromArgb(255, 238, 186);
+                        systemBack = true;
+                    }
+                    else if (rowId >= _doc.BaseRowCount)
+                    {
+                        e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(30, 74, 44) : Color.FromArgb(214, 240, 220);
+                        systemBack = true;
+                    }
+                }
             }
-            else if (_doc.Edits.Contains(rowId, e.ColumnIndex))
-                e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(96, 78, 16) : Color.FromArgb(255, 238, 186);
-            else if (rowId >= _doc.BaseRowCount)
-                e.CellStyle.BackColor = _theme == AppTheme.Dark ? Color.FromArgb(30, 74, 44) : Color.FromArgb(214, 240, 220);
+            if (!cf.IsEmpty) ApplyFormatToCell(e, cf, systemBack);
+        }
+
+        // 헤더 우클릭 메뉴(Features의 타입 메뉴)에 시트 편집 모드의 컬럼 항목을 덧붙인다. 타입 메뉴가 없으면(요약 계산 전) 항목만 있는 메뉴를 만든다.
+        private ContextMenuStrip? _editHeaderMenu;
+
+        private void OnEditHeaderMenuNeeded(object? sender, DataGridViewCellContextMenuStripNeededEventArgs e)
+        {
+            if (e.RowIndex != -1 || e.ColumnIndex < 0 || !_sheetEditing || _doc is null || !_doc.IndexingComplete || _busy) return;
+            var menu = e.ContextMenuStrip;
+            if (menu is null)
+            {
+                _editHeaderMenu?.Dispose();
+                menu = _editHeaderMenu = new ContextMenuStrip();
+                e.ContextMenuStrip = menu;
+            }
+            int col = e.ColumnIndex;
+            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(LT("Rename Column…", "컬럼 이름 변경…"), null, (_, _) => RenameColumn(col));
+            menu.Items.Add(LT("Insert Column…", "컬럼 삽입…"), null, (_, _) => InsertColumnFromUi());
+            var del = menu.Items.Add(LT("Delete Column", "컬럼 삭제"), null, (_, _) => DeleteColumnFromUi(col));
+            del.Enabled = _doc.ColumnCount > 1;
         }
 
         // ---------------------------------------------------------------- 저장

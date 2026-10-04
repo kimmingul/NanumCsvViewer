@@ -100,6 +100,21 @@ namespace NanumCsvViewer.Agent.Tools
             return list;
         }
 
+        public IReadOnlyList<long>? OptIntArray(string name, int maxItems, long min, long max)
+        {
+            if (!TryGet(name, out var v)) return null;
+            if (v.ValueKind != JsonValueKind.Array) throw Bad(name, "an array of integers");
+            var list = new List<long>();
+            foreach (var item in v.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Number || !item.TryGetInt64(out long n)) throw Bad(name, "an array of integers");
+                if (n < min || n > max) throw new AgentToolException($"'{name}' items must be between {min} and {max} (got {n}).");
+                list.Add(n);
+                if (list.Count > maxItems) throw new AgentToolException($"'{name}' has more than {maxItems} items. Use 'from'/'to' for ranges or split the request.");
+            }
+            return list;
+        }
+
         public IReadOnlyList<ToolArgs>? OptObjectArray(string name, int maxItems)
         {
             if (!TryGet(name, out var v)) return null;

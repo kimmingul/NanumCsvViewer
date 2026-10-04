@@ -44,7 +44,7 @@ namespace NanumCsvViewer
             string? what = e.UndoDescription;
             bool agentCanUndo = e.CanUndo && what is not null && what.StartsWith(AgentEditTag.Prefix, StringComparison.Ordinal);
             return new AgentEditState(e.Count, e.HeaderEditCount, e.DeletedCount, e.AddedCount,
-                HasUnsavedEdits, e.CanUndo, what, agentCanUndo, _sheetEditing);
+                HasUnsavedEdits, e.CanUndo, what, agentCanUndo, _sheetEditing, e.AppendedColumnCount, e.DeletedColumnCount);
         }
 
         // ------------------------------------------------------------------ 상태
@@ -609,6 +609,143 @@ namespace NanumCsvViewer
             UpdateFeatureState();
             statusLabel.Text = LT($"Saved edits ({summary}) to {Path.GetFileName(fullPath)}.", $"편집({summary})을 {Path.GetFileName(fullPath)}에 저장했습니다.");
             return new AgentSaveResult(fullPath, summary);
+        }
+
+        // ------------------------------------------------------------------ 구조 편집 (행 삽입·삭제, 컬럼 추가·삭제)
+        //
+        // 실제 편집은 EditFormat 슬라이스의 internal Agent* 메서드(Form1.Edit*.cs)가 하고, 여기서는 호스트 경계에 맞춰
+        // 준비 상태 확인과 예외 변환(ArgumentException/InvalidOperationException → AgentToolException)만 한다.
+
+        private static T AgentGuard<T>(Func<T> action)
+        {
+            try { return action(); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                throw new AgentToolException(ex.Message);
+            }
+        }
+
+        private void AgentRequireNotTyping()
+        {
+            if (grid.IsCurrentCellInEditMode)
+                throw new AgentToolException("The user is typing in a cell right now. Retry after they finish.");
+        }
+
+        async Task<AgentRowNumbers> ICsvAgentHost.GetViewRowNumbersAsync(int cap, CancellationToken cancellation)
+        {
+            AgentRequireReady();
+            var doc = _doc!;
+            int count = doc.DisplayRowCount;
+            var result = await Task.Run(() =>
+            {
+                var list = new List<long>(Math.Min(count, cap));
+                for (int i = 0; i < count; i++)
+                {
+                    if ((i & 0xFFFF) == 0) cancellation.ThrowIfCancellationRequested();
+                    if (list.Count >= cap) return new AgentRowNumbers(list, true);
+                    list.Add(doc.GetSourceRowNumber(i));
+                }
+                return new AgentRowNumbers(list, false);
+            }, cancellation);
+            if (!ReferenceEquals(doc, _doc)) throw new AgentToolException("The file was changed while reading the view. Retry.");
+            return result;
+        }
+
+        AgentStructureResult ICsvAgentHost.InsertRows(long rowNumber, int count, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            long first = AgentGuard(() => AgentInsertRows(rowNumber, count, description));
+            return new AgentStructureResult(first, count, _doc!.DataRowsAvailable, AgentEditStateNow());
+        }
+
+        AgentStructureResult ICsvAgentHost.DeleteRows(IReadOnlyList<long> rowNumbers, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            int deleted = AgentGuard(() => AgentDeleteRows(rowNumbers, description));
+            return new AgentStructureResult(0, deleted, _doc!.DataRowsAvailable, AgentEditStateNow());
+        }
+
+        AgentColumnChange ICsvAgentHost.AddColumn(string name, string? fill, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            int index = AgentGuard(() => AgentAddColumn(name, fill, description));
+            var doc = _doc!;
+            return new AgentColumnChange(index, AdvHeaders()[index], doc.ColumnCount, AgentEditStateNow());
+        }
+
+        AgentColumnChange ICsvAgentHost.DeleteColumn(int column, string description)
+        {
+            AgentRequireReady();
+            AgentRequireNotTyping();
+            string deleted = AgentGuard(() => AgentDeleteColumn(column, description));
+            return new AgentColumnChange(column, deleted, _doc!.ColumnCount, AgentEditStateNow());
+        }
+
+        // ------------------------------------------------------------------ 조건부 서식 (보기 전용)
+
+        IReadOnlyDictionary<string, string> ICsvAgentHost.ConditionalFormatProblems()
+        {
+            AgentAssertUi();
+            return AgentConditionalFormatProblems().ToDictionary(p => p.Id, p => p.Problem);
+        }
+
+        IReadOnlyList<ConditionalFormatRule> ICsvAgentHost.ListConditionalFormats()
+        {
+            AgentAssertUi();
+            return AgentListConditionalFormats();
+        }
+
+        ConditionalFormatRule ICsvAgentHost.AddConditionalFormat(ConditionalFormatRule draft)
+        {
+            AgentRequireReady();
+            return AgentGuard(() => AgentAddConditionalFormat(draft));
+        }
+
+        bool ICsvAgentHost.RemoveConditionalFormat(string id)
+        {
+            AgentAssertUi();
+            return AgentRemoveConditionalFormat(id);
+        }
+
+        int ICsvAgentHost.ClearConditionalFormats()
+        {
+            AgentAssertUi();
+            return AgentClearConditionalFormats();
+        }
+
+        async Task<ConditionalFormatCount> ICsvAgentHost.CountConditionalFormatAsync(string? id, ConditionalFormatRule? draft, CancellationToken cancellation)
+        {
+            AgentRequireReady();
+            try { return await AgentCountConditionalFormatAsync(id, draft, cancellation); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                throw new AgentToolException(ex.Message);
+            }
+        }
+
+        // ------------------------------------------------------------------ 뷰어 창 (Markdown·그림)
+
+        ViewerShowResult ICsvAgentHost.ShowMarkdown(string fullPath)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            return MarkdownViewerForm.ShowFile(this, fullPath, _palette);
+        }
+
+        ViewerShowResult ICsvAgentHost.ShowImage(string fullPath)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            return ImageViewerForm.ShowFile(this, fullPath, _palette);
+        }
+
+        bool ICsvAgentHost.PostInlineImage(string fullPath, string? caption)
+        {
+            AgentAssertUi();
+            return _agentController?.PostImage(fullPath, caption) ?? false;
         }
     }
 }

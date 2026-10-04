@@ -136,12 +136,13 @@ namespace NanumCsvViewer.Agent.Rpc
         public static string HostConfigPath(string tag) => Path.Combine(TempDirectory, $"omp-host-p{tag}.yml");
         public static string GuidePath(string tag) => Path.Combine(TempDirectory, $"agent-guide-p{tag}.md");
 
-        /// <summary>--mode rpc-ui --cwd &lt;dir&gt; --config &lt;yml&gt; [--append-system-prompt &lt;guide&gt;] [extra...]</summary>
-        public static List<string> BuildArguments(string workingDirectory, string? hostConfigPath, string? guidePath, string? extraArgs)
+        /// <summary>--mode rpc-ui --cwd &lt;dir&gt; --config &lt;yml&gt; [--append-system-prompt &lt;guide&gt;] [--resume &lt;session&gt;] [extra...]</summary>
+        public static List<string> BuildArguments(string workingDirectory, string? hostConfigPath, string? guidePath, string? extraArgs, string? resumeSessionPath = null)
         {
             var args = new List<string> { "--mode", "rpc-ui", "--cwd", workingDirectory };
             if (!string.IsNullOrEmpty(hostConfigPath)) { args.Add("--config"); args.Add(hostConfigPath); }
             if (!string.IsNullOrEmpty(guidePath)) { args.Add("--append-system-prompt"); args.Add(guidePath); }
+            if (!string.IsNullOrEmpty(resumeSessionPath)) { args.Add("--resume"); args.Add(resumeSessionPath); }
             args.AddRange(SplitArguments(extraArgs));
             return args;
         }
@@ -179,7 +180,7 @@ namespace NanumCsvViewer.Agent.Rpc
         }
 
         /// <summary>임시 폴더에 host.yml과 가이드를 쓰고 경로를 돌려준다(가이드 없으면 null).</summary>
-        public static (string HostConfig, string? Guide) WriteSupportFiles(string tag, string? guideText, string language)
+        public static (string HostConfig, string? Guide) WriteSupportFiles(string tag, string? guideText, string language, string? extraSection = null)
         {
             Directory.CreateDirectory(TempDirectory);
             PruneStaleFiles();
@@ -192,7 +193,8 @@ namespace NanumCsvViewer.Agent.Rpc
                 string tail = language == "en"
                     ? "\n\nThe app UI language is English (en)."
                     : "\n\n앱 화면 언어는 한국어(ko)입니다.";
-                File.WriteAllText(guide, guideText.TrimEnd() + tail + "\n", new UTF8Encoding(false));
+                string extra = string.IsNullOrWhiteSpace(extraSection) ? "" : "\n\n" + extraSection.Trim();
+                File.WriteAllText(guide, guideText.TrimEnd() + extra + tail + "\n", new UTF8Encoding(false));
             }
             return (host, guide);
         }

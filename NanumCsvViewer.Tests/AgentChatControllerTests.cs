@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NanumCsvViewer.Agent;
 using NanumCsvViewer.Agent.Chat;
+using NanumCsvViewer.Agent.Python;
 using NanumCsvViewer.Agent.Rpc;
 
 namespace NanumCsvViewer.Tests
@@ -25,7 +26,7 @@ namespace NanumCsvViewer.Tests
         public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> Cli { get; set; } =
             (_, _, _, _) => Task.FromResult<string?>(null);
 
-        public ControllerRig(AgentHostOptions? options = null, Action<FakeOmpProcess>? configure = null)
+        public ControllerRig(AgentHostOptions? options = null, Action<FakeOmpProcess>? configure = null, IPythonSetup? python = null, string? dataFile = null)
         {
             Factory.Configure = configure;
             var services = new ChatControllerServices
@@ -40,9 +41,11 @@ namespace NanumCsvViewer.Tests
                 RunVersion = (_, _) => Task.FromResult<string?>(VersionText),
                 ReadGuide = () => "# guide",
                 RunOmpCli = (exe, args, cwd, ct) => Cli(exe, args, cwd, ct),
+                LocalPython = python ?? new FakePythonSetup(),
             };
             Controller = new ChatController(Page, Tools, options ?? new AgentHostOptions(Language: "en", AppVersion: "1.2.3"), services);
             Controller.PageMessageUnhandled += e => { lock (Unhandled) Unhandled.Add(e); };
+            if (dataFile != null) Ui.Invoke(() => Controller.SetDataFile(dataFile));
         }
 
         public FakeOmpProcess Proc => Factory.Last;

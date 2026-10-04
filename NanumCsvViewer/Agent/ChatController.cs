@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NanumCsvViewer.Agent.Chat;
+using NanumCsvViewer.Agent.Python;
 using NanumCsvViewer.Agent.Rpc;
 
 namespace NanumCsvViewer.Agent
@@ -28,6 +29,8 @@ namespace NanumCsvViewer.Agent
             (exe, args, cwd, ct) => OmpLocator.RunAsync(exe, args, cwd, TimeSpan.FromSeconds(10), true, ct);
         /// <summary>omp 세션 저장소 루트(null이면 ~/.omp/agent/sessions).</summary>
         public string? SessionRoot { get; init; }
+        /// <summary>로컬 Python 분석 준비(인터프리터 찾기·도구 환경). 테스트는 가짜로 교체한다.</summary>
+        internal IPythonSetup LocalPython { get; init; } = new PythonSetup();
     }
 
     /// <summary>
@@ -123,6 +126,8 @@ namespace NanumCsvViewer.Agent
                 _options = value;
                 if (languageChanged) PostCommands();
                 RefreshStatus(force: true);
+                // 로컬 Python 켜기/끄기·결과 폴더·데이터 정책이 바뀌면 쉬는 대로(작업 중이면 턴 뒤) 같은 대화로 다시 시작한다.
+                RunPendingWorkspaceRestart();
             }
         }
 
@@ -153,6 +158,7 @@ namespace NanumCsvViewer.Agent
         public void Dispose()
         {
             if (_disposed) return;
+            try { _pythonCts?.Cancel(); } catch { }
             TearDown(force: true);
             _disposed = true;
             _page.Received -= OnPageMessage;
@@ -161,12 +167,17 @@ namespace NanumCsvViewer.Agent
             if (_ownsLog) (_log as IDisposable)?.Dispose();
         }
 
-        private async Task StartCoreAsync(string workingDirectory, string? resumeSession, CancellationToken cancellation)
+        private async Task StartCoreAsync(string workingDirectory, string? resumeSession, CancellationToken cancellation, bool resumeViaCli = false)
         {
             if (_disposed) return;
             TearDown(force: true);
             int launch = ++_launchId;
-            _workDir = Directory.Exists(workingDirectory) ? workingDirectory : Environment.CurrentDirectory;
+            if (!string.IsNullOrEmpty(workingDirectory)) _baseDir = workingDirectory;
+            _workDir = _options.AllowLocalPython
+                ? AgentWorkspace.OutputFolderFor(_dataFile)
+                : Directory.Exists(_baseDir) ? _baseDir : Environment.CurrentDirectory;
+            _launchedDesired = DesiredWorkDir();
+            _evalApproval.Reset();
             SetStatus(T("Connecting to omp…", "omp에 연결하는 중…"), false);
             EnsureTimer();
 
@@ -199,8 +210,13 @@ namespace NanumCsvViewer.Agent
                     _ompVersion = version;
                 }
 
-                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language);
-                var args = OmpLaunch.BuildArguments(_workDir, hostConfig, guide, _options.ExtraArgs);
+                string? pythonSection = await PreparePythonAsync(exe, launch, cancellation);
+                if (launch != _launchId || _disposed) return;
+                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, pythonSection);
+                // 작업 폴더가 바뀐 재시작은 omp가 RPC switch_session을 거절한다(다른 cwd의 세션). 명령줄 --resume은 폴더가 달라도 이어 간다.
+                string? cliResume = resumeViaCli && !string.IsNullOrEmpty(resumeSession) ? resumeSession : null;
+                if (cliResume != null) resumeSession = null;
+                var args = OmpLaunch.BuildArguments(_workDir, hostConfig, guide, _options.ExtraArgs, cliResume);
                 var info = new OmpLaunchInfo(exe, args, _workDir, OmpLaunch.StderrLogPath(_supportTag));
 
                 var client = new OmpRpcClient(_svc.ProcessFactory, _svc.Ui, _log);
@@ -243,19 +259,23 @@ namespace NanumCsvViewer.Agent
                 Fail(T("omp rejected the CSV tools: ", "omp가 CSV 도구 등록을 거절했습니다: ") + reply.Str("error"));
                 return;
             }
-            _connected = true;
             _statusError = false;
-            SetStatus("", false);
             if (!string.IsNullOrEmpty(resumeSession))
             {
+                // 이어받기가 끝나기 전에 입력을 받으면 진행 중인 턴 때문에 omp가 전환을 취소한다(실제 omp로 확인): 끝난 뒤에 연결됨으로 본다.
                 client.TryRequest(id => RpcProtocol.SwitchSession(id, resumeSession), out var switchTask);
                 JsonElement switched = await switchTask;
                 if (launch != _launchId || !ReferenceEquals(client, _client)) return;
                 if (switched.Bool("success") != true)
                     _stream.Emit(ChatPageMessages.Notice("warn", T("Could not resume the previous session: ", "이전 세션을 이어 가지 못했습니다: ") + switched.Str("error")));
+                else if (switched.Child("data").Bool("cancelled") == true)
+                    _stream.Emit(ChatPageMessages.Notice("warn", T("omp did not resume the previous session; this is a new conversation.", "omp가 이전 세션을 이어 가지 않았습니다. 새 대화로 시작합니다.")));
                 RequestState();
             }
+            _connected = true;
+            SetStatus("", false);
             RefreshStatus(force: true);
+            RunPendingWorkspaceRestart();
         }
 
         private void Fail(string message)
@@ -286,8 +306,9 @@ namespace NanumCsvViewer.Agent
         private async Task RestartSessionAsync()
         {
             string? resume = _sessionFile;
+            bool otherFolder = FolderStale();   // 새 작업 폴더로 가는 재시작: 세션은 명령줄로 이어받는다
             if (_activity.Busy) { _activity.NoteStopRequested(); TearDown(force: true); EndTurn(stopped: true); }
-            try { await StartCoreAsync(_workDir, string.IsNullOrEmpty(resume) ? null : resume, default); }
+            try { await StartCoreAsync(_baseDir, string.IsNullOrEmpty(resume) ? null : resume, default, otherFolder); }
             catch (Exception ex) { _log.Note("restart failed: " + ex); }
         }
 
@@ -337,7 +358,7 @@ namespace NanumCsvViewer.Agent
 
         private async Task ResumeAsync(string? resume)
         {
-            try { await StartCoreAsync(_workDir, string.IsNullOrEmpty(resume) ? null : resume, default); }
+            try { await StartCoreAsync(_baseDir, string.IsNullOrEmpty(resume) ? null : resume, default); }
             catch (Exception ex) { _log.Note("resume failed: " + ex); }
         }
 
@@ -480,8 +501,8 @@ namespace NanumCsvViewer.Agent
     /// <summary>임시 폴더의 host.yml·가이드 파일 관리.</summary>
     internal static class SupportFiles
     {
-        public static (string HostConfig, string? Guide) Write(string tag, string? guide, string language) =>
-            OmpLaunch.WriteSupportFiles(tag, guide, language);
+        public static (string HostConfig, string? Guide) Write(string tag, string? guide, string language, string? extraSection = null) =>
+            OmpLaunch.WriteSupportFiles(tag, guide, language, extraSection);
 
         public static void Cleanup(string tag)
         {

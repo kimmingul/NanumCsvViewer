@@ -80,6 +80,7 @@ namespace NanumCsvViewer.Agent
                 _page.Post(ChatPageMessages.Clear());
                 foreach (string json in _stream.Replay()) _page.Post(json);
             }
+            if (_imageBase.Length > 0) _page.Post(ChatPageMessages.ImageBase(_imageBase));
             PostCatalog();
             PostCommands();
             RefreshStatus(force: true);
@@ -255,6 +256,7 @@ namespace NanumCsvViewer.Agent
             return Ask("new_session", null, data =>
             {
                 if (data.Bool("cancelled") == true) return;
+                _evalApproval.Reset();
                 _stream.Clear();
                 _page.Post(ChatPageMessages.Clear());
                 RequestState();
@@ -444,6 +446,7 @@ namespace NanumCsvViewer.Agent
             Ask("switch_session", o => o["sessionPath"] = path, data =>
             {
                 if (data.Bool("cancelled") == true) return;
+                _evalApproval.Reset();
                 _stream.Clear();
                 _page.Post(ChatPageMessages.Clear());
                 RequestState();

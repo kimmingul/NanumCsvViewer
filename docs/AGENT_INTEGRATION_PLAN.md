@@ -85,3 +85,15 @@ NanumCsvViewer.exe
 
 수치 집계(최소·최대·평균·분위수)와 분석 결과(요인 수준 이름 포함)는 정책과 무관하게 보낸다. 도구 기록에는 셀 값을 남기지 않는다.
 - 사용량 팝업(get_session_stats + `omp usage --json`, 60초 캐시)과 세션 목록(omp 세션 폴더, 최신순, 전환 시 기록 재생) 구현. omp가 없으면 설치 안내 링크. README·랜딩 페이지 개인정보 문구 갱신(v2 브랜치, 배포는 master 병합 때).
+
+## 8. 확장 (편집·서식·Python)
+
+- 도구 추가: `csv.insert_rows`, `csv.delete_rows`, `csv.add_column`, `csv.delete_column`(승인, AI 실행 취소 1단계), `csv.goto`(셀 주소),
+  `csv.format_add/list/remove/clear`(조건부 서식, 승인 없음), `csv.regex_count`, `csv.regex_replace`, `csv.export_view`(로컬 Python 허용 시만),
+  `csv.show_markdown`, `csv.show_image`.
+- 로컬 Python: 설정 "로컬 Python 분석 허용"(기본 꺼짐). 켜면 omp `--cwd` = `<파일명>_분석결과`, 데이터는 `data\`로 내보내고 omp `eval`(Python)로 분석.
+  Python `eval`은 대화마다 처음 한 번 승인. 보고서(.md)·그림은 같은 폴더, 보고서 창·그림 창·채팅 미리보기.
+- Python LSP: `%LOCALAPPDATA%\NanumCsvViewer\python-tools\venv`(basedpyright·ruff 고정 버전) + 분석 폴더 `.omp\lsp.json`(절대 경로).
+  omp는 시작할 때만 lsp.json을 읽으므로 첫 설치 뒤 같은 대화로 재시작한다. 작업 폴더가 바뀌면 `--resume`으로 재시작한다.
+- 실제 확인(omp 18.4.4 + 모델): "성별 나이–혈압 산점도+회귀선 PNG, 마크다운 보고서" 요청 → 내보내기·스크립트 작성·Python 실행(승인 1회)·
+  그림·보고서 저장·보고서 창/그림 창/채팅 미리보기. 회귀식(F: 97.6 + 0.54·age, M: 104.5 + 0.50·age, R² 0.56)과 상호작용 p 0.48이 statsmodels와 일치.

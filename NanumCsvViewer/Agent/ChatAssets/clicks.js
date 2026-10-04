@@ -16,6 +16,15 @@
       return;
     }
 
+    // A picture (agent figure or ![title](x.png) in an answer/report): the host opens it in the image viewer.
+    const pic = e.target.closest('.chat-img');
+    if (pic) {
+      e.preventDefault();
+      e.stopPropagation();
+      global.chatPost({ t: 'openImage', path: pic.getAttribute('data-path') || '' });
+      return;
+    }
+
     const copyBtn = e.target.closest('.code-copy-btn');
     if (copyBtn) {
       e.preventDefault();

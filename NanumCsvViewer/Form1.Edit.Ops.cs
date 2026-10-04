@@ -800,55 +800,349 @@ namespace NanumCsvViewer
                 + TimeoutWarning(plan.CellsTimedOut).Replace("\n", " ");
         }
 
+        // 그리드 컬럼의 물리 번호(만들 때 이름을 "col"+물리 번호로 붙인다). 컬럼을 삭제·복원해도 이 번호로 어느 컬럼인지 알 수 있다.
+        private static int PhysicalIdOf(DataGridViewColumn col)
+            => col.Name.StartsWith("col", StringComparison.Ordinal) && int.TryParse(col.Name.AsSpan(3), out int p) ? p : col.Index;
+
         /// <summary>
-        /// 덮개가 컬럼을 추가·제거했으면(추출 · 되돌리기 포함) 그리드 컬럼과 필터 콤보를 문서 헤더 길이에 맞춘다.
-        /// 사라지는 컬럼을 가리키던 정렬·필터·숨김·타입 지정은 함께 정리한다. 바뀌었으면 true.
+        /// 덮개가 컬럼을 추가·삭제·복원했으면(추출 · 삭제 · 되돌리기 포함) 그리드 컬럼과 필터 콤보를 문서 헤더에 맞춘다.
+        /// 컬럼 번호로 보관하는 뷰 상태(정렬·컬럼 필터·숨김·타입 지정·식 필터)는 같은 번호 대응표로 함께 옮기고,
+        /// 사라지는 컬럼을 가리키던 것은 정리한다. 바뀌었으면 true.
         /// </summary>
         private bool SyncGridColumnsWithHeader()
         {
             if (_doc is null) return false;
-            var header = _doc.Header;
-            int want = header.Length;
-            if (grid.Columns.Count == want) return false;
+            var doc = _doc;
+            int want = doc.Header.Length;
+            int[] desired = doc.Edits.VisiblePhysicalColumns(doc.RawColumnCount);
+            if (desired.Length != want) desired = Enumerable.Range(0, want).ToArray();
 
-            if (grid.Columns.Count < want)
-            {
-                for (int i = grid.Columns.Count; i < want; i++)
-                {
-                    string name = string.IsNullOrEmpty(header[i]) ? $"Column{i + 1}" : header[i];
-                    grid.Columns.Add(new DataGridViewTextBoxColumn
-                    {
-                        HeaderText = name, Name = "col" + i, SortMode = DataGridViewColumnSortMode.Programmatic,
-                        Width = 130, Resizable = DataGridViewTriState.True,
-                    });
-                    filterColumnCombo.Items.Add(name);
-                }
-                return true;
-            }
+            var cur = new int[grid.Columns.Count];
+            for (int i = 0; i < cur.Length; i++) cur[i] = PhysicalIdOf(grid.Columns[i]);
+            if (cur.AsSpan().SequenceEqual(desired)) return false;
 
-            int old = grid.Columns.Count;
             if (grid.IsCurrentCellInEditMode) grid.CancelEdit();
-            bool sortRemoved = _sortKeys.RemoveAll(k => k.Column >= want) > 0;
-            for (int c = want; c < old; c++)
+            var map = new int[cur.Length]; // 옛 보이는 번호 → 새 번호(사라지면 -1)
+            bool removedAny = false, shifted = false;
+            for (int i = 0; i < cur.Length; i++)
             {
-                if (_columnFilters.HasFilterFor(c)) _columnFilters.Remove(c);
-                _manualTypeOverrides.Remove(c);
-                _hiddenColumns.Remove(c);
+                map[i] = Array.IndexOf(desired, cur[i]);
+                if (map[i] < 0) removedAny = true;
+                if (map[i] != i) shifted = true;
             }
+
+            int oldComboCol = filterColumnCombo.SelectedIndex - 1;
+            RemapColumnState(map, removedAny, shifted, oldComboCol);
+
             // 현재 셀이 사라질 컬럼에 있으면 먼저 옮긴다(그리드가 컬럼 제거 중 현재 셀을 잃지 않게).
-            if (grid.CurrentCell is { } cur && cur.ColumnIndex >= want && want > 0 && cur.RowIndex >= 0)
+            if (grid.CurrentCell is { RowIndex: >= 0 } at && at.ColumnIndex < map.Length && map[at.ColumnIndex] < 0)
             {
-                try { grid.CurrentCell = grid[want - 1, cur.RowIndex]; } catch { }
+                int target = -1;
+                for (int i = at.ColumnIndex + 1; i < map.Length && target < 0; i++) if (map[i] >= 0) target = i;
+                for (int i = at.ColumnIndex - 1; i >= 0 && target < 0; i--) if (map[i] >= 0) target = i;
+                if (target >= 0) { try { grid.CurrentCell = grid[target, at.RowIndex]; } catch { /* 레이아웃 중 일시 예외 무시 */ } }
             }
-            while (grid.Columns.Count > want) grid.Columns.RemoveAt(grid.Columns.Count - 1);
+
+            for (int i = cur.Length - 1; i >= 0; i--)
+            {
+                if (map[i] >= 0) continue;
+                grid.Columns.RemoveAt(i);
+                if (i + 1 < filterColumnCombo.Items.Count) filterColumnCombo.Items.RemoveAt(i + 1);
+            }
+            for (int j = 0; j < desired.Length; j++)
+            {
+                if (j < grid.Columns.Count && PhysicalIdOf(grid.Columns[j]) == desired[j]) continue;
+                string name = string.IsNullOrEmpty(doc.Header[j]) ? $"Column{j + 1}" : doc.Header[j];
+                var col = new DataGridViewTextBoxColumn
+                {
+                    HeaderText = name, Name = "col" + desired[j], SortMode = DataGridViewColumnSortMode.Programmatic,
+                    Width = 130, Resizable = DataGridViewTriState.True,
+                };
+                if (j >= grid.Columns.Count) grid.Columns.Add(col); else grid.Columns.Insert(j, col);
+                if (j + 1 >= filterColumnCombo.Items.Count) filterColumnCombo.Items.Add(name); else filterColumnCombo.Items.Insert(j + 1, name);
+            }
             while (filterColumnCombo.Items.Count > want + 1) filterColumnCombo.Items.RemoveAt(filterColumnCombo.Items.Count - 1);
-            if (filterColumnCombo.SelectedIndex < 0 || filterColumnCombo.SelectedIndex > want) filterColumnCombo.SelectedIndex = 0;
-            if (sortRemoved)
+            int newCombo = oldComboCol >= 0 && oldComboCol < map.Length && map[oldComboCol] >= 0 ? map[oldComboCol] + 1 : 0;
+            if (filterColumnCombo.SelectedIndex != newCombo) filterColumnCombo.SelectedIndex = newCombo;
+
+            if (_sortDroppedByColumnEdit)
             {
+                _sortDroppedByColumnEdit = false;
                 UpdateSortGlyphs();
-                if (_sortKeys.Count == 0) { _doc.ResetViewOrder(); grid.Invalidate(); }
+                if (_sortKeys.Count == 0) { doc.ResetViewOrder(); grid.Invalidate(); }
             }
+            else if (shifted) UpdateSortGlyphs();
             return true;
+        }
+
+        private bool _sortDroppedByColumnEdit;
+
+        // map[옛 번호] = 새 번호 또는 -1(사라짐). shifted = 번호가 하나라도 달라짐(중간 컬럼 삭제·복원).
+        private void RemapColumnState(int[] map, bool removedAny, bool shifted, int oldComboCol)
+        {
+            int Map(int c) => (uint)c < (uint)map.Length ? map[c] : -1;
+
+            // 정렬 키
+            var keys = _sortKeys.ToArray();
+            _sortKeys.Clear();
+            foreach (var k in keys)
+            {
+                int n = Map(k.Column);
+                if (n < 0) { _sortDroppedByColumnEdit = true; continue; }
+                _sortKeys.Add(new SortKey(n, k.Ascending));
+            }
+
+            // 컬럼 필터(선택값·날짜·숫자·텍스트)
+            _columnFilters.ValueFilters.RemoveAll(f => Map(f.Column) < 0);
+            _columnFilters.DateFilters.RemoveAll(f => Map(f.Column) < 0);
+            _columnFilters.NumericFilters.RemoveAll(f => Map(f.Column) < 0);
+            _columnFilters.TextFilters.RemoveAll(f => Map(f.Column) < 0);
+            foreach (var f in _columnFilters.ValueFilters) f.Column = Map(f.Column);
+            foreach (var f in _columnFilters.DateFilters) f.Column = Map(f.Column);
+            foreach (var f in _columnFilters.NumericFilters) f.Column = Map(f.Column);
+            foreach (var f in _columnFilters.TextFilters) f.Column = Map(f.Column);
+
+            // 수동 타입 지정 · 숨긴 컬럼
+            if (_manualTypeOverrides.Count > 0)
+            {
+                var old = _manualTypeOverrides.ToArray();
+                _manualTypeOverrides.Clear();
+                foreach (var (c, t) in old) if (Map(c) is var n && n >= 0) _manualTypeOverrides[n] = t;
+            }
+            if (_hiddenColumns.Count > 0)
+            {
+                var old = _hiddenColumns.ToArray();
+                _hiddenColumns.Clear();
+                foreach (int c in old) if (Map(c) is var n && n >= 0) _hiddenColumns.Add(n);
+            }
+
+            if (!shifted) return;
+
+            // 툴바 텍스트 필터: 특정 컬럼이면 새 번호로 술어를 다시 만든다(사라진 컬럼이면 해제).
+            if (_textCondition is not null && oldComboCol >= 0)
+            {
+                int n = Map(oldComboCol);
+                if (n >= 0) _textCondition = BuildContainsPredicate(filterTextBox.Text, n);
+                else { _textCondition = null; _textConditionDesc = ""; filterTextBox.Text = ""; }
+            }
+            // 식 필터는 식 글자를 새 헤더로 다시 컴파일한다. 컬럼 위치로 만든 "셀 값" 필터는 어느 컬럼인지 알 수 없어 해제한다.
+            int dropped = 0;
+            for (int i = _valueConditions.Count - 1; i >= 0; i--)
+            {
+                var (desc, _, expr) = _valueConditions[i];
+                if (expr is not null)
+                {
+                    try { _valueConditions[i] = (desc, AdvancedFilterExpression.Compile(expr, _doc!.Header).Predicate, expr); continue; }
+                    catch (AdvancedFilterExpressionException) { /* 삭제한 컬럼을 쓰는 식 */ }
+                }
+                _valueConditions.RemoveAt(i);
+                dropped++;
+            }
+            if (dropped > 0)
+                statusLabel.Text = LT($"{dropped} filter(s) that depended on column positions or on the removed column were cleared.",
+                                      $"컬럼 위치나 삭제된 컬럼에 의존하던 필터 {dropped}개를 해제했습니다.");
+        }
+
+        // ---------------------------------------------------------------- 컬럼 삽입(맨 끝에 추가) / 삭제
+
+        private const int MaxColumnFillRows = 1_000_000;  // 새 컬럼을 같은 값으로 채울 수 있는 행 수 상한(셀 편집 하나씩 기록)
+        private const int MaxAgentInsertRows = 10_000;     // 에이전트가 한 번에 삽입할 수 있는 행 수
+
+        private void EnsureEditable()
+        {
+            if (_doc is null || !_doc.IndexingComplete)
+                throw new InvalidOperationException("The file is still being indexed (or nothing is open). Retry when indexing finishes.");
+            if (_busy) throw new InvalidOperationException("Another operation is running. Retry when it finishes.");
+            if (grid.IsCurrentCellInEditMode) grid.CancelEdit();
+        }
+
+        private void InsertColumnFromUi()
+        {
+            if (!_sheetEditing || _doc is null) return;
+            if (!EditsReady)
+            {
+                statusLabel.Text = LT("Wait for the current operation to finish, then insert the column.", "진행 중인 작업이 끝난 뒤 컬럼을 삽입하세요.");
+                return;
+            }
+            CancelInlineEdit();
+            string name = "", fill = "";
+            while (true)
+            {
+                using var dlg = new ParamDialog(LT("Insert Column", "컬럼 삽입"), _palette);
+                var nameBox = dlg.AddText(LT("Column name", "컬럼 이름"), name);
+                var fillBox = dlg.AddText(LT("Value for every row (optional)", "모든 행의 값 (선택)"), fill);
+                dlg.AddNote(LT("The new column is added at the right end of the table, empty unless you give a value. Undo removes it; it is saved with the file.",
+                               "새 컬럼은 표의 맨 오른쪽에 추가되며 값을 적지 않으면 비어 있습니다. 되돌리기로 제거할 수 있고 저장 파일에 포함됩니다."));
+                if (!dlg.ShowOk(this)) return;
+                name = nameBox.Text.Trim();
+                fill = fillBox.Text;
+                string? problem = ValidateColumnName(-1, name);
+                if (problem is not null) { MessageBox.Show(this, problem, ProgramName, MessageBoxButtons.OK, MessageBoxIcon.Information); continue; }
+                break;
+            }
+            try
+            {
+                int col = AddColumnCore(name, fill, LT($"Insert column '{name}'", $"컬럼 '{name}' 삽입"));
+                statusLabel.Text = LT($"Added column '{name}' at the right end. Ctrl+Z removes it.", $"컬럼 '{name}'을(를) 맨 오른쪽에 추가했습니다. Ctrl+Z로 제거합니다.");
+                SelectColumnInCurrentRow(col);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                statusLabel.Text = ex.Message;
+            }
+            UpdateFeatureState();
+        }
+
+        private void SelectColumnInCurrentRow(int col)
+        {
+            try
+            {
+                if (col >= 0 && col < grid.ColumnCount && grid.RowCount > 0 && grid.Columns[col].Visible)
+                {
+                    int vi = Math.Clamp(grid.CurrentCell?.RowIndex ?? 0, 0, grid.RowCount - 1);
+                    grid.CurrentCell = grid[col, vi];
+                }
+            }
+            catch { /* 레이아웃 중 일시 예외 무시 */ }
+        }
+
+        /// <summary>
+        /// 컬럼을 맨 뒤에 추가한다(한 단계). fill이 비어 있지 않으면 모든 행(삭제 제외·추가 행 포함)에 그 값을 넣는다.
+        /// 새 컬럼의 0-based 번호를 돌려준다. 이름 규칙은 컬럼 이름 변경과 같다(비어 있지 않음·한 줄·중복 불가).
+        /// </summary>
+        private int AddColumnCore(string name, string? fill, string description)
+        {
+            EnsureEditable();
+            var doc = _doc!;
+            name = (name ?? "").Trim();
+            string? problem = ValidateColumnName(-1, name);
+            if (problem is not null) throw new ArgumentException(problem);
+            fill ??= "";
+            if (fill.Length > 0 && doc.DataRowsAvailable > MaxColumnFillRows)
+                throw new ArgumentException($"A fill value can be set for at most {MaxColumnFillRows:N0} rows; this table has {doc.DataRowsAvailable:N0}. Add the column empty and fill part of it with a regex extract or csv.edit_cells.");
+            var edits = doc.Edits;
+            int col;
+            using (edits.BeginStep(description))
+            {
+                col = edits.AppendColumn(name, doc.RawColumnCount);
+                if (fill.Length > 0)
+                    foreach (long id in AllRowIds(doc)) edits.Set((int)id, col, fill, "");
+            }
+            return col;
+        }
+
+        private void DeleteColumnFromUi(int col)
+        {
+            if (!_sheetEditing || _doc is null) return;
+            if (!EditsReady)
+            {
+                statusLabel.Text = LT("Wait for the current operation to finish, then delete the column.", "진행 중인 작업이 끝난 뒤 컬럼을 삭제하세요.");
+                return;
+            }
+            if (col < 0 || col >= _doc.ColumnCount) return;
+            CancelInlineEdit();
+            try
+            {
+                string name = DeleteColumnCore(col, null);
+                statusLabel.Text = LT($"Deleted column '{name}' from the table (the original file is untouched). Ctrl+Z restores it; saved files omit it.",
+                                      $"컬럼 '{name}'을(를) 표에서 삭제했습니다(원본 파일은 그대로). Ctrl+Z로 복원하며 저장 파일에서 빠집니다.");
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                statusLabel.Text = ex.Message;
+            }
+            UpdateFeatureState();
+        }
+
+        /// <summary>보이는 컬럼 하나를 삭제 표시한다(한 단계). 삭제한 컬럼의 표시 이름을 돌려준다.</summary>
+        private string DeleteColumnCore(int col, string? description)
+        {
+            EnsureEditable();
+            var doc = _doc!;
+            if (col < 0 || col >= doc.ColumnCount) throw new ArgumentException($"Column index {col} is out of range (0..{doc.ColumnCount - 1}).");
+            if (doc.ColumnCount <= 1) throw new InvalidOperationException(LT("The last remaining column cannot be deleted.", "마지막 남은 컬럼은 삭제할 수 없습니다."));
+            string name = string.IsNullOrEmpty(doc.Header[col]) ? $"Column{col + 1}" : doc.Header[col];
+            doc.Edits.DeleteColumn(col, doc.ColumnCount, doc.RawColumnCount,
+                description ?? LT($"Delete column '{name}'", $"컬럼 '{name}' 삭제"));
+            return name;
+        }
+
+        // ---------------------------------------------------------------- 에이전트용 편집 진입점 (UI 스레드, 시트 편집 모드와 무관)
+        // 실패는 ArgumentException(인자 문제) / InvalidOperationException(상태 문제)로 알린다. 모두 되돌리기 한 단계.
+
+        /// <summary>빈 행 count개를 삽입해 첫 새 행이 rowNumber(1-based, 편집 후 순서)가 되게 한다. 표 끝 다음 번호면 맨 끝에 추가. 첫 새 행 번호를 돌려준다.</summary>
+        internal int AgentInsertRows(long rowNumber, int count, string description)
+        {
+            EnsureEditable();
+            var doc = _doc!;
+            if (!doc.CanEditStructure) throw new InvalidOperationException("Rows cannot be inserted or deleted in a table this large.");
+            if (count < 1 || count > MaxAgentInsertRows) throw new ArgumentException($"count must be 1..{MaxAgentInsertRows:N0}.");
+            int available = doc.DataRowsAvailable;
+            if (rowNumber < 1 || rowNumber > (long)available + 1)
+                throw new ArgumentException($"row_number must be 1..{(long)available + 1:N0} (use {(long)available + 1:N0} to append at the end).");
+
+            int anchor;
+            if (rowNumber > available) anchor = available > 0 ? doc.GetRowIdAtPosition(available - 1) : -1;
+            else
+            {
+                int target = doc.GetRowIdAtPosition((int)(rowNumber - 1));
+                anchor = target < 0 ? -1 : doc.PredecessorId(target);
+            }
+            int firstId = -1;
+            using (doc.Edits.BeginStep(description))
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    anchor = doc.Edits.AddRow(anchor, doc.ColumnCount, doc.BaseRowCount);
+                    if (i == 0) firstId = anchor;
+                }
+            }
+            int vi = doc.FindViewIndex(firstId);
+            if (vi >= 0) SelectViewRow(vi);
+            else _pendingSelectRowId = firstId;
+            statusLabel.Text = LT($"Inserted {count:N0} row(s) at row {rowNumber:N0}. Ctrl+Z undoes.", $"{rowNumber:N0}행 위치에 행 {count:N0}개를 삽입했습니다. Ctrl+Z로 되돌립니다.");
+            return (int)rowNumber;
+        }
+
+        /// <summary>행 번호(1-based, 편집 후 순서, 필터와 무관)로 행을 삭제한다. 삭제한 행 수를 돌려준다.</summary>
+        internal int AgentDeleteRows(IReadOnlyList<long> rowNumbers, string description)
+        {
+            EnsureEditable();
+            var doc = _doc!;
+            if (!doc.CanEditStructure) throw new InvalidOperationException("Rows cannot be inserted or deleted in a table this large.");
+            if (rowNumbers.Count == 0) throw new ArgumentException("No row numbers were given.");
+            int available = doc.DataRowsAvailable;
+            var ids = new List<int>(rowNumbers.Count);
+            foreach (long n in rowNumbers)
+            {
+                if (n < 1 || n > available) throw new ArgumentException($"Row {n:N0} does not exist (the table has {available:N0} rows).");
+                int id = doc.GetRowIdAtPosition((int)(n - 1));
+                if (id < 0) throw new ArgumentException($"Row {n:N0} does not exist.");
+                ids.Add(id);
+            }
+            int deleted = doc.Edits.DeleteRows(ids, description);
+            if (grid.RowCount > 0 && grid.CurrentCell is null) SelectViewRow(0);
+            statusLabel.Text = LT($"Deleted {deleted:N0} row(s); later row numbers shift up. Ctrl+Z undoes.",
+                                  $"행 {deleted:N0}개를 삭제했습니다(뒤 행 번호가 당겨집니다). Ctrl+Z로 되돌립니다.");
+            return deleted;
+        }
+
+        /// <summary>컬럼을 표의 맨 끝에 추가한다(중간 삽입은 지원하지 않는다). fill = 모든 행에 넣을 값(null/빈 값 = 빈 컬럼, 행 수 100만 이하). 새 컬럼의 0-based 번호.</summary>
+        internal int AgentAddColumn(string name, string? fill, string description)
+        {
+            int col = AddColumnCore(name, fill, description);
+            SelectColumnInCurrentRow(col);
+            statusLabel.Text = LT($"Added column '{name.Trim()}' at the right end. Ctrl+Z removes it.", $"컬럼 '{name.Trim()}'을(를) 맨 오른쪽에 추가했습니다. Ctrl+Z로 제거합니다.");
+            return col;
+        }
+
+        /// <summary>보이는 컬럼(원본·추가 모두)을 삭제 표시한다. 뒤 컬럼 번호가 1씩 당겨진다. 삭제한 컬럼 이름을 돌려준다.</summary>
+        internal string AgentDeleteColumn(int column, string description)
+        {
+            string name = DeleteColumnCore(column, description);
+            statusLabel.Text = LT($"Deleted column '{name}' from the table. Ctrl+Z restores it; saved files omit it.",
+                                  $"컬럼 '{name}'을(를) 표에서 삭제했습니다. Ctrl+Z로 복원하며 저장 파일에서 빠집니다.");
+            return name;
         }
 
         // ---------------------------------------------------------------- E7 크래시 복구 저널

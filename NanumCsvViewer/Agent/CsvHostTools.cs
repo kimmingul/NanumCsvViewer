@@ -19,9 +19,11 @@ namespace NanumCsvViewer.Agent
     ///  - RowsAllowed: csv.get_rows 승인 없이 MaxRowsPerRequest까지. top_values·품질 예시 값도 포함.
     ///  - csv.regex_count: 개수·행 번호·시간 초과 셀 수는 항상. 일치한 셀의 값 예시는 SummaryOnly면 생략, RowsWithApproval이면 값을 담은 승인 카드 뒤에만, RowsAllowed면 상한(20)까지.
     ///  - csv.regex_replace: 편집이므로 정책과 무관하게 항상 - 이전/+ 이후 승인 카드(로컬). 결과의 이전/이후 값 예시는 RowsAllowed에서만.
-    /// 편집·저장은 정책과 무관하게 항상 승인 카드.
+    /// 편집·저장은 정책과 무관하게 항상 승인 카드. 구조 편집(csv.insert_rows·delete_rows·add_column·delete_column)도 같다(편집 덮개 한 단계, "AI: " 표지, csv.undo).
+    /// 조건부 서식(csv.format_*)은 보기 상태일 뿐이라 승인 없음. csv.export_view는 AllowLocalPython이 켜졌을 때만 현재 뷰를 로컬 CSV+schema.json으로
+    /// 쓰고 경로·개수만 돌려준다(셀 값 없음). csv.show_markdown/show_image는 결과 폴더·데이터 파일 폴더 안의 허용 확장자 파일만 연다.
     /// </summary>
-    public sealed class CsvHostTools : ICsvToolExecutor
+    public sealed partial class CsvHostTools : ICsvToolExecutor
     {
         private const int MaxResultChars = 60_000;
         private const int RowsOutputBudgetChars = 30_000;
@@ -109,6 +111,17 @@ namespace NanumCsvViewer.Agent
                 ToolDefinitions.RegexCount => await RegexCountAsync(args, approvals, ct),
                 ToolDefinitions.RegexReplace => await RegexReplaceAsync(args, approvals, ct),
                 ToolDefinitions.SaveEditsAs => await SaveEditsAsAsync(args, approvals, ct),
+                ToolDefinitions.InsertRows => await InsertRowsAsync(args, approvals, ct),
+                ToolDefinitions.DeleteRows => await DeleteRowsAsync(args, approvals, ct),
+                ToolDefinitions.AddColumn => await AddColumnAsync(args, approvals, ct),
+                ToolDefinitions.DeleteColumn => await DeleteColumnAsync(args, approvals, ct),
+                ToolDefinitions.FormatAdd => await FormatAddAsync(args, ct),
+                ToolDefinitions.FormatList => FormatList(),
+                ToolDefinitions.FormatRemove => FormatRemove(args),
+                ToolDefinitions.FormatClear => FormatClear(),
+                ToolDefinitions.ExportView => await ExportViewAsync(args, ct),
+                ToolDefinitions.ShowMarkdown => ShowMarkdown(args),
+                ToolDefinitions.ShowImage => ShowImage(args),
                 _ => HostToolResult.Error($"Unknown tool '{call.ToolName}'. Available: {string.Join(", ", ToolDefinitions.All.Select(d => d.Name))}."),
             };
         }
@@ -181,6 +194,7 @@ namespace NanumCsvViewer.Agent
                 ["edits"] = EditStateJson(info.Edits),
                 ["data_policy"] = options.DataPolicy.ToString(),
                 ["max_rows_per_request"] = options.MaxRowsPerRequest,
+                ["local_python_allowed"] = options.AllowLocalPython,
             };
             if (info.SheetNames.Count > 1) json["sheets"] = ToolJson.Strings(info.SheetNames);
             if (info.HiddenColumns.Count > 0) json["hidden_columns"] = ToolJson.Strings(info.HiddenColumns);
@@ -208,6 +222,8 @@ namespace NanumCsvViewer.Agent
             ["renamed_columns"] = e.RenamedColumns,
             ["deleted_rows"] = e.DeletedRows,
             ["added_rows"] = e.AddedRows,
+            ["added_columns"] = e.AddedColumns,
+            ["deleted_columns"] = e.DeletedColumns,
             ["unsaved"] = e.Unsaved,
             ["can_undo"] = e.CanUndo,
             ["agent_can_undo"] = e.AgentCanUndo,
@@ -428,9 +444,21 @@ namespace NanumCsvViewer.Agent
         {
             long? row = args.OptInt("row", 1, long.MaxValue);
             string? colName = args.OptString("column");
-            if (row is null && string.IsNullOrWhiteSpace(colName)) throw new AgentToolException("Give 'row' and/or 'column'.");
+            string? cell = args.OptString("cell");
+            bool hasCell = !string.IsNullOrWhiteSpace(cell);
+            if (hasCell && (row is not null || !string.IsNullOrWhiteSpace(colName)))
+                throw new AgentToolException("Give either 'cell' or 'row'/'column', not both.");
+            if (!hasCell && row is null && string.IsNullOrWhiteSpace(colName)) throw new AgentToolException("Give 'cell', or 'row' and/or 'column'.");
             var info = RequireReady();
-            int? col = string.IsNullOrWhiteSpace(colName) ? null : ColumnNames.Resolve(Names(info), colName, "column");
+            int? col;
+            if (hasCell)
+            {
+                if (!CellAddress.TryParse(cell!, out var address, out string parseError))
+                    throw new AgentToolException($"Invalid cell address '{cell}': {parseError} Examples: 120, R120C3, C3, age:120, [age]120, age:");
+                if (!address.TryResolve(Names(info), out row, out col, out string resolveError))
+                    throw new AgentToolException($"Invalid cell address '{cell}': {resolveError}");
+            }
+            else col = string.IsNullOrWhiteSpace(colName) ? null : ColumnNames.Resolve(Names(info), colName, "column");
 
             var r = await _host.GotoAsync(row, col, ct);
             return Reply($"Cursor moved to row {r.SourceRow:N0}, column {r.Column}.",
@@ -769,7 +797,7 @@ namespace NanumCsvViewer.Agent
             bool overwrite = args.OptBool("overwrite") ?? false;
             var info = RequireReady();
             var e = info.Edits;
-            if (e.Cells + e.RenamedColumns + e.DeletedRows + e.AddedRows == 0)
+            if (!e.HasAny)
                 throw new AgentToolException("There are no edits to save.");
 
             string full = AgentSavePolicy.Resolve(requested, info.Directory, info.ProtectedPaths, overwrite);
@@ -780,6 +808,8 @@ namespace NanumCsvViewer.Agent
             if (e.RenamedColumns > 0) parts.Add(L($"{e.RenamedColumns:N0} renamed column(s)", $"컬럼 이름 {e.RenamedColumns:N0}개"));
             if (e.DeletedRows > 0) parts.Add(L($"{e.DeletedRows:N0} deleted row(s)", $"삭제 행 {e.DeletedRows:N0}개"));
             if (e.AddedRows > 0) parts.Add(L($"{e.AddedRows:N0} added row(s)", $"추가 행 {e.AddedRows:N0}개"));
+            if (e.AddedColumns > 0) parts.Add(L($"{e.AddedColumns:N0} added column(s)", $"추가 컬럼 {e.AddedColumns:N0}개"));
+            if (e.DeletedColumns > 0) parts.Add(L($"{e.DeletedColumns:N0} deleted column(s)", $"삭제 컬럼 {e.DeletedColumns:N0}개"));
             string summary = string.Join(", ", parts);
 
             var lines = new List<string>
