@@ -17,25 +17,22 @@ namespace NanumCsvViewer
 
         // 수동 지정 컬럼 타입(이슈 #12). 추론·선언 힌트보다 우선. 문서/시트 전환(ResetView) 시 초기화.
         private Dictionary<int, ColumnValueType> _manualTypeOverrides = new();
-        private ContextMenuStrip? _typeMenu; // 헤더 우클릭 메뉴(컬럼마다 새로 구성)
 
         // 시각화(이슈 #19): 모델리스 차트 빌더 창들. 문서/시트 전환 시 일괄 닫음(뷰 스냅샷이 낡기 때문).
         private List<ChartForm> _chartForms = new();
         private ToolStripMenuItem? _vizMenu;
 
         // 그리드/인스펙터 복사 (그리드 향상)
-        private ToolStripMenuItem? _copyCellsMenu, _copyRowMenu, _copyColMenu;
+        private ToolStripMenuItem? _copyRowMenu, _copyColMenu;
         private Button? _inspectorCopyText, _inspectorCopyJson;
 
-        // 헤더 타입 배지 표시 토글(보기 메뉴 + 툴바 버튼 동기화)
+        // 헤더 타입 배지 표시 토글(보기 메뉴)
         private bool _showTypeBadges = true;
         private ToolStripMenuItem? _showBadgesMenu;
-        private ToolStripButton? _badgeToggleButton;
         private bool _syncingBadgeToggle;
 
-        // SPSS·SAS 필드 라벨 표시 토글(보기 메뉴 + 툴바 버튼). 현재 워크북을 재임포트·재로드한다.
+        // SPSS·SAS 필드 라벨 표시 토글(보기 메뉴). 현재 워크북을 재임포트·재로드한다.
         private ToolStripMenuItem? _fieldLabelsMenu;
-        private ToolStripButton? _fieldLabelsToggleButton;
         private int _currentSheetIndex;
         private bool _reimporting;        // 라벨 모드 재임포트 진행 중(재진입 직렬화)
         private bool _syncingFieldLabels; // 체크 상태를 코드로 되돌릴 때 CheckedChanged 억제
@@ -50,7 +47,7 @@ namespace NanumCsvViewer
         // 언어 전환 시 다시 라벨링하기 위한 메뉴 참조
         private ToolStripMenuItem? _exportMenu, _clipboardOpenMenu, _gotoRowMenu, _advFilterMenu,
             _columnsMenu, _saveViewMenu, _restoreViewMenu, _perfMenu, _indexCacheMenu, _analysisMenu,
-            _deleteIndexOnCloseMenu, _pivotTopMenu, _pivotTableMenu, _pivotChartMenu;
+            _deleteIndexOnCloseMenu, _pivotTableMenu, _pivotChartMenu;
         private readonly List<(ToolStripMenuItem item, string en, string ko)> _featureLabels = new();
 
         private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
@@ -62,12 +59,9 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 메뉴 구성
 
+        // 항목만 만들어 필드에 둔다. 메뉴 트리 조립(어느 메뉴에 놓일지)은 Ui/Form1.MainMenu.cs의 ComposeMainMenu가 한다.
         private void BuildFeatureMenus()
         {
-            // File ▸ 내보내기 + 클립보드 열기 (Quit 앞에 삽입)
-            int quitIdx = fileToolStripMenuItem.DropDownItems.IndexOf(quitToolStripMenuItem);
-            if (quitIdx < 0) quitIdx = fileToolStripMenuItem.DropDownItems.Count;
-
             _exportMenu = new ToolStripMenuItem();
             _exportMenu.DropDownItems.Add(MakeItem("Export as CSV…", "CSV로 내보내기…", (_, _) => ExportView(ExportFormat.Csv)));
             _exportMenu.DropDownItems.Add(MakeItem("Export as Markdown…", "Markdown으로 내보내기…", (_, _) => ExportView(ExportFormat.Markdown)));
@@ -77,45 +71,26 @@ namespace NanumCsvViewer
 
             _clipboardOpenMenu = MakeItem("Open from Clipboard", "클립보드에서 열기", async (_, _) => await OpenFromClipboardAsync());
 
-            var fileSep = new ToolStripSeparator();
-            fileToolStripMenuItem.DropDownItems.Insert(quitIdx, fileSep);
-            fileToolStripMenuItem.DropDownItems.Insert(quitIdx, _clipboardOpenMenu);
-            fileToolStripMenuItem.DropDownItems.Insert(quitIdx, _exportMenu);
-
-            // Edit ▸ 이동 / 고급 필터
-            editToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            _gotoRowMenu = MakeItem("Go to Cell…", "셀로 이동…", (_, _) => GoToRow());
-            _gotoRowMenu.ShortcutKeys = Keys.Control | Keys.G;
-            editToolStripMenuItem.DropDownItems.Add(_gotoRowMenu);
-            _advFilterMenu = MakeItem("Advanced Filter…", "고급 필터…", (_, _) => ShowAdvancedFilter());
-            editToolStripMenuItem.DropDownItems.Add(_advFilterMenu);
+            _gotoRowMenu = MakeCmd("data.goto", (_, _) => GoToRow());
+            _advFilterMenu = MakeCmd("data.advFilter", (_, _) => ShowAdvancedFilter());
             BuildEditFeatures();
             BuildAgentFeatures();
 
-            // View ▸ 컬럼 / 저장된 뷰 / 성능 / 인덱스 캐시
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
             _columnsMenu = MakeItem("Columns…", "컬럼 표시…", (_, _) => ShowColumnChooser());
-            viewToolStripMenuItem.DropDownItems.Add(_columnsMenu);
 
             _showTypeBadges = _settings.ShowTypeBadges;
             _showBadgesMenu = new ToolStripMenuItem { CheckOnClick = true, Checked = _showTypeBadges };
             _showBadgesMenu.CheckedChanged += (_, _) => { if (!_syncingBadgeToggle) SetShowTypeBadges(_showBadgesMenu.Checked); };
-            RegisterLabel(_showBadgesMenu, "Show Type Badges", "타입 배지 표시");
-            viewToolStripMenuItem.DropDownItems.Add(_showBadgesMenu);
+            RegisterLabel(_showBadgesMenu, "Type Badges", "타입 배지");
 
             // SPSS·SAS 필드 라벨 표시 토글. 라벨 대상 파일이 열렸을 때만 활성.
             _fieldLabelsMenu = new ToolStripMenuItem { CheckOnClick = true, Checked = _settings.ShowFieldLabels, Enabled = false };
             _fieldLabelsMenu.CheckedChanged += (_, _) => { if (!_syncingFieldLabels) SetShowFieldLabels(_fieldLabelsMenu.Checked); };
-            RegisterLabel(_fieldLabelsMenu, "Show Field Labels", "필드 라벨 표시");
-            viewToolStripMenuItem.DropDownItems.Add(_fieldLabelsMenu);
+            RegisterLabel(_fieldLabelsMenu, "Field Labels (SPSS/SAS)", "필드 라벨 (SPSS·SAS)");
 
             _saveViewMenu = MakeItem("Save Current View", "현재 보기 저장", (_, _) => SaveCurrentView());
-            viewToolStripMenuItem.DropDownItems.Add(_saveViewMenu);
             _restoreViewMenu = MakeItem("Restore Saved View", "저장된 보기 복원", async (_, _) => await RestoreSavedViewAsync());
-            viewToolStripMenuItem.DropDownItems.Add(_restoreViewMenu);
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
             _perfMenu = MakeItem("Performance Dashboard", "성능 대시보드", (_, _) => ShowPerformanceDashboard());
-            viewToolStripMenuItem.DropDownItems.Add(_perfMenu);
 
             _indexCacheMenu = new ToolStripMenuItem();
             _indexCacheMenu.DropDownItems.Add(MakeItem("Open Index Folder", "인덱스 폴더 열기", (_, _) => OpenIndexFolder()));
@@ -129,9 +104,8 @@ namespace NanumCsvViewer
             RegisterLabel(_deleteIndexOnCloseMenu, "Delete Index Cache on Close", "닫을 때 인덱스 캐시 삭제");
             _indexCacheMenu.DropDownItems.Add(_deleteIndexOnCloseMenu);
             RegisterLabel(_indexCacheMenu, "Index Cache", "인덱스 캐시");
-            viewToolStripMenuItem.DropDownItems.Add(_indexCacheMenu);
 
-            // 새 최상위 메뉴: 분석 (Help 앞에 삽입)
+            // 통계 ▸ 기본 분석(하위 메뉴) — 아래 고급 통계 항목들과 같은 "통계" 메뉴에 놓인다.
             _analysisMenu = new ToolStripMenuItem();
             _analysisMenu.DropDownItems.Add(MakeItem("Descriptive Statistics…", "기술통계…", (_, _) => AnalyzeDescriptives()));
             _analysisMenu.DropDownItems.Add(MakeItem("Frequency Table…", "빈도분석…", (_, _) => AnalyzeFrequency()));
@@ -146,55 +120,32 @@ namespace NanumCsvViewer
             _analysisMenu.DropDownItems.Add(MakeItem("One-way ANOVA…", "일원배치 분산분석…", (_, _) => AnalyzeOneWayAnova()));
             _analysisMenu.DropDownItems.Add(MakeItem("Chi-square…", "카이제곱 검정…", (_, _) => AnalyzeChiSquare()));
             _analysisMenu.DropDownItems.Add(MakeItem("Normality Test (Shapiro-Wilk)…", "정규성 검정(Shapiro-Wilk)…", (_, _) => AnalyzeNormality()));
-            RegisterLabel(_analysisMenu, "Analysis", "분석");
-            int helpIdx = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
-            if (helpIdx < 0) helpIdx = menuStrip1.Items.Count;
-            menuStrip1.Items.Insert(helpIdx, _analysisMenu);
+            RegisterLabel(_analysisMenu, "Basics", "기본 분석");
 
-            // 새 최상위 메뉴: 피벗 ▸ 피벗테이블 / 피벗차트
-            _pivotTopMenu = new ToolStripMenuItem();
             _pivotTableMenu = MakeItem("Pivot Table…", "피벗테이블…", (_, _) => OpenPivotBuilder(chartTab: false));
             _pivotChartMenu = MakeItem("Pivot Chart…", "피벗차트…", (_, _) => OpenPivotBuilder(chartTab: true));
-            _pivotTopMenu.DropDownItems.Add(_pivotTableMenu);
-            _pivotTopMenu.DropDownItems.Add(_pivotChartMenu);
-            RegisterLabel(_pivotTopMenu, "Pivot", "피벗");
-            int pivotIdx = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
-            if (pivotIdx < 0) pivotIdx = menuStrip1.Items.Count;
-            menuStrip1.Items.Insert(pivotIdx, _pivotTopMenu);
 
-            // 새 최상위 메뉴: 시각화(이슈 #19) — 분석과 피벗 사이. 차트 빌더 + 분석 축(분포/관계/범주/시계열) 프리셋.
-            _vizMenu = new ToolStripMenuItem();
+            // 시각화(이슈 #19): 차트 빌더 + 차트 종류 프리셋(분포 · 관계 · 범주/시계열 순) + 피벗차트. 항목 하나짜리 하위 메뉴는 두지 않는다.
+            _vizMenu = new ToolStripMenuItem { Name = "visualizationMenu" };
             _vizMenu.DropDownItems.Add(MakeItem("Chart Builder…", "차트 빌더…", (_, _) => OpenChartBuilder(ChartKind.Histogram)));
             _vizMenu.DropDownItems.Add(new ToolStripSeparator());
-            var vizDist = new ToolStripMenuItem();
-            RegisterLabel(vizDist, "Distribution", "분포");
-            vizDist.DropDownItems.Add(MakeItem("Histogram · Density…", "히스토그램·밀도…", (_, _) => OpenChartBuilder(ChartKind.Histogram)));
-            vizDist.DropDownItems.Add(MakeItem("Box Plot (groups)…", "박스플롯(그룹)…", (_, _) => OpenChartBuilder(ChartKind.BoxPlot)));
-            vizDist.DropDownItems.Add(MakeItem("Q-Q Plot…", "Q-Q 플롯…", (_, _) => OpenChartBuilder(ChartKind.QqPlot)));
-            _vizMenu.DropDownItems.Add(vizDist);
-            var vizRel = new ToolStripMenuItem();
-            RegisterLabel(vizRel, "Relationship", "관계");
-            vizRel.DropDownItems.Add(MakeItem("Scatter · Regression…", "산점도·회귀…", (_, _) => OpenChartBuilder(ChartKind.Scatter)));
-            vizRel.DropDownItems.Add(MakeItem("Correlation Heatmap…", "상관 히트맵…", (_, _) => OpenChartBuilder(ChartKind.CorrelationHeatmap)));
-            _vizMenu.DropDownItems.Add(vizRel);
-            var vizCat = new ToolStripMenuItem();
-            RegisterLabel(vizCat, "Category", "범주");
-            vizCat.DropDownItems.Add(MakeItem("Pareto…", "파레토…", (_, _) => OpenChartBuilder(ChartKind.Pareto)));
-            _vizMenu.DropDownItems.Add(vizCat);
-            var vizTime = new ToolStripMenuItem();
-            RegisterLabel(vizTime, "Time Series", "시계열");
-            vizTime.DropDownItems.Add(MakeItem("Time Series · Moving Avg…", "시계열·이동평균…", (_, _) => OpenChartBuilder(ChartKind.TimeSeries)));
-            _vizMenu.DropDownItems.Add(vizTime);
+            _vizMenu.DropDownItems.Add(MakeItem("Histogram · Density…", "히스토그램·밀도…", (_, _) => OpenChartBuilder(ChartKind.Histogram)));
+            _vizMenu.DropDownItems.Add(MakeItem("Box Plot (groups)…", "박스플롯(그룹)…", (_, _) => OpenChartBuilder(ChartKind.BoxPlot)));
+            _vizMenu.DropDownItems.Add(MakeItem("Q-Q Plot…", "Q-Q 플롯…", (_, _) => OpenChartBuilder(ChartKind.QqPlot)));
+            _vizMenu.DropDownItems.Add(new ToolStripSeparator());
+            _vizMenu.DropDownItems.Add(MakeItem("Scatter · Regression…", "산점도·회귀…", (_, _) => OpenChartBuilder(ChartKind.Scatter)));
+            _vizMenu.DropDownItems.Add(MakeItem("Correlation Heatmap…", "상관 히트맵…", (_, _) => OpenChartBuilder(ChartKind.CorrelationHeatmap)));
+            _vizMenu.DropDownItems.Add(new ToolStripSeparator());
+            _vizMenu.DropDownItems.Add(MakeItem("Pareto…", "파레토…", (_, _) => OpenChartBuilder(ChartKind.Pareto)));
+            _vizMenu.DropDownItems.Add(MakeItem("Time Series · Moving Avg…", "시계열·이동평균…", (_, _) => OpenChartBuilder(ChartKind.TimeSeries)));
+            _vizMenu.DropDownItems.Add(new ToolStripSeparator());
+            _vizMenu.DropDownItems.Add(_pivotChartMenu);
             RegisterLabel(_vizMenu, "Visualization", "시각화");
-            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _vizMenu);
 
-            // 새 최상위 메뉴: 데이터 품질(이슈 #26) — 시각화와 피벗 사이.
-            // 구성은 4-모델 설계 논쟁으로 확정: 전수 프로파일 + 발견 패널(필터 칩·행 점프 루프) +
-            // 키 유일성 + 사용자 규칙(JSON) + 증거 보고서. 점수 게이지·내장 의료 규칙 팩은 두지 않는다.
-            _qualityMenu = new ToolStripMenuItem();
-            var qualityRun = MakeItem("Run Quality Profile", "품질 프로파일 실행", async (_, _) => await RunQualityProfileAsync());
-            qualityRun.ShortcutKeys = Keys.Control | Keys.Shift | Keys.Q;
-            _qualityMenu.DropDownItems.Add(qualityRun);
+            // 데이터 품질(이슈 #26): 전수 프로파일 + 발견 패널(필터 칩·행 점프 루프) + 키 유일성 + 사용자 규칙(JSON) + 증거 보고서.
+            // 점수 게이지·내장 의료 규칙 팩은 두지 않는다.
+            _qualityMenu = new ToolStripMenuItem { Name = "qualityMenu" };
+            _qualityMenu.DropDownItems.Add(MakeCmd("quality.profile", async (_, _) => await RunQualityProfileAsync()));
             _qualityPanelMenu = MakeItem("Findings Panel", "검사 결과 패널", (_, _) => ToggleQualityPanel());
             _qualityMenu.DropDownItems.Add(_qualityPanelMenu);
             _qualityMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -207,42 +158,12 @@ namespace NanumCsvViewer
             _qualityMenu.DropDownItems.Add(MakeItem("Export Quality Report…", "품질 보고서 내보내기…", (_, _) => ExportQualityReport()));
             _qualityMenu.DropDownItems.Add(MakeItem("Compare with Baseline Snapshot…", "기준선 스냅샷과 비교…",
                 async (_, _) => await CompareQualityBaselineAsync()));
-            RegisterLabel(_qualityMenu, "Data Quality", "데이터 품질");
-            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_pivotTopMenu), _qualityMenu);
+            RegisterLabel(_qualityMenu, "Quality", "품질");
 
-            // 새 최상위 메뉴: 고급 통계(이슈 #27, ALGLIB) — 데이터 품질 바로 뒤.
+            // 통계 메뉴 = 기본 분석 하위 메뉴 + 고급 통계 하위 메뉴들(BuildAdvancedStatsMenu가 _advMenu에 채운다).
             BuildAdvancedStatsMenu();
-            menuStrip1.Items.Insert(menuStrip1.Items.IndexOf(_qualityMenu) + 1, _advMenu!);
-
-            // 타입 배지 토글 툴바 버튼 — 우측 정렬로 추가하면 테마 토글 버튼 왼쪽에 놓인다.
-            _badgeToggleButton = new ToolStripButton
-            {
-                CheckOnClick = true,
-                Checked = _showTypeBadges,
-                Alignment = ToolStripItemAlignment.Right,
-                DisplayStyle = ToolStripItemDisplayStyle.Image,
-                ImageScaling = ToolStripItemImageScaling.None,
-                Image = UiIcons.TypeBadge(),
-                Name = "badgeToggleButton",
-            };
-            _badgeToggleButton.CheckedChanged += (_, _) => { if (!_syncingBadgeToggle) SetShowTypeBadges(_badgeToggleButton.Checked); };
-            toolStrip1.Items.Add(_badgeToggleButton);
-
-            // 필드 라벨 토글 툴바 버튼 — 배지 버튼 뒤에 추가하면 우측 정렬상 배지 버튼 왼쪽에 놓인다.
-            // SPSS·SAS일 때만 활성(UpdateFeatureMenuState가 관리). 메뉴와 한 상태를 공유.
-            _fieldLabelsToggleButton = new ToolStripButton
-            {
-                CheckOnClick = true,
-                Checked = _settings.ShowFieldLabels,
-                Enabled = false,
-                Alignment = ToolStripItemAlignment.Right,
-                DisplayStyle = ToolStripItemDisplayStyle.Image,
-                ImageScaling = ToolStripItemImageScaling.None,
-                Image = UiIcons.FieldLabels(),
-                Name = "fieldLabelsToggleButton",
-            };
-            _fieldLabelsToggleButton.CheckedChanged += (_, _) => { if (!_syncingFieldLabels) SetShowFieldLabels(_fieldLabelsToggleButton.Checked); };
-            toolStrip1.Items.Add(_fieldLabelsToggleButton);
+            _advMenu!.DropDownItems.Insert(0, new ToolStripSeparator());
+            _advMenu.DropDownItems.Insert(0, _analysisMenu);
 
             // 드래그앤드롭 가져오기
             AllowDrop = true;
@@ -256,17 +177,12 @@ namespace NanumCsvViewer
             grid.ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable;
             grid.KeyDown += OnGridCopyKeyDown;
 
-            // 헤더 우클릭 → 컬럼 타입 수동 변경 메뉴(이슈 #12). 데이터 셀은 기존 gridContextMenu 유지.
+            // 우클릭 메뉴(셀 · 컬럼 헤더 · 행 헤더)는 Ui/Form1.ContextMenus.cs가 위치별로 새로 만든다.
             grid.CellContextMenuStripNeeded += OnCellContextMenuStripNeeded;
 
-            // 컨텍스트 메뉴: 선택/행/열 복사
-            gridContextMenu.Items.Insert(0, new ToolStripSeparator());
-            _copyColMenu = MakeItem("Copy Entire Column", "열 전체 복사", async (_, _) => await CopyCurrentColumnAsync());
-            gridContextMenu.Items.Insert(0, _copyColMenu);
-            _copyRowMenu = MakeItem("Copy Entire Row", "행 전체 복사", (_, _) => CopyCurrentRow());
-            gridContextMenu.Items.Insert(0, _copyRowMenu);
-            _copyCellsMenu = MakeItem("Copy Selection", "선택 영역 복사", (_, _) => CopySelectedCells());
-            gridContextMenu.Items.Insert(0, _copyCellsMenu);
+            // 행/열 복사(편집 ▸ 행·컬럼 하위 메뉴)
+            _copyColMenu = MakeItem("Copy Column", "컬럼 복사", async (_, _) => await CopyCurrentColumnAsync());
+            _copyRowMenu = MakeItem("Copy Row", "행 복사", (_, _) => CopyCurrentRow());
 
             // 인스펙터(상세 패널) 복사 버튼 — 헤더 우측에 얹음
             _inspectorCopyText = InspectorButton("TEXT", 116, (_, _) => CopyInspectorText());
@@ -275,8 +191,6 @@ namespace NanumCsvViewer
             outerSplit.Panel2.Controls.Add(_inspectorCopyJson);
             _inspectorCopyText.BringToFront();
             _inspectorCopyJson.BringToFront();
-
-            LocalizeFeatureMenus();
         }
 
         private ToolStripMenuItem MakeItem(string en, string ko, EventHandler handler)
@@ -290,28 +204,24 @@ namespace NanumCsvViewer
         private void RegisterLabel(ToolStripMenuItem item, string en, string ko)
             => _featureLabels.Add((item, en, ko));
 
-        // Form1.ApplyLocalization() 끝에서 호출됨(부분 클래스 훅).
+        // Form1.ApplyLocalization()에서 호출됨(부분 클래스 훅). 등록된 모든 메뉴 항목 + 툴바를 현재 언어로 다시 라벨링한다.
         private void LocalizeFeatureMenus()
         {
             foreach (var (item, en, ko) in _featureLabels)
                 item.Text = LT(en, ko);
-            if (_badgeToggleButton is not null)
-                _badgeToggleButton.ToolTipText = LT("Toggle type badges", "타입 배지 표시 전환");
-            if (_fieldLabelsToggleButton is not null)
-                _fieldLabelsToggleButton.ToolTipText = LT("Toggle field labels (SPSS/SAS)", "필드 라벨 표시 전환 (SPSS·SAS)");
+            LocalizeToolbar();
             _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
             LocalizeEditButtons();
             LocalizeAgentUi();
             LocalizeWorkspaceUi();
         }
 
-        // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
+        // 보기 메뉴 항목을 토글하고, 설정 저장 + 헤더 다시 그림.
         private void SetShowTypeBadges(bool show)
         {
             _showTypeBadges = show;
             _syncingBadgeToggle = true;
             if (_showBadgesMenu is not null) _showBadgesMenu.Checked = show;
-            if (_badgeToggleButton is not null) _badgeToggleButton.Checked = show;
             _syncingBadgeToggle = false;
 
             _settings.ShowTypeBadges = show;
@@ -329,20 +239,19 @@ namespace NanumCsvViewer
             if (_columnsMenu is not null) _columnsMenu.Enabled = _doc is not null && !_busy;
             if (_saveViewMenu is not null) _saveViewMenu.Enabled = ready;
             if (_restoreViewMenu is not null) _restoreViewMenu.Enabled = ready;
+            if (_pivotTableMenu is not null) _pivotTableMenu.Enabled = ready;
             if (_perfMenu is not null) _perfMenu.Enabled = _doc is not null;
             if (_analysisMenu is not null) _analysisMenu.Enabled = ready;
             if (_vizMenu is not null) _vizMenu.Enabled = ready;
             if (_qualityMenu is not null) _qualityMenu.Enabled = ready;
             if (_advMenu is not null) _advMenu.Enabled = ready;
-            if (_pivotTopMenu is not null) _pivotTopMenu.Enabled = ready;
             UpdateEditState();
-            // 필드 라벨 토글(메뉴+툴바 버튼): 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
+            // 필드 라벨 토글: 문서 준비 + SPSS·SAS + 재임포트 중이 아닐 때만.
             bool labelToggleReady = ready && _workbook?.SupportsFieldLabels == true && !_reimporting;
             if (_fieldLabelsMenu is not null) _fieldLabelsMenu.Enabled = labelToggleReady;
-            if (_fieldLabelsToggleButton is not null) _fieldLabelsToggleButton.Enabled = labelToggleReady;
 
             bool open = _doc is not null && !_busy;
-            if (_copyCellsMenu is not null) _copyCellsMenu.Enabled = open;
+            if (_copyMenu is not null) _copyMenu.Enabled = open;
             if (_copyRowMenu is not null) _copyRowMenu.Enabled = open;
             if (_copyColMenu is not null) _copyColMenu.Enabled = open;
             if (_inspectorCopyText is not null) _inspectorCopyText.Enabled = open;
@@ -445,55 +354,6 @@ namespace NanumCsvViewer
             ColumnValueType.Boolean, ColumnValueType.Categorical, ColumnValueType.Ordinal,
             ColumnValueType.Identifier, ColumnValueType.String,
         };
-
-        // 헤더 셀(RowIndex -1) 우클릭에만 타입 메뉴를 제공. 데이터 셀은 기본(gridContextMenu) 유지.
-        private void OnCellContextMenuStripNeeded(object? sender, DataGridViewCellContextMenuStripNeededEventArgs e)
-        {
-            if (e.RowIndex != -1 || e.ColumnIndex < 0) return;
-            if (_doc is null || !_doc.IndexingComplete || _busy) return;
-            if (e.ColumnIndex >= _columnSummaries.Length) return;
-            _typeMenu?.Dispose();
-            _typeMenu = BuildTypeMenu(e.ColumnIndex);
-            e.ContextMenuStrip = _typeMenu;
-        }
-
-        private ContextMenuStrip BuildTypeMenu(int col)
-        {
-            var menu = new ContextMenuStrip();
-            var current = _columnSummaries[col].InferredType;
-            string header = col < grid.Columns.Count ? grid.Columns[col].HeaderText : $"Column{col + 1}";
-
-            menu.Items.Add(new ToolStripMenuItem(LT(
-                $"\"{header}\" — {current.DisplayName()}",
-                $"\"{header}\" — {current.DisplayName()}"))
-            { Enabled = false });
-            menu.Items.Add(new ToolStripSeparator());
-
-            var change = new ToolStripMenuItem(LT("Change Type", "타입 변경"));
-            foreach (var target in ManualTypeTargets)
-            {
-                var policy = ColumnTypeConversion.Classify(current, target);
-                var item = new ToolStripMenuItem(target.DisplayName())
-                {
-                    Checked = target == current,
-                    Enabled = target != current && policy != TypeChangePolicy.Blocked,
-                };
-                if (policy == TypeChangePolicy.Blocked)
-                    item.ToolTipText = LT("Blocked: lossy or unsafe reinterpretation", "차단됨: 손실·오해석 가능 전환");
-                else if (policy == TypeChangePolicy.RequiresValidation)
-                    item.ToolTipText = LT("Applies after sample validation", "표본 검증 후 적용");
-                var t = target;
-                item.Click += (_, _) => ApplyManualType(col, t);
-                change.DropDownItems.Add(item);
-            }
-            menu.Items.Add(change);
-
-            var reset = new ToolStripMenuItem(LT("Reset to Auto-detected", "자동 감지로 되돌리기"))
-            { Enabled = _manualTypeOverrides.ContainsKey(col) };
-            reset.Click += (_, _) => ResetManualType(col);
-            menu.Items.Add(reset);
-            return menu;
-        }
 
         // 변환 규칙(허용/제한적/차단)에 따라 수동 타입을 적용. 제한적 전환은 표본 검증 결과를 보여주고 확인받는다.
         private async void ApplyManualType(int col, ColumnValueType target)
@@ -1357,12 +1217,11 @@ namespace NanumCsvViewer
             }
         }
 
-        // 체크 상태를 코드로 설정(메뉴+툴바 버튼 동기화, 핸들러 재진입 억제).
+        // 체크 상태를 코드로 설정(핸들러 재진입 억제).
         private void SyncFieldLabelsChecked(bool value)
         {
             _syncingFieldLabels = true;
             if (_fieldLabelsMenu is not null) _fieldLabelsMenu.Checked = value;
-            if (_fieldLabelsToggleButton is not null) _fieldLabelsToggleButton.Checked = value;
             _syncingFieldLabels = false;
         }
 
@@ -1447,23 +1306,29 @@ namespace NanumCsvViewer
         private const int FacetSampleCap = 50_000;
 
         private void BuildFacetsMenuItem()
+            => _facetsMenu = MakeCmd("view.facets", (_, _) => ToggleFacets());
+
+        private void ToggleFacets() => SetFacetsVisible(!_facetsVisible);
+
+        /// <summary>
+        /// 패싯 패널을 켜거나 끈다. 켜 둔 상태는 문서와 별개로 기억하고, 패널 자체는 문서가 있을 때만 보인다
+        /// (시작 때 켜져 있어도 문서가 열릴 때까지 빈 패널을 보이지 않는다).
+        /// </summary>
+        internal void SetFacetsVisible(bool visible)
         {
-            var item = new ToolStripMenuItem(LT("Facets Panel", "패싯 패널"))
-            {
-                ShortcutKeys = Keys.F6,
-                ShowShortcutKeys = true,
-            };
-            item.Click += (_, _) => ToggleFacets();
-            viewToolStripMenuItem.DropDownItems.Add(item);
+            _facetsVisible = visible;
+            if (visible) EnsureFacetsPanel();
+            SyncFacetsPanel();
+            if (visible) BuildFacets();
+            else _facetCts?.Cancel();
+            RaisePanelChanged(PanelKind.Facets);
         }
 
-        private void ToggleFacets()
+        private void SyncFacetsPanel()
         {
-            EnsureFacetsPanel();
-            _facetsVisible = !_facetsVisible;
-            _facetsPanel!.Visible = _facetsVisible;
-            if (_facetsVisible) BuildFacets();
-            else _facetCts?.Cancel();
+            if (_facetsPanel is null) return;
+            bool show = _facetsVisible && _doc is not null;
+            if (_facetsPanel.Visible != show) _facetsPanel.Visible = show;
         }
 
         private void EnsureFacetsPanel()
@@ -1487,6 +1352,7 @@ namespace NanumCsvViewer
         // 현재(필터된) 뷰의 표본으로 컬럼별 분포를 다시 계산 → 크로스필터링.
         private async void BuildFacets()
         {
+            SyncFacetsPanel();
             if (_closing || _drainDepth > 0 || _facetsPanel is null || !_facetsVisible || _doc is null) return;
             _facetCts?.Cancel();
             using var cts = new CancellationTokenSource();
@@ -1887,11 +1753,11 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 분석 (M)
 
-        private async void AnalyzeDistribution()
+        private async void AnalyzeDistribution(int? preselect = null)
         {
             if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Numeric Distribution", "수치 분포"), _palette);
-            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), FirstNumericColumn());
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), preselect ?? FirstNumericColumn());
             var bins = dlg.AddNumeric(LT("Bins", "구간 수"), 1, 100, 10);
             if (!dlg.ShowOk(this)) return;
 
@@ -2175,13 +2041,15 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 기본통계 (이슈 #17)
 
-        private async void AnalyzeDescriptives()
+        private async void AnalyzeDescriptives(int? preselect = null)
         {
             if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Descriptive Statistics", "기술통계"), _palette);
             var list = dlg.AddCheckedList(LT("Columns", "컬럼"), ColumnLabels(), Math.Min(12, _doc.ColumnCount));
-            for (int c = 0; c < _columnSummaries.Length && c < list.Items.Count; c++)
-                if (IsNumericColumn(c)) list.SetItemChecked(c, true);
+            if (preselect is { } only && only >= 0 && only < list.Items.Count) list.SetItemChecked(only, true);
+            else
+                for (int c = 0; c < _columnSummaries.Length && c < list.Items.Count; c++)
+                    if (IsNumericColumn(c)) list.SetItemChecked(c, true);
             if (!dlg.ShowOk(this)) return;
             var cols = CheckedIndexes(list);
             if (cols.Count == 0) { ShowResult(LT("Descriptive Statistics", "기술통계"), LT("Select at least one column.", "컬럼을 하나 이상 선택하세요.")); return; }
@@ -2231,11 +2099,12 @@ namespace NanumCsvViewer
             });
         }
 
-        private async void AnalyzeFrequency()
+        // preselect: 헤더 우클릭 ▸ 빠른 분석이 컬럼을 미리 골라 대화상자를 연다(그 외에는 기본 컬럼).
+        private async void AnalyzeFrequency(int? preselect = null)
         {
             if (_doc is null || _closing || _busy || !_doc.IndexingComplete) return;
             using var dlg = new ParamDialog(LT("Frequency Table", "빈도분석"), _palette);
-            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), 0);
+            var col = dlg.AddCombo(LT("Column", "컬럼"), ColumnLabels(), preselect ?? 0);
             var topN = dlg.AddNumeric(LT("Max rows", "최대 행 수"), 1, 10_000, 100);
             if (!dlg.ShowOk(this)) return;
 
@@ -2564,7 +2433,7 @@ namespace NanumCsvViewer
             if (_qualityPanel is not null)
             {
                 _qualityPanel.ShowFindings(Array.Empty<QualityFinding>(), "");
-                SetQualityPanelVisible(false);
+                if (!_findingsPinned) SetQualityPanelVisible(false);   // 사용자가 켜 둔(고정한) 패널은 문서가 바뀌어도 그대로 둔다
             }
         }
 
@@ -2576,24 +2445,36 @@ namespace NanumCsvViewer
             _qualityPanel.JumpRequested += async row => await JumpToSourceRowAsync(row);
             _qualityPanel.ExportRequested += ExportQualityReport;
             _qualityPanel.AdvancedStatsRequested += ShowAdvancedStatsFromQuality;
-            _qualityPanel.CloseRequested += () => SetQualityPanelVisible(false);
+            _qualityPanel.CloseRequested += () => SetFindingsVisible(false);
             // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
             Controls.Add(_qualityPanel);
             Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(MainContent) + 1);
         }
 
+        private bool _findingsPinned;   // 사용자가 직접(메뉴·설정·레이아웃) 켠 검사 결과 패널: 문서·탭이 바뀌어도 자동으로 숨기지 않는다
+        private bool _findingsShown;    // 패널을 보이게 했는가(창이 아직 안 보일 때도 맞는 값 — Control.Visible은 부모가 안 보이면 false)
+
         private void SetQualityPanelVisible(bool visible)
         {
             EnsureQualityPanel();
             _qualityPanel!.Visible = visible;
+            _findingsShown = visible;
             if (_qualityPanelMenu is not null) _qualityPanelMenu.Checked = visible;
             PerformLayout();
+            RaisePanelChanged(PanelKind.Findings);
+        }
+
+        /// <summary>사용자가 검사 결과 패널을 직접 켜거나 끈다(켜면 문서·탭이 바뀌어도 유지).</summary>
+        internal void SetFindingsVisible(bool visible)
+        {
+            _findingsPinned = visible;
+            SetQualityPanelVisible(visible);
         }
 
         private void ToggleQualityPanel()
         {
             EnsureQualityPanel();
-            SetQualityPanelVisible(!_qualityPanel!.Visible);
+            SetFindingsVisible(!_findingsShown);
         }
 
         // 발견 목록을 결정적 순서(심각도↓·컬럼·종류)로 패널에 반영하고 표시한다.

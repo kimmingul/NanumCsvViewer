@@ -51,47 +51,11 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
 
-  <data name="Menu_File" xml:space="preserve"><value>파일</value></data>
-  <data name="Menu_Open" xml:space="preserve"><value>열기...</value></data>
-  <data name="Menu_Quit" xml:space="preserve"><value>종료</value></data>
-  <data name="Menu_Edit" xml:space="preserve"><value>편집</value></data>
-  <data name="Menu_Find" xml:space="preserve"><value>찾기...</value></data>
-  <data name="Menu_FindNext" xml:space="preserve"><value>다음 찾기</value></data>
-  <data name="Menu_ApplyFilter" xml:space="preserve"><value>필터 적용</value></data>
-  <data name="Menu_FilterByCell" xml:space="preserve"><value>선택한 셀 값으로 필터</value></data>
-  <data name="Menu_ClearFilter" xml:space="preserve"><value>필터 해제</value></data>
-  <data name="Menu_SortAsc" xml:space="preserve"><value>오름차순 정렬 (현재 열)</value></data>
-  <data name="Menu_SortDesc" xml:space="preserve"><value>내림차순 정렬 (현재 열)</value></data>
-  <data name="Menu_ClearSort" xml:space="preserve"><value>정렬 해제</value></data>
-  <data name="Menu_View" xml:space="preserve"><value>보기</value></data>
-  <data name="Menu_Encoding" xml:space="preserve"><value>인코딩</value></data>
-  <data name="Menu_DetailPanel" xml:space="preserve"><value>상세 패널</value></data>
-  <data name="Menu_Language" xml:space="preserve"><value>언어</value></data>
+  <!-- 메뉴·툴바·우클릭 메뉴의 글자는 Ui/CommandShortcuts.cs(단축키가 있는 명령)와 각 메뉴 구성 코드(LT en/ko)에 있다 — 여기에는 언어 이름만 남긴다. -->
   <data name="Lang_English" xml:space="preserve"><value>English</value></data>
   <data name="Lang_Korean" xml:space="preserve"><value>한국어</value></data>
-  <data name="Menu_Help" xml:space="preserve"><value>도움말</value></data>
-  <data name="Menu_Usage" xml:space="preserve"><value>사용법</value></data>
-  <data name="Menu_About" xml:space="preserve"><value>정보</value></data>
 
-  <data name="Tb_Open" xml:space="preserve"><value>열기</value></data>
-  <data name="Tb_FindLabel" xml:space="preserve"><value>찾기:</value></data>
-  <data name="Tb_FindNext" xml:space="preserve"><value>다음</value></data>
-  <data name="Tb_FilterByCell" xml:space="preserve"><value>셀 값으로 필터</value></data>
-  <data name="Tb_FilterLabel" xml:space="preserve"><value>필터:</value></data>
-  <data name="Tb_Apply" xml:space="preserve"><value>적용</value></data>
-  <data name="Tb_Clear" xml:space="preserve"><value>해제</value></data>
-  <data name="Tb_Details" xml:space="preserve"><value>상세 (F4)</value></data>
-
-  <data name="Tip_FilterByCell" xml:space="preserve"><value>선택한 셀의 열을 그 값으로 필터(기존 필터에 AND 누적)</value></data>
-  <data name="Tip_SortAsc" xml:space="preserve"><value>현재 열을 오름차순으로 정렬</value></data>
-  <data name="Tip_SortDesc" xml:space="preserve"><value>현재 열을 내림차순으로 정렬</value></data>
-  <data name="Tip_ClearSort" xml:space="preserve"><value>정렬 해제(파일 순서로 복원)</value></data>
-  <data name="Tip_Detail" xml:space="preserve"><value>선택한 행의 전체 내용을 우측 패널에 표시</value></data>
-  <data name="Tip_Encoding" xml:space="preserve"><value>텍스트 인코딩 (클릭하여 변경)</value></data>
-  <data name="Tip_Theme" xml:space="preserve"><value>밝은/어두운 테마 전환</value></data>
-  <data name="Ctx_FilterByCell" xml:space="preserve"><value>이 셀 값으로 필터</value></data>
-
-  <data name="Status_OpenPrompt" xml:space="preserve"><value>파일을 여세요 (File ▸ Open).</value></data>
+  <data name="Status_OpenPrompt" xml:space="preserve"><value>파일을 여세요 (파일 ▸ 열기…).</value></data>
   <data name="Status_Loading" xml:space="preserve"><value>불러오는 중...</value></data>
   <data name="Status_LoadingProgressFmt" xml:space="preserve"><value>불러오는 중...  {0} 행 인덱싱  ({1} / {2})</value></data>
   <data name="Status_ReadyFmt" xml:space="preserve"><value>준비 완료 · {0} 행 · {1} · {2} 열 · 구분자 '{3}' · {4} 모드 · {5} ms · 필터/정렬 준비됨{6}</value></data>
@@ -138,14 +102,14 @@ UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
   <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — 빠른 사용 안내
 
 [열기]
-• File ▸ Open (Ctrl+O)로 .csv / .txt 와 함께 엑셀(.xlsx/.xls)·SAS(.sas7bdat)·SPSS(.sav)도 엽니다.
+• 파일 ▸ 열기…(Ctrl+O)로 .csv / .txt 와 함께 엑셀(.xlsx/.xls)·SAS(.sas7bdat)·SPSS(.sav)도 엽니다.
 • 첫 페이지는 즉시 표시되고 나머지는 백그라운드로 인덱싱됩니다(하단 진행바). 인덱싱 중에도 스크롤할 수 있습니다.
 • 시트가 여러 개인 엑셀은 하단 시트 탭으로 전환합니다.
-• SPSS·SAS는 보기 ▸ 필드 라벨 표시로 코드·변수명을 값 라벨·변수 라벨로 전환합니다.
+• SPSS·SAS는 보기 ▸ 필드 라벨로 코드·변수명을 값 라벨·변수 라벨로 전환합니다.
 • SPSS·SAS에 선언된 타입(통화·퍼센트·날짜·범주·순서형 등)을 자동으로 매칭하며, 통화·퍼센트 열은 기호를 함께 표시합니다.
 
 [인코딩]
-• 자동 감지(UTF-8 / UTF-8 BOM / CP949·EUC-KR). 틀린 경우 상태바 우측의 인코딩 위젯을 클릭하거나 보기 ▸ 인코딩에서 바꿉니다. 재인덱싱은 필요 없습니다.
+• 자동 감지(UTF-8 / UTF-8 BOM / CP949·EUC-KR). 틀린 경우 상태바 우측의 인코딩 위젯을 클릭하거나 데이터 ▸ 인코딩에서 바꿉니다. 재인덱싱은 필요 없습니다.
 
 [찾기]
 • 찾기 입력란에 입력 후 Enter, 또는 F3로 다음 일치로 이동(대소문자 무시, 끝에서 처음으로 순환).
@@ -153,7 +117,7 @@ UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
 [필터]
 • 헤더의 깔때기 아이콘으로 타입별 필터: 숫자·시간은 범위, 범주·불리언은 체크박스, 문자열·식별자는 텍스트 술어(포함·정규식·목록·빈값).
 • 활성 조건은 그리드 위 칩으로 표시 — ✕로 제거, 클릭으로 재편집, 모두(AND)/하나라도(OR) 전환.
-• 셀 값으로 필터(Ctrl+B)·고급 식 필터(NOT/AND/OR/괄호, 정규식은 matches / matches_cs / !matches, * = 모든 컬럼 예: * matches "x"). 셀 하나에서 정규식 시간이 초과되면 그 셀은 불일치로 처리하고 ⚠로 알립니다. 해제로 모두 지웁니다.
+• 이 셀 값으로 필터(Ctrl+B)·이 값 제외·이 값 이상/이하(≥ / ≤; 셀 우클릭, 컬럼 타입에 따라 숫자·날짜·문자열로 비교)·고급 식 필터(Ctrl+Shift+F; NOT/AND/OR/괄호, 정규식은 matches / matches_cs / !matches, * = 모든 컬럼 예: * matches "x"). 셀 하나에서 정규식 시간이 초과되면 그 셀은 불일치로 처리하고 ⚠로 알립니다. 필터 해제로 모두 지웁니다.
 
 [정렬]
 • 컬럼 헤더를 클릭해 정렬(다시 클릭하면 방향 전환).
@@ -162,31 +126,35 @@ UTF-8 또는 CP949(EUC-KR) 파일을 사용하세요.</value></data>
 
 [분석]
 • 패싯 패널(F6): 컬럼별 분포(히스토그램·상위 값)를 보고 막대를 클릭해 즉시 필터(크로스필터링).
-• 분석·통계·피벗 메뉴: 분포·상관·검정·그룹 집계·피벗 표/차트. 내보내기: CSV/Markdown/JSON/HTML.
+• 데이터 / 통계 / 시각화 메뉴: 분포·상관·검정·모형·그룹 집계·피벗 표(데이터)·피벗 차트(시각화). 내보내기: 파일 ▸ 현재 보기 내보내기 ▸ CSV/Markdown/JSON/HTML.
 
 [상세 패널]
-• 상세 버튼 또는 F4로 토글. 선택한 행의 모든 컬럼을 컬럼명+값으로 표시 — 줄바꿈이 있는 셀을 읽기에 좋습니다.
+• 툴바 버튼, 보기 ▸ 행 상세 패널, 또는 F4로 토글(설정 ▸ 패널·배치에서 켜 두지 않으면 시작할 때는 꺼져 있습니다). 선택한 행의 모든 컬럼을 컬럼명+값으로 표시 — 줄바꿈이 있는 셀을 읽기에 좋습니다.
 
 [상태 표시등]
 • 상태바 우측 끝의 색 점: ⚪ 대기 · 🟡 불러오는 중 · 🟠 작업 중 · 🟢 준비 완료.
 
-[테마]
-• 툴바 우측의 테마 토글로 밝은/어두운 모드를 전환합니다.
+[설정]
+• 도구 ▸ 설정…(Ctrl+,) — 일반(테마 시스템 / 밝게 / 어둡게, 언어 자동 / English / 한국어; 보기 ▸ 테마·언어로도 바꿉니다), 패널·배치, 그리드, 파일, AI 에이전트, 단축키.
+• 시작할 때 AI 패널은 켜지고 행 상세 패널·패싯·탐색기는 꺼집니다. 설정 ▸ 패널·배치에서 바꾸거나 "마지막 상태 기억"을 켤 수 있습니다. AI 에이전트(omp)는 실행 시가 아니라 첫 메시지를 보낼 때 시작합니다.
 
 [작업 공간(여러 파일)]
 • 열린 파일은 각각 탭입니다. Ctrl+Tab / Ctrl+Shift+Tab으로 전환, Ctrl+W 또는 가운데 클릭으로 닫습니다. 통합 문서(엑셀·SAS·SPSS·SQLite)는 탭 하나에 하단 시트 버튼으로 전환합니다.
 • 보기 ▸ 작업 공간 탐색기(Ctrl+Shift+W)에서 원본·테이블·뷰를 봅니다. 데이터 파일을 원본으로 추가한 뒤 마법사로 조인·이어 붙이기·비교·그룹 집계를 합니다(조인 진단이 안 맞는 키·중복 키를 먼저 보여 줍니다).
 • 작업 공간 ▸ 새 질의(Ctrl+Alt+Q)는 SQL 편집기입니다(DuckDB, SELECT 문 하나만). CSV 열은 테이블 "T"에 타입이 붙고 "T__raw"는 모든 열이 원본 텍스트입니다. 식별자 같은 열은 텍스트이므로 숫자 비교는 CAST("id" AS BIGINT)를 쓰세요.
 • 뷰는 읽기 전용 탭입니다(편집하려면 파일로 저장한 뒤 여세요). ⚠는 원본이 바뀐 뷰이며, 새로 고침하면 다시 계산하고 그 탭의 필터·정렬이 초기화됩니다. 뷰가 쓰는 원본은 이름 바꾸기·제거가 거부됩니다.
-• 파일 ▸ 작업 공간 열기(Ctrl+Shift+O) / 저장은 원본과 뷰 정의를 .ncvws 파일에 담습니다(데이터는 저장 안 함, 없는 파일은 위치 지정/건너뛰기).
+• 파일 ▸ 작업 공간 열기…(Ctrl+Shift+O) / 작업 공간 저장(Ctrl+S, 처음에는 이름을 묻습니다)은 원본과 뷰 정의, 패널 배치를 .ncvws 파일에 담습니다(데이터는 저장 안 함, 없는 파일은 위치 지정/건너뛰기). 작업 공간을 열면 앱 기본값 대신 그 작업 공간의 배치를 복원합니다.
 • 작업 공간 ▸ 작업 공간 메모…에 자유 텍스트(데이터 설명, 핵심 관계, 분석 목표; 최대 20,000자)를 .ncvws 파일과 함께 저장합니다. AI 에이전트는 이를 사용자가 쓴 데이터로 읽을 뿐(ws.notes), 데이터 정책·승인 모드·사용자 요청을 바꾸지 못합니다.
 • 저장한 .ncvws(형식 v2)에는 AI 에이전트 대화(세션 연결), 작업 공간별 승인 모드·데이터 공유·로컬 Python 설정, 각 뷰를 누가 만들었는지도 기록됩니다. 작업 공간을 열면 그 대화를 이어 가며, 대화가 없으면(예: 다른 PC에서 온 파일) 새 대화를 시작하고 채팅에 안내가 표시됩니다. 작업 공간 ▸ 이 작업 공간의 새 대화 시작으로 연결을 바꿉니다.
-• 작업 공간 에이전트 설정은 더 엄격하게만 바꿀 수 있습니다: 실제 값은 앱 설정과 작업 공간 값 중 더 엄격한 쪽입니다(승인: 항상 묻기 > 편집 자동 승인 > 모두 허용, 데이터: 요약만 > 요청마다 승인 > 허용, 로컬 Python: 끔 > 켬). 완화하려면 앱 기본값을 바꾸세요(보기 ▸ AI 에이전트 설정…에서 "앱 기본값" 선택). 작업 공간이 무언가를 제한하면 채팅에 "🔒 작업 공간" 표시가 나타납니다.
+• 작업 공간 에이전트 설정은 더 엄격하게만 바꿀 수 있습니다: 실제 값은 앱 설정과 작업 공간 값 중 더 엄격한 쪽입니다(승인: 항상 묻기 > 편집 자동 승인 > 모두 허용, 데이터: 요약만 > 요청마다 승인 > 허용, 로컬 Python: 끔 > 켬). 완화하려면 앱 기본값을 바꾸세요(도구 ▸ 설정… ▸ AI 에이전트에서 "앱 기본값" 선택). 작업 공간이 무언가를 제한하면 채팅에 "🔒 작업 공간" 표시가 나타납니다.
 • 작업 공간 탐색기에서 AI 에이전트가 만든 뷰는 ◈ 대신 ✦로 표시되고, 툴팁에 만든 주체·시각·요청 내용이 나옵니다. 이전(v1) 파일의 뷰에는 이 정보가 없습니다.
 
-[단축키]
-Ctrl+O 열기 · Ctrl+Q 종료 · Ctrl+F 찾기 · F3 다음 찾기 · Ctrl+G 셀로 이동(행 · R12C3 · C3 · 이름:12)
-Ctrl+B 셀 값으로 필터 · Ctrl+Shift+L 필터 해제 · Ctrl+Shift+S 정렬 해제
-F4 상세 패널 · F6 패싯 패널 · F1 이 도움말
-Ctrl+Tab / Ctrl+Shift+Tab 다음/이전 탭 · Ctrl+W 탭 닫기 · Ctrl+Shift+W 작업 공간 탐색기 · Ctrl+Alt+Q 새 질의 · Ctrl+Shift+O 작업 공간 열기</value></data>
+[우클릭 메뉴]
+• 셀 우클릭: 복사, 필터 ▸(이 값 / 이 값 제외 / ≥ / ≤), 이 컬럼 정렬, 컬럼 숨기기, 조건부 서식, AI에게 묻기 ▸(이 컬럼 요약 / 이 값을 가진 행 분석 — AI 패널을 열고 질문을 보냅니다), 그리고 편집 명령(시트 편집을 켜기 전에는 비활성, 맨 위 "시트 편집 켜기"로 바로 켤 수 있음).
+• 컬럼 헤더 우클릭: 정렬, 필터, 숨기기, 여기까지 열 고정, 너비 자동 맞춤, 타입 변경, 빠른 분석 ▸(그 컬럼의 기술통계 / 빈도 / 분포), 시트 편집 모드에서는 컬럼 이름 변경·삽입·삭제.
+• 행 번호 우클릭: 행 복사, 행 상세 보기, 행 삽입/삭제(시트 편집 모드).
+• 탭 우클릭: 탭 닫기, 다른 탭 닫기, 모든 탭 닫기, 경로 복사, 폴더 열기, 작업 공간 명령.
+
+[단축키]  (도구 ▸ 설정… ▸ 단축키에도 모두 나옵니다)
+{SHORTCUTS}</value></data>
 </root>

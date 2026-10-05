@@ -153,6 +153,11 @@ namespace NanumCsvViewer.Workspace
         public bool ExplorerVisible { get; set; }
         /// <summary>(v2) 에이전트 대화·제한 설정·메모. v1 파일에는 없다(null).</summary>
         public WorkspaceFileAgent? Agent { get; set; }
+        /// <summary>
+        /// (v3.2, 형식 v2에 선택 절로 추가 — 옛 앱은 모르는 속성이라 무시한다) 이 작업 공간을 마지막으로 저장할 때의 패널 상태(표시 여부·폭). v1·v2 파일에는 없다(null) — 그러면 앱 기본 레이아웃을 쓴다
+        /// (옛 <see cref="ExplorerVisible"/>만 따른다). 저장하지 않은 변경 확인(<see cref="WorkspaceFile.Signature"/>)에는 들어가지 않는다.
+        /// </summary>
+        public PanelLayout? Layout { get; set; }
     }
 
     /// <summary>저장 직전의 원본 한 개(작업 공간·탭에서 읽은 값).</summary>
@@ -249,6 +254,7 @@ namespace NanumCsvViewer.Workspace
                 v.Request = v.CreatedBy == ViewProvenance.AgentKind ? ViewProvenance.ClipRequest(v.Request) : null;
             }
             m.Agent = NormalizeAgent(m.Agent);
+            m.Layout = m.Layout?.Normalized();
             var tabs = new List<WorkspaceFileTab>();
             int active = -1;
             for (int i = 0; i < (m.Tabs?.Count ?? 0); i++)
@@ -380,10 +386,11 @@ namespace NanumCsvViewer.Workspace
             IEnumerable<WorkspaceCaptureTab> tabs,
             int activeTab,
             bool explorerVisible,
-            WorkspaceFileAgent? agent = null)
+            WorkspaceFileAgent? agent = null,
+            PanelLayout? layout = null)
         {
             string dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(workspacePath)) ?? "";
-            var model = new WorkspaceFileModel { ExplorerVisible = explorerVisible };
+            var model = new WorkspaceFileModel { ExplorerVisible = explorerVisible, Layout = layout?.Clone().Normalized() };
             var indexByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             int AddSource(WorkspaceCaptureSource s)

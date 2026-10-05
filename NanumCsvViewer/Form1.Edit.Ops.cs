@@ -822,6 +822,7 @@ namespace NanumCsvViewer
             if (cur.AsSpan().SequenceEqual(desired)) return false;
 
             if (grid.IsCurrentCellInEditMode) grid.CancelEdit();
+            SuspendFrozenColumns(); // 컬럼 객체를 옮기는 동안은 고정을 풀어 둔다(고정 열 앞에 고정 안 된 열을 끼울 수 없다)
             var map = new int[cur.Length]; // 옛 보이는 번호 → 새 번호(사라지면 -1)
             bool removedAny = false, shifted = false;
             for (int i = 0; i < cur.Length; i++)
@@ -898,6 +899,7 @@ namespace NanumCsvViewer
                 if (_sortKeys.Count == 0) { doc.ResetViewOrder(); grid.Invalidate(); }
             }
             else if (shifted) UpdateSortGlyphs();
+            ApplyFrozenColumns();   // 위에서 풀어 둔 고정 열을 고정 열 수에 맞춰 다시 건다
             return true;
         }
 
@@ -940,6 +942,13 @@ namespace NanumCsvViewer
                 var old = _hiddenColumns.ToArray();
                 _hiddenColumns.Clear();
                 foreach (int c in old) if (Map(c) is var n && n >= 0) _hiddenColumns.Add(n);
+            }
+            if (_frozenColumnCount > 0)
+            {
+                // 고정 열 수에서 사라진 열 몫을 뺀다(고정 영역 안의 열이 지워졌을 때). 옮김·삽입은 개수를 바꾸지 않는다.
+                int kept = 0;
+                for (int i = 0; i < Math.Min(_frozenColumnCount, map.Length); i++) if (Map(i) >= 0) kept++;
+                _frozenColumnCount = kept;
             }
 
             if (!shifted) return;

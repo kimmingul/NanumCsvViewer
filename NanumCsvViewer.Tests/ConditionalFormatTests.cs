@@ -717,18 +717,18 @@ namespace NanumCsvViewer.Tests
         {
             OnForm("id,score\n1,30\n2,10\n3,20\n", (form, doc, csv) =>
             {
-                var button = Get<System.Windows.Forms.ToolStripButton>(form, "_cfUndoButton");
+                var cfToolbar = Get<System.Windows.Forms.ToolStripButton>(form, "_cfButton");
                 var undoMenu = Get<System.Windows.Forms.ToolStripMenuItem>(form, "_cfUndoMenu");
                 var redoMenu = Get<System.Windows.Forms.ToolStripMenuItem>(form, "_cfRedoMenu");
 
                 Assert.Null(form.AgentUndoConditionalFormat());                    // 이력 없음
                 Assert.Null(form.AgentRedoConditionalFormat());
-                Assert.False(button.Enabled);
                 Assert.False(undoMenu.Enabled);
+                Assert.True(cfToolbar.Enabled);                                   // 툴바 단추는 서식 관리자를 연다: 문서가 있으면 켜짐(되돌리기는 보기 메뉴)
 
                 form.AgentAddConditionalFormat(Draft("a", "score > 15"));
                 form.AgentAddConditionalFormat(Draft("b", "score > 25", "blue"));
-                Assert.True(button.Enabled); Assert.True(undoMenu.Enabled); Assert.False(redoMenu.Enabled);
+                Assert.True(undoMenu.Enabled); Assert.False(redoMenu.Enabled);
 
                 var undone = form.AgentUndoConditionalFormat()!;
                 Assert.Equal(("add cf2", 1), (undone.Description, undone.RuleCount));
@@ -775,7 +775,7 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal(20, undone);
                 Assert.Equal(4, form.AgentListConditionalFormats().Count);          // 가장 오래된 4건은 되돌릴 수 없다
                 Assert.Equal(4, SavedViewStore.LoadConditionalFormats(csv).Count);
-                Assert.False(Get<System.Windows.Forms.ToolStripButton>(form, "_cfUndoButton").Enabled);
+                Assert.False(Get<System.Windows.Forms.ToolStripMenuItem>(form, "_cfUndoMenu").Enabled);
             });
         }
 

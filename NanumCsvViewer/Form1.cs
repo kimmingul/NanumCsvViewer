@@ -45,7 +45,7 @@ namespace NanumCsvViewer
         // 멀티라인 셀 행 높이 계산용
         private int _singleLineHeight = 22;
         private int _lineHeight = 18;
-        private const int MaxCellLines = 6;
+        private int MaxCellLines => Math.Clamp(_settings.MaxCellLines, 1, 20);
 
         // 명령줄(탐색기 연결 프로그램)로 전달된 시작 파일. OnShown에서 한 번 연다.
         private string? _startupPath;
@@ -55,6 +55,7 @@ namespace NanumCsvViewer
             _settings = settings;
             _startupPath = startupPath;
             InitializeComponent();
+            RestoreWindowGeometry();   // 저장된 창 위치·크기(모니터 구성이 바뀌었으면 보이는 곳으로)
             Text = ProgramName;
 
             // 창/작업표시줄 아이콘: exe에 박힌 앱 아이콘(app.ico) 사용
@@ -67,13 +68,17 @@ namespace NanumCsvViewer
             BuildFeatureMenus();
             BuildTabFeatures();
             BuildWorkspaceFeatures();
-            ApplyIcons();
+            ComposeMainMenu();      // Ui/Form1.MainMenu.cs — 10개 최상위 메뉴 조립
+            ComposeToolbar();       // Ui/Form1.Toolbar.cs — 글리프 아이콘 툴바
             ApplyLocalization();
+            DpiChanged += (_, _) => RefreshToolbarIcons();
 
             // 셀 내 줄바꿈을 여러 줄로 표시
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+            ApplyGridFont();
             _lineHeight = grid.Font.Height + 2;
             _singleLineHeight = Math.Max(grid.RowTemplate.Height, _lineHeight + 6);
+            HookLayoutPersistence();
 
             // 헤더에 컬럼명 + 타입 배지를 한 줄로 그릴 공간 확보
             grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
@@ -89,12 +94,8 @@ namespace NanumCsvViewer
             _detailTimer.Tick += (_, _) => { _detailTimer.Stop(); UpdateDetailPanel(); };
 
             // 테마: 저장값(Light/Dark) 우선, 없으면 Windows 시스템 테마 따름.
-            _theme = _settings.Theme switch
-            {
-                "Dark" => AppTheme.Dark,
-                "Light" => AppTheme.Light,
-                _ => ThemeManager.DetectSystem(),
-            };
+            _theme = ResolveTheme(_settings.Theme);
+            WatchSystemTheme();
             ApplyTheme(_theme);
 
             UpdateFeatureState();
@@ -103,47 +104,6 @@ namespace NanumCsvViewer
         }
 
         // ---------------------------------------------------------------- UI 설정(아이콘 · 인코딩 메뉴)
-
-        private void ApplyIcons()
-        {
-            // 메뉴 아이콘
-            openToolStripMenuItem.Image = UiIcons.Open();
-            quitToolStripMenuItem.Image = UiIcons.Quit();
-            findMenuItem.Image = UiIcons.Find();
-            findNextMenuItem.Image = UiIcons.FindNext();
-            applyFilterMenuItem.Image = UiIcons.Filter();
-            editFilterByCellMenuItem.Image = UiIcons.FilterByCell();
-            clearFilterToolStripMenuItem.Image = UiIcons.ClearFilter();
-            sortAscMenuItem.Image = UiIcons.SortAscending();
-            sortDescMenuItem.Image = UiIcons.SortDescending();
-            clearSortToolStripMenuItem.Image = UiIcons.ClearSort();
-            encodingMenuItem.Image = UiIcons.Encoding();
-            detailPanelMenuItem.Image = UiIcons.DetailPanel();
-            aboutToolStripMenuItem.Image = UiIcons.About();
-            filterByCellMenuItem.Image = UiIcons.FilterByCell();
-
-            // 툴바 버튼(이미지 + 텍스트)
-            SetButtonImage(openToolStripButton, UiIcons.Open());
-            SetButtonImage(findNextButton, UiIcons.FindNext());
-            SetButtonImage(filterByCellButton, UiIcons.FilterByCell());
-            SetButtonImage(applyFilterButton, UiIcons.Filter());
-            SetButtonImage(clearFilterButton, UiIcons.ClearFilter());
-            SetButtonImage(sortAscButton, UiIcons.SortAscending());
-            SetButtonImage(sortDescButton, UiIcons.SortDescending());
-            SetButtonImage(clearSortButton, UiIcons.ClearSort());
-            SetButtonImage(detailToggleButton, UiIcons.DetailPanel());
-
-            encodingStatusButton.Image = UiIcons.Encoding();
-            encodingStatusButton.ImageScaling = ToolStripItemImageScaling.None;
-        }
-
-        // 아이콘 이미지만 코드에서 제공하고, 표시 방식(DisplayStyle: Image/Text/ImageAndText)은
-        // Designer가 단일 소스로 결정하게 둔다(런타임이 Designer 설정을 덮어쓰지 않도록).
-        private static void SetButtonImage(ToolStripButton btn, Image img)
-        {
-            btn.Image = img;
-            btn.ImageScaling = ToolStripItemImageScaling.None;
-        }
 
         // View 메뉴와 상태바 인코딩 드롭다운을 같은 목록(SelectableNames)으로 채움.
         private void BuildEncodingMenu()
@@ -168,13 +128,10 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- Localization (i18n)
 
-        // View ▸ Language 하위 메뉴 구성(English / 한국어). OS 자동 감지는 시작값.
+        // 보기 ▸ 언어 하위 메뉴 구성(자동 / English / 한국어). 체크·글자는 SyncLanguageThemeMenus(Ui/Form1.MainMenu.cs)가 맞춘다.
         private void BuildLanguageMenu()
         {
-            AddLang("en", "Lang_English");
-            AddLang("ko", "Lang_Korean");
-
-            void AddLang(string code, string key)
+            foreach (string code in new[] { "auto", "en", "ko" })
             {
                 var item = new ToolStripMenuItem { Tag = code };
                 item.Click += OnLanguagePick;
@@ -184,68 +141,16 @@ namespace NanumCsvViewer
 
         private void OnLanguagePick(object? sender, EventArgs e)
         {
-            if (sender is not ToolStripMenuItem item || item.Tag is not string code) return;
-            if (code == Loc.CurrentLanguage) return;
-            _settings.Language = code;
-            _settings.Save();
-            Loc.Apply(code);
-            ApplyLocalization();         // 모든 정적 텍스트 즉시 갱신
-            RefreshDynamicTexts();       // 상태바 등 동적 텍스트 갱신
+            if (sender is not ToolStripMenuItem { Tag: string code }) return;
+            ApplyLanguageSetting(code);
         }
 
         // 메뉴/툴바/툴팁/컨텍스트 등 모든 정적 UI 텍스트를 현재 언어로 설정(코드가 단일 소스).
         private void ApplyLocalization()
         {
+            // 메뉴·툴바 글자와 툴팁은 모두 RegisterLabel/LocalizeToolbar가 현재 언어로 다시 정한다.
             LocalizeFeatureMenus();
-            // 메뉴
-            fileToolStripMenuItem.Text = Loc.T("Menu_File");
-            openToolStripMenuItem.Text = Loc.T("Menu_Open");
-            quitToolStripMenuItem.Text = Loc.T("Menu_Quit");
-            editToolStripMenuItem.Text = Loc.T("Menu_Edit");
-            findMenuItem.Text = Loc.T("Menu_Find");
-            findNextMenuItem.Text = Loc.T("Menu_FindNext");
-            applyFilterMenuItem.Text = Loc.T("Menu_ApplyFilter");
-            editFilterByCellMenuItem.Text = Loc.T("Menu_FilterByCell");
-            clearFilterToolStripMenuItem.Text = Loc.T("Menu_ClearFilter");
-            sortAscMenuItem.Text = Loc.T("Menu_SortAsc");
-            sortDescMenuItem.Text = Loc.T("Menu_SortDesc");
-            clearSortToolStripMenuItem.Text = Loc.T("Menu_ClearSort");
-            viewToolStripMenuItem.Text = Loc.T("Menu_View");
-            encodingMenuItem.Text = Loc.T("Menu_Encoding");
-            detailPanelMenuItem.Text = Loc.T("Menu_DetailPanel");
-            languageMenuItem.Text = Loc.T("Menu_Language");
-            helpToolStripMenuItem.Text = Loc.T("Menu_Help");
-            usageMenuItem.Text = Loc.T("Menu_Usage");
-            aboutToolStripMenuItem.Text = Loc.T("Menu_About");
-
-            // 언어 하위 항목(라벨 + 체크)
-            foreach (ToolStripItem it in languageMenuItem.DropDownItems)
-                if (it is ToolStripMenuItem mi && mi.Tag is string code)
-                {
-                    mi.Text = Loc.T(code == "ko" ? "Lang_Korean" : "Lang_English");
-                    mi.Checked = code == Loc.CurrentLanguage;
-                }
-
-            // 툴바
-            openToolStripButton.Text = Loc.T("Tb_Open");
-            findLabel.Text = Loc.T("Tb_FindLabel");
-            findNextButton.Text = Loc.T("Tb_FindNext");
-            filterByCellButton.Text = Loc.T("Tb_FilterByCell");
-            filterByCellButton.ToolTipText = Loc.T("Tip_FilterByCell");
-            filterColumnLabel.Text = Loc.T("Tb_FilterLabel");
-            applyFilterButton.Text = Loc.T("Tb_Apply");
-            clearFilterButton.Text = Loc.T("Tb_Clear");
-            sortAscButton.ToolTipText = Loc.T("Tip_SortAsc");
-            sortDescButton.ToolTipText = Loc.T("Tip_SortDesc");
-            clearSortButton.Text = Loc.T("Menu_ClearSort");
-            clearSortButton.ToolTipText = Loc.T("Tip_ClearSort");
-            detailToggleButton.Text = Loc.T("Tb_Details");
-            detailToggleButton.ToolTipText = Loc.T("Tip_Detail");
-            themeToggleButton.ToolTipText = Loc.T("Tip_Theme");
-            encodingStatusButton.ToolTipText = Loc.T("Tip_Encoding");
-
-            // 컨텍스트 메뉴
-            filterByCellMenuItem.Text = Loc.T("Ctx_FilterByCell");
+            SyncLanguageThemeMenus();
 
             // 필터 컬럼 콤보 첫 항목(열려 있는 경우)
             if (filterColumnCombo.Items.Count > 0) filterColumnCombo.Items[0] = Loc.T("Combo_AllColumns");
@@ -255,6 +160,7 @@ namespace NanumCsvViewer
         private void RefreshDynamicTexts()
         {
             RefreshSignal();
+            if (!outerSplit.Panel2Collapsed) { _detailTimer.Stop(); UpdateDetailPanel(); }   // 행 상세 머리글도 새 언어로
             if (_doc is null) { statusLabel.Text = Loc.T("Status_OpenPrompt"); return; }
             if (HasAnyFilter || _sortKeys.Count > 0) UpdateFilterStatus();
             else statusLabel.Text = Loc.F("Status_NoFilterFmt", _doc.DataRowsAvailable.ToString("N0"), FormatBytes(_doc.FileLength));
@@ -266,8 +172,7 @@ namespace NanumCsvViewer
         {
             _theme = theme;
             _palette = ThemeManager.Apply(this, theme);
-            // 토글 버튼 아이콘: 현재 다크면 해(라이트로 전환), 라이트면 달(다크로 전환)
-            themeToggleButton.Image = theme == AppTheme.Dark ? UiIcons.Sun() : UiIcons.Moon();
+            RefreshToolbarIcons(); // 툴바 글리프를 새 글자색으로 다시 그린다
             if (_doc is not null) { _detailTimer.Stop(); UpdateDetailPanel(); } // 상세 패널 색 갱신
             _qualityPanel?.ApplyPalette(_palette); // 품질 패널은 서브아이템 색이 고정돼 별도 재적용 필요(이슈 #26)
             tabStrip.ApplyPalette(_palette);
@@ -276,14 +181,6 @@ namespace NanumCsvViewer
             ApplyWorkspaceTheme();
             ApplyAgentTheme();
             grid.Invalidate();
-        }
-
-        private void OnThemeToggleClick(object? sender, EventArgs e)
-        {
-            var next = _theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark;
-            ApplyTheme(next);
-            _settings.Theme = next == AppTheme.Dark ? "Dark" : "Light";
-            _settings.Save();
         }
 
         // ---------------------------------------------------------------- Help
@@ -306,7 +203,7 @@ namespace NanumCsvViewer
         // 열린 탭이 없으면 탭을 만들어 활성 탭으로 삼는다(새 파일을 여는 일반 경로는 OpenFileTabAsync → CreateFileTab).
         private void LoadDocument(string filePath, string title)
         {
-            var doc = VirtualCsvDocument.Open(filePath); // 실패하면 아무것도 바꾸지 않는다
+            var doc = OpenDocument(filePath); // 실패하면 아무것도 바꾸지 않는다
             var tab = _t;
             if (tab is null)
             {
@@ -338,6 +235,7 @@ namespace NanumCsvViewer
         {
             cellAddressBox.Text = "";
             cellValueTextBox.Text = "";
+            _frozenColumnCount = 0;   // 컬럼을 새로 만들면 고정 열도 없다(탭 복원은 이 뒤에 ApplyFrozenColumns)
             grid.Columns.Clear();
             filterColumnCombo.Items.Clear();
             filterColumnCombo.Items.Add(Loc.T("Combo_AllColumns"));
@@ -599,6 +497,7 @@ namespace NanumCsvViewer
                 if (!cellAddressBox.Focused) cellAddressBox.Text = Loc.F("CellAddr_Fmt", _doc.GetSourceRowNumber(r).ToString("N0"), colName);
             }
             catch (Exception ex) { Debug.WriteLine($"[CurrentCellChanged] {ex}"); }
+            UpdateCellSelectionState();   // 셀 편집 메뉴·단추는 현재 셀이 있어야 켜진다(Form1.Edit.cs)
 
             if (!outerSplit.Panel2Collapsed) { _detailTimer.Stop(); _detailTimer.Start(); }
         }
@@ -607,7 +506,7 @@ namespace NanumCsvViewer
 
         private bool _syncingDetailToggle;
         private Font? _detailBoldFont;
-        private bool _detailEverShown;
+        private int _detailWidthOverride;   // 논리 단위. 작업 공간 레이아웃이 정했거나 사용자가 끈 폭(0 = 앱 설정/기본)
 
         private void OnDetailToggleChanged(object? sender, EventArgs e)
         {
@@ -630,25 +529,20 @@ namespace NanumCsvViewer
 
             if (visible)
             {
-                outerSplit.Panel2Collapsed = false;
-                if (!_detailEverShown)
+                _placingSplitters++;
+                try
                 {
-                    _detailEverShown = true;
-                    try
-                    {
-                        int want = outerSplit.Width - 360; // 우측 패널 ~360px
-                        int min = outerSplit.Panel1MinSize;
-                        int max = outerSplit.Width - outerSplit.Panel2MinSize - outerSplit.SplitterWidth;
-                        if (max > min) outerSplit.SplitterDistance = Math.Clamp(want, min, max);
-                    }
-                    catch { }
+                    outerSplit.Panel2Collapsed = false;
+                    PlaceDetailSplitter();
                 }
+                finally { _placingSplitters--; }
                 UpdateDetailPanel();
             }
             else
             {
                 outerSplit.Panel2Collapsed = true;
             }
+            RaisePanelChanged(PanelKind.Detail);
         }
 
         private void UpdateDetailPanel()
@@ -885,32 +779,19 @@ namespace NanumCsvViewer
             }
         }
 
-        // 셀값으로 필터(AND 누적): 선택 셀의 열 = 그 값(정확 일치) 조건을 추가.
+        // 셀값으로 필터(AND 누적): 선택 셀의 열 = 그 값(정확 일치) 조건을 추가. 제외·≥·≤는 우클릭 메뉴(Ui/Form1.ContextMenus.cs).
         private void OnFilterByCellClick(object? sender, EventArgs e) => _ = FilterBySelectedCellAsync();
 
-        private async Task FilterBySelectedCellAsync()
+        private Task FilterBySelectedCellAsync()
         {
-            if (_doc is null || !_doc.IndexingComplete || _busy) return;
             var cell = grid.CurrentCell;
+            if (_doc is null || !_doc.IndexingComplete || _busy) return Task.CompletedTask;
             if (cell is null || cell.RowIndex < 0 || cell.ColumnIndex < 0)
             {
                 statusLabel.Text = Loc.T("Status_SelectCellFirst");
-                return;
+                return Task.CompletedTask;
             }
-            int viewRow = cell.RowIndex, col = cell.ColumnIndex;
-            string[] row;
-            try { row = _doc.GetDisplayRow(viewRow); } catch { return; }
-            string value = col < row.Length ? row[col] : "";
-            string colName = col < grid.Columns.Count ? grid.Columns[col].HeaderText : Loc.F("ColShort_Fmt", col + 1);
-
-            int capCol = col;
-            string capVal = value;
-            Func<string[], bool> pred = r => capCol < r.Length && string.Equals(r[capCol], capVal, StringComparison.Ordinal);
-            _valueConditions.Add((Loc.F("Filter_EqualsFmt", colName, Trunc(value)), pred, null));
-
-            // 증분: 현재 뷰만 새 조건으로 좁힘(전체 재스캔 안 함). 정렬 순서 유지.
-            await RunViewOpAsync(p => _doc.FilterWithinViewAsync(pred, p, _opCts!.Token), Loc.T("Status_CellFilterApplying"));
-            UpdateFilterStatus();
+            return FilterByCellAsync(cell.RowIndex, cell.ColumnIndex, CellFilterOp.Equals);
         }
 
         // 모든 활성 조건(텍스트 + 셀값들)을 AND로 합쳐 뷰를 다시 구성. 필터 변경 시 정렬은 초기화.
@@ -1017,10 +898,16 @@ namespace NanumCsvViewer
 
         private void OnGridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
         {
+            if (e.Button != MouseButtons.Right) return;
             // 우클릭 시 해당 셀을 현재 셀로 선택(컨텍스트 메뉴의 '이 셀 값으로 필터'가 그 셀에 적용되도록)
-            if (e.Button == MouseButtons.Right && e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
             {
                 try { grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex]; } catch { }
+            }
+            // 행 헤더(행 번호 칸): 그 행을 현재 행으로 삼아 행 메뉴(복사·삽입·삭제)가 이 행에 작용하게 한다.
+            else if (e.RowIndex >= 0 && e.ColumnIndex < 0)
+            {
+                SelectRowForContext(e.RowIndex);
             }
         }
 
@@ -1104,9 +991,7 @@ namespace NanumCsvViewer
             int col = grid.CurrentCell?.ColumnIndex ?? -1;
             if (col < 0) col = grid.Columns.Count > 0 ? 0 : -1;
             if (col < 0) return;
-            _sortKeys.Clear();
-            _sortKeys.Add(new SortKey(col, ascending));
-            _ = SortAsync();
+            SortColumn(col, ascending);
         }
 
         private async Task SortAsync()
@@ -1296,29 +1181,9 @@ namespace NanumCsvViewer
         {
             bool open = _doc is not null;
             bool ready = open && _doc!.IndexingComplete && !_busy;
+            SyncFacetsPanel();   // 패싯 패널은 문서가 있을 때만 보인다(켜 둔 채 문서가 열리면 그때 나타난다)
 
-            encodingStatusButton.Enabled = open && !_busy;
-            encodingMenuItem.Enabled = open && !_busy;
-            findTextBox.Enabled = open && !_busy;
-            findNextButton.Enabled = open && !_busy;
-            findMenuItem.Enabled = open && !_busy;
-            findNextMenuItem.Enabled = open && !_busy;
-
-            filterColumnCombo.Enabled = ready;
-            filterTextBox.Enabled = ready;
-            applyFilterButton.Enabled = ready;
-            clearFilterButton.Enabled = ready;
-            filterByCellButton.Enabled = ready;
-            filterByCellMenuItem.Enabled = ready;
-            applyFilterMenuItem.Enabled = ready;
-            editFilterByCellMenuItem.Enabled = ready;
-            clearFilterToolStripMenuItem.Enabled = ready;
-            clearSortToolStripMenuItem.Enabled = ready;
-            sortAscMenuItem.Enabled = ready;
-            sortDescMenuItem.Enabled = ready;
-            sortAscButton.Enabled = ready;
-            sortDescButton.Enabled = ready;
-            clearSortButton.Enabled = ready;
+            UpdateChromeEnabledState(open, ready);   // Ui/Form1.MainMenu.cs — 찾기·필터·정렬·인코딩 메뉴/버튼 활성
 
             UpdateFeatureMenuState();
             RefreshSignal();
@@ -1429,8 +1294,8 @@ namespace NanumCsvViewer
             }
             catch { }
 
-            // 상세 패널을 기본으로 표시
-            SetDetailPanelVisible(true);
+            // 시작 패널: 설정(또는 '마지막 상태 기억')이 정한 대로. 예전처럼 상세 패널을 무조건 켜지 않는다.
+            ApplyStartupLayout();
 
             // 탐색기에서 연 파일: 첫 화면·레이아웃이 확정된 뒤 일반 열기와 같은 경로로 연다(오류 안내 포함).
             if (_startupPath is { } startup)
@@ -1438,6 +1303,8 @@ namespace NanumCsvViewer
                 _startupPath = null;
                 BeginInvoke(new Action(async () => await OpenFileAsync(startup)));
             }
+            else if (_settings.ReopenLastWorkspace && _settings.LastWorkspace is { Length: > 0 } last && File.Exists(last))
+                BeginInvoke(new Action(async () => await OpenWorkspaceFileAsync(last)));
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -1446,6 +1313,8 @@ namespace NanumCsvViewer
             DisposeAllTabs(); // 모든 탭의 문서·워크북 해제와 인덱스 캐시 정리(설정 시)
             DisposeWorkspaceUi(); // 작업 공간 엔진·SQL 편집기 창·탐색기 해제
             CleanupTempImports();
+            UnwatchSystemTheme();
+            _gridCustomFont?.Dispose();
             _detailBoldFont?.Dispose();
             _detailTimer?.Dispose();
             _rowCountTimer?.Dispose();
@@ -1471,6 +1340,7 @@ namespace NanumCsvViewer
             // Leave the initial FormClosing callback before closing again, even
             // when there are no workers. The message loop stays alive while readers drain.
             await Task.Yield();
+            SaveSessionState();   // 창 위치·크기, 마지막 패널 상태, 열려 있던 작업 공간
             ShutdownAgent();
             await CancelAndDrainAsync();
             await DrainBackgroundTabsAsync();

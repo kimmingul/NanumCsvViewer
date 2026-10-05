@@ -101,6 +101,7 @@ namespace NanumCsvViewer.Agent
         {
             string trimmed = (text ?? "").Trim();
             if (trimmed.Length == 0) return false;
+            if (IsStartDeferred) return StartDeferredWith(trimmed, followUp);   // 첫 사용: omp를 지금 시작하고 연결되면 이 메시지를 보낸다
             if (_client == null || !_connected)
             {
                 _stream.Emit(ChatPageMessages.Notice("warn", T("The agent is not connected.", "에이전트가 연결되어 있지 않습니다.")));

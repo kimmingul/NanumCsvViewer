@@ -11,8 +11,8 @@ namespace NanumCsvViewer.Tests
             new("NanumCsvViewer.Resources.Strings", typeof(VirtualCsvDocument).Assembly);
 
         [Theory]
-        [InlineData("Menu_Open", "Open...")]
-        [InlineData("Menu_DetailPanel", "Detail Panel")]
+        [InlineData("Lang_English", "English")]
+        [InlineData("Combo_AllColumns", "(All columns)")]
         [InlineData("Signal_Ready", "Ready")]
         public void English_is_the_base_language(string key, string expected)
         {
@@ -20,12 +20,8 @@ namespace NanumCsvViewer.Tests
         }
 
         [Theory]
-        [InlineData("Menu_File", "파일")]
-        [InlineData("Menu_Edit", "편집")]
-        [InlineData("Menu_View", "보기")]
-        [InlineData("Menu_Help", "도움말")]
-        [InlineData("Menu_Open", "열기...")]
-        [InlineData("Menu_DetailPanel", "상세 패널")]
+        [InlineData("Lang_Korean", "한국어")]
+        [InlineData("Combo_AllColumns", "(모든 컬럼)")]
         [InlineData("Signal_Ready", "준비완료")]
         public void Korean_satellite_overrides(string key, string expected)
         {

@@ -9,7 +9,7 @@ namespace NanumCsvViewer
     // 오래 걸리는 일은 모두 RunWorkspaceUiAsync로 감싼다: 탐색기 아래에 진행 표시와 취소 버튼이 나오고, 오류는 한 번에 안내한다.
     public partial class Form1
     {
-        private ToolStripMenuItem? _wsMenu, _viewExplorerMenu, _wsExplorerMenu, _wsNewQueryMenu, _wsAddFilesMenu, _wsAddFolderMenu, _wsRefreshAllMenu,
+        private ToolStripMenuItem? _wsMenu, _viewExplorerMenu, _wsNewQueryMenu, _wsAddFilesMenu, _wsAddFolderMenu, _wsRefreshAllMenu,
             _wsJoinMenu, _wsAppendMenu, _wsCompareMenu, _wsGroupMenu, _wsSaveRelationMenu, _wsRefreshViewMenu, _wsOpenSourcesMenu;
         private ToolStripButton? _wsToolButton;
         private WorkspaceExplorer? _explorer;
@@ -30,14 +30,12 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- 메뉴 · 툴바
 
+        // 작업 공간 메뉴(탐색기 토글은 보기 메뉴와 툴바에만 둔다 — 중복 항목 없음). 메뉴 조립 위치는 Ui/Form1.MainMenu.cs.
         private void BuildWorkspaceFeatures()
         {
             _wsMenu = new ToolStripMenuItem { Name = "workspaceMenu" };
             RegisterLabel(_wsMenu, "Workspace", "작업 공간");
-            _wsExplorerMenu = MakeItem("Workspace Explorer", "작업 공간 탐색기", (_, _) => SetWorkspaceExplorerVisible(!WorkspaceDockVisible));
-            _wsExplorerMenu.CheckOnClick = false;
-            _wsNewQueryMenu = MakeItem("New Query…", "새 질의…", (_, _) => NewQueryCommand(null, null));
-            _wsNewQueryMenu.ShortcutKeys = Keys.Control | Keys.Alt | Keys.Q; // Ctrl+Shift+Q는 "품질 프로파일 실행"이 이미 쓴다
+            _wsNewQueryMenu = MakeCmd("ws.newQuery", (_, _) => NewQueryCommand(null, null)); // Ctrl+Shift+Q는 "품질 프로파일 실행"이 이미 쓴다
             _wsAddFilesMenu = MakeItem("Add Files to Workspace…", "작업 공간에 파일 추가…", (_, _) => AddFilesCommand());
             _wsAddFolderMenu = MakeItem("Add Folder to Workspace…", "작업 공간에 폴더 추가…", (_, _) => AddFolderCommand());
             _wsRefreshAllMenu = MakeItem("Re-read Changed Files", "바뀐 파일 다시 읽기", (_, _) => RefreshWorkspaceCommand());
@@ -46,53 +44,26 @@ namespace NanumCsvViewer
             _wsCompareMenu = MakeItem("Compare Tables…", "표 비교…", (_, _) => _ = RunWizardAsync(WizardKind.Compare, ActiveTabPreselect()));
             _wsGroupMenu = MakeItem("Group & Aggregate…", "그룹 집계…", (_, _) => _ = RunWizardAsync(WizardKind.Group, ActiveTabPreselect()));
             _wsSaveRelationMenu = MakeItem("Save Current Table as File…", "현재 표를 파일로 저장…", (_, _) => _ = SaveActiveTabRelationAsync());
-            _wsRefreshViewMenu = MakeItem("Refresh View Tab", "뷰 탭 새로 고침", (_, _) => _ = RefreshActiveViewTabAsync());
-            _wsOpenSourcesMenu = MakeItem("Open Source Tabs of View", "뷰의 원본 탭 열기", (_, _) => _ = OpenActiveViewSourcesAsync());
+            // 탭 우클릭 메뉴와 같은 이름("뷰 새로 고침" · "원본 탭 열기")을 쓴다.
+            _wsRefreshViewMenu = MakeItem("Refresh View", "뷰 새로 고침", (_, _) => _ = RefreshActiveViewTabAsync());
+            _wsOpenSourcesMenu = MakeItem("Open Source Tabs", "원본 탭 열기", (_, _) => _ = OpenActiveViewSourcesAsync());
 
             _wsMenu.DropDownItems.AddRange(new ToolStripItem[]
             {
-                _wsExplorerMenu, new ToolStripSeparator(), _wsNewQueryMenu, _wsAddFilesMenu, _wsAddFolderMenu, _wsRefreshAllMenu, new ToolStripSeparator(),
+                _wsNewQueryMenu, _wsAddFilesMenu, _wsAddFolderMenu, _wsRefreshAllMenu, new ToolStripSeparator(),
                 _wsJoinMenu, _wsAppendMenu, _wsCompareMenu, _wsGroupMenu, new ToolStripSeparator(),
                 _wsSaveRelationMenu, _wsRefreshViewMenu, _wsOpenSourcesMenu,
             });
-            int at = _analysisMenu is null ? menuStrip1.Items.IndexOf(helpToolStripMenuItem) : menuStrip1.Items.IndexOf(_analysisMenu);
-            if (at < 0) at = menuStrip1.Items.Count;
-            menuStrip1.Items.Insert(at, _wsMenu);
             _wsMenu.DropDownOpening += (_, _) => UpdateWorkspaceMenuState();
 
-            // 보기 ▸ 작업 공간 탐색기 (Ctrl+Shift+W)
-            _viewExplorerMenu = MakeItem("Workspace Explorer", "작업 공간 탐색기", (_, _) => SetWorkspaceExplorerVisible(!WorkspaceDockVisible));
-            _viewExplorerMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.W;
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            viewToolStripMenuItem.DropDownItems.Add(_viewExplorerMenu);
-
-            _wsToolButton = new ToolStripButton
-            {
-                CheckOnClick = false, DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, ImageScaling = ToolStripItemImageScaling.None,
-                Image = WorkspaceIcon(), Name = "workspaceToolButton",
-            };
-            _wsToolButton.Click += (_, _) => SetWorkspaceExplorerVisible(!WorkspaceDockVisible);
-            toolStrip1.Items.Add(_wsToolButton);
+            // 보기 ▸ 작업 공간 탐색기 (Ctrl+Shift+W). 툴바의 탐색기 단추는 Ui/Form1.Toolbar.cs.
+            _viewExplorerMenu = MakeCmd("view.explorer", (_, _) => SetWorkspaceExplorerVisible(!WorkspaceDockVisible));
 
             TabsChanged += OnWorkspaceTabsChanged;
             workspaceDockHost.VisibleChanged += (_, _) => { if (workspaceDockHost.Visible) EnsureExplorer(); UpdateWorkspaceCheckStates(); };
             WorkspaceChanged += () => _explorer?.ScheduleRefresh();
             Activated += (_, _) => _explorer?.ScheduleRefresh(); // 다른 프로그램에서 파일이 바뀌었을 수 있다(⚠ 표시 갱신)
             BuildWorkspaceAgentMenu();   // 작업 공간 ▸ 메모… · 이 작업 공간의 새 대화 시작
-        }
-
-        private static Bitmap WorkspaceIcon()
-        {
-            var bmp = new Bitmap(16, 16);
-            using var g = Graphics.FromImage(bmp);
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using var pen = new Pen(Color.FromArgb(70, 120, 190), 1.4f);
-            using var fill = new SolidBrush(Color.FromArgb(70, 120, 190));
-            g.DrawRectangle(pen, 1.5f, 2.5f, 12, 11);
-            g.FillRectangle(fill, 1.5f, 2.5f, 4, 11);
-            g.DrawLine(pen, 7, 6, 13, 6);
-            g.DrawLine(pen, 7, 9, 13, 9);
-            return bmp;
         }
 
         // 메뉴 항목 텍스트·툴팁. 엔진 쓸 수 없음 → 엔진이 필요한 항목을 끄고 이유를 툴팁으로.
@@ -119,14 +90,12 @@ namespace NanumCsvViewer
             Set(_wsRefreshViewMenu, tab is { Kind: TabKind.View });
             Set(_wsOpenSourcesMenu, tab is { Kind: TabKind.View });
             bool shown = WorkspaceDockVisible;
-            if (_wsExplorerMenu is not null) _wsExplorerMenu.Checked = shown;
             if (_viewExplorerMenu is not null) _viewExplorerMenu.Checked = shown;
             if (_wsToolButton is not null)
             {
                 _wsToolButton.Checked = shown;
-                _wsToolButton.Text = LT("Workspace", "작업 공간");
                 _wsToolButton.ToolTipText = ok
-                    ? LT("Show or hide the workspace explorer (Ctrl+Shift+W)", "작업 공간 탐색기 표시/숨김 (Ctrl+Shift+W)")
+                    ? CommandShortcuts.Tip(LT("Workspace Explorer", "작업 공간 탐색기"), "view.explorer")
                     : LT("The query engine is unavailable: ", "질의 엔진을 쓸 수 없습니다: ") + reason;
             }
         }
@@ -134,7 +103,7 @@ namespace NanumCsvViewer
         // 언어 전환 때 호출(LocalizeFeatureMenus 끝). 메뉴 글자는 RegisterLabel이 처리하므로 탐색기·열린 편집기만 다시 현지화.
         private void LocalizeWorkspaceUi()
         {
-            if (_wsToolButton is not null) _wsToolButton.Text = LT("Workspace", "작업 공간");
+            // 탐색기 단추 글자·툴팁은 LocalizeToolbar가 정하고, 엔진을 못 쓸 때의 이유 문구만 UpdateWorkspaceMenuState가 덮는다.
             _explorer?.Relocalize();
             foreach (var f in _sqlEditors) f.Relocalize();
         }
@@ -217,7 +186,6 @@ namespace NanumCsvViewer
         private void UpdateWorkspaceCheckStates()
         {
             bool shown = WorkspaceDockVisible;
-            if (_wsExplorerMenu is not null) _wsExplorerMenu.Checked = shown;
             if (_viewExplorerMenu is not null) _viewExplorerMenu.Checked = shown;
             if (_wsToolButton is not null) _wsToolButton.Checked = shown;
         }

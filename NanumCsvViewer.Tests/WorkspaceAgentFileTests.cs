@@ -38,7 +38,7 @@ namespace NanumCsvViewer.Tests
             var m = WorkspaceFile.Load(ws);
 
             Assert.Equal(2, WorkspaceFile.CurrentVersion);
-            Assert.Equal(2, m.Version);
+            Assert.Equal(WorkspaceFile.CurrentVersion, m.Version);
             var a = m.Agent!;
             Assert.Equal("01a0ce46-98ad-71ba-b708-11bc4f34c6cb", a.Session!.Id);
             Assert.EndsWith("_01a0ce46-98ad-71ba-b708-11bc4f34c6cb.jsonl", a.Session.File);
@@ -57,7 +57,7 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
-        public void A_v1_file_loads_without_an_agent_section_or_provenance_and_is_written_back_as_v2()
+        public void A_v1_file_loads_without_an_agent_section_or_provenance_and_is_written_back_in_the_current_format()
         {
             const string v1 = """
                 { "format": "ncvws", "version": 1,
@@ -72,19 +72,19 @@ namespace NanumCsvViewer.Tests
             Assert.Null(m.Views.Single().ToProvenance());
             Assert.Equal("SELECT * FROM a", m.Views.Single().Sql);
 
-            // 다시 저장하면 현재 형식(v2)으로 나간다 — 옛 앱은 이를 "더 새로운 버전"으로 거절한다.
+            // 다시 저장하면 현재 형식으로 나간다 — 옛 앱은 이를 "더 새로운 버전"으로 거절한다.
             using var tmp = new TempFolder();
             string ws = tmp.Combine("w.ncvws");
             m.Version = WorkspaceFile.CurrentVersion;
             WorkspaceFile.Save(ws, m);
-            Assert.Contains("\"version\": 2", File.ReadAllText(ws));
+            Assert.Contains($"\"version\": {WorkspaceFile.CurrentVersion}", File.ReadAllText(ws));
         }
 
         [Fact]
         public void A_file_newer_than_this_app_is_refused_but_v2_is_accepted()
         {
             Assert.Equal(WorkspaceFileError.TooNew, Assert.Throws<WorkspaceFileException>(() =>
-                WorkspaceFile.Parse("{\"format\":\"ncvws\",\"version\":3}")).Error);
+                WorkspaceFile.Parse("{\"format\":\"ncvws\",\"version\":" + (WorkspaceFile.CurrentVersion + 1) + "}")).Error);
             Assert.Empty(WorkspaceFile.Parse("{\"format\":\"ncvws\",\"version\":2}").Sources);
         }
 

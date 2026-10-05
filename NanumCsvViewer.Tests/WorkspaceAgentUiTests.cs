@@ -111,7 +111,7 @@ namespace NanumCsvViewer.Tests
             });
 
             var saved = WorkspaceFile.Load(ws);
-            Assert.Equal(2, saved.Version);
+            Assert.Equal(WorkspaceFile.CurrentVersion, saved.Version);
             Assert.Equal("a.id는 고유 번호\n목표: 점수 분포", saved.Agent!.Notes);
             Assert.Equal(("always-ask", "SummaryOnly", false), (saved.Agent.ApprovalMode, saved.Agent.DataPolicy, saved.Agent.AllowLocalPython));
             Assert.Equal(new[] { "user", "wizard:join", "agent" }, saved.Views.OrderBy(v => v.Name == "mine" ? 0 : v.Name == "joined" ? 1 : 2).Select(v => v.CreatedBy));

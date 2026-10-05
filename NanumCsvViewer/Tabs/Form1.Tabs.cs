@@ -43,9 +43,11 @@ namespace NanumCsvViewer
             set
             {
                 _workspaceDockVisible = value;
+                if (value) workspaceDockHost.Width = LogicalToDeviceUnits(ExplorerWidthLogical);
                 workspaceDockHost.Visible = value;
                 workspaceSplitter.Visible = value;
                 ApplyDockOrder();
+                RaisePanelChanged(PanelKind.Explorer);
             }
         }
         private bool _workspaceDockVisible;
@@ -89,20 +91,10 @@ namespace NanumCsvViewer
             tabStrip.DragEnter += OnFeatureDragEnter;
             tabStrip.DragDrop += OnFeatureDragDrop;
 
-            int openIdx = fileToolStripMenuItem.DropDownItems.IndexOf(openToolStripMenuItem);
-            _closeTabMenu = MakeItem("Close Tab", "탭 닫기", (_, _) => { if (_t is { } t) CloseTab(t, true); });
-            _closeTabMenu.ShortcutKeys = Keys.Control | Keys.W;
+            _closeTabMenu = MakeCmd("file.closeTab", (_, _) => { if (_t is { } t) CloseTab(t, true); });
             _closeAllTabsMenu = MakeItem("Close All Tabs", "모든 탭 닫기", (_, _) => CloseAllTabs(true));
-            fileToolStripMenuItem.DropDownItems.Insert(openIdx + 1, _closeAllTabsMenu);
-            fileToolStripMenuItem.DropDownItems.Insert(openIdx + 1, _closeTabMenu);
-
-            _nextTabMenu = MakeItem("Next Tab", "다음 탭", (_, _) => CycleTab(+1));
-            _nextTabMenu.ShortcutKeyDisplayString = "Ctrl+Tab";
-            _prevTabMenu = MakeItem("Previous Tab", "이전 탭", (_, _) => CycleTab(-1));
-            _prevTabMenu.ShortcutKeyDisplayString = "Ctrl+Shift+Tab";
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            viewToolStripMenuItem.DropDownItems.Add(_nextTabMenu);
-            viewToolStripMenuItem.DropDownItems.Add(_prevTabMenu);
+            _nextTabMenu = MakeCmd("view.nextTab", (_, _) => CycleTab(+1));
+            _prevTabMenu = MakeCmd("view.prevTab", (_, _) => CycleTab(-1));
         }
 
         private void UpdateTabMenuState()
@@ -110,6 +102,7 @@ namespace NanumCsvViewer
             bool any = _tabs.Count > 0;
             if (_closeTabMenu is not null) _closeTabMenu.Enabled = any;
             if (_closeAllTabsMenu is not null) _closeAllTabsMenu.Enabled = any;
+            if (_closeOthersMenu is not null) _closeOthersMenu.Enabled = _tabs.Count > 1;
             bool many = _tabs.Count > 1;
             if (_nextTabMenu is not null) _nextTabMenu.Enabled = many;
             if (_prevTabMenu is not null) _prevTabMenu.Enabled = many;
@@ -243,7 +236,7 @@ namespace NanumCsvViewer
         private DocumentTab CreateFileTab(string fullPath, Import.WorkbookSession? wb)
         {
             string docPath = wb is null ? fullPath : wb.CsvPath(0);
-            var doc = VirtualCsvDocument.Open(docPath);
+            var doc = OpenDocument(docPath);
             string fileName = Path.GetFileName(fullPath);
             var tab = new DocumentTab(this, wb is null ? TabKind.File : TabKind.Sheet, fullPath, fileName, readOnly: false, viewName: null)
             {
@@ -347,6 +340,7 @@ namespace NanumCsvViewer
 
             // 화면 상태
             t.ColumnWidths = grid.Columns.Cast<DataGridViewColumn>().Select(c => c.Width).ToArray();
+            t.FrozenColumns = _frozenColumnCount;
             t.CurrentRow = grid.CurrentCell?.RowIndex ?? -1;
             t.CurrentColumn = grid.CurrentCell?.ColumnIndex ?? -1;
             t.FirstRow = grid.RowCount > 0 ? grid.FirstDisplayedScrollingRowIndex : -1;
@@ -431,6 +425,8 @@ namespace NanumCsvViewer
                     for (int i = 0; i < widths.Length && i < grid.Columns.Count; i++) grid.Columns[i].Width = widths[i];
                 foreach (int c in _hiddenColumns)
                     if (c >= 0 && c < grid.Columns.Count) grid.Columns[c].Visible = false;
+                _frozenColumnCount = tab.FrozenColumns;   // 고정 열은 탭마다 따로 기억한다(BuildColumns는 새로 만든 열이라 0으로 시작)
+                ApplyFrozenColumns();
                 ApplyColumnTooltips();
                 UpdateSortGlyphs();
                 if (tab.FilterColumnIndex > 0 && tab.FilterColumnIndex < filterColumnCombo.Items.Count)
@@ -464,7 +460,7 @@ namespace NanumCsvViewer
 
             // 품질 패널: 이 탭의 발견만 보인다.
             if (_qualityFindings.Count > 0) ShowQualityFindings();
-            else if (_qualityPanel is not null) { _qualityPanel.ShowFindings(Array.Empty<Csv.DataQuality.QualityFinding>(), ""); SetQualityPanelVisible(false); }
+            else if (_qualityPanel is not null) { _qualityPanel.ShowFindings(Array.Empty<Csv.DataQuality.QualityFinding>(), ""); if (!_findingsPinned) SetQualityPanelVisible(false); }
 
             ShowTabWindows(tab);
             UpdateFeatureState();
@@ -526,7 +522,7 @@ namespace NanumCsvViewer
             _editTitleSuffix = "";
             Text = ProgramName;
             HideSheetTabs();
-            if (_qualityPanel is not null) { _qualityPanel.ShowFindings(Array.Empty<Csv.DataQuality.QualityFinding>(), ""); SetQualityPanelVisible(false); }
+            if (_qualityPanel is not null) { _qualityPanel.ShowFindings(Array.Empty<Csv.DataQuality.QualityFinding>(), ""); if (!_findingsPinned) SetQualityPanelVisible(false); }
             RebuildFilterChips();
             UpdateFeatureState();
             statusLabel.Text = Loc.T("Status_OpenPrompt");
@@ -733,21 +729,26 @@ namespace NanumCsvViewer
         private void ShowTabMenu(DocumentTab tab, Point screenPoint)
         {
             _tabMenu?.Dispose();
+            _tabMenu = BuildTabContextMenu(tab);
+            _tabMenu.Show(screenPoint);
+        }
+
+        // 항목 이름은 파일 메뉴와 같다(탭 닫기 · 다른 탭 닫기 · 모든 탭 닫기). 작업 공간 항목은 작업 공간 메뉴의 이름을 따른다.
+        internal ContextMenuStrip BuildTabContextMenu(DocumentTab tab)
+        {
             var menu = new ContextMenuStrip();
-            menu.Items.Add(LT("Close", "닫기"), null, (_, _) => CloseTab(tab, true));
-            menu.Items.Add(LT("Close Others", "다른 탭 닫기"), null, (_, _) => CloseOtherTabs(tab)).Enabled = _tabs.Count > 1;
-            menu.Items.Add(LT("Close All", "모두 닫기"), null, (_, _) => CloseAllTabs(true));
+            menu.Items.Add(CtxCmd("file.closeTab", () => CloseTab(tab, true)));
+            menu.Items.Add(Ctx(LT("Close Other Tabs", "다른 탭 닫기"), () => CloseOtherTabs(tab), _tabs.Count > 1));
+            menu.Items.Add(Ctx(LT("Close All Tabs", "모든 탭 닫기"), () => CloseAllTabs(true)));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(LT("Copy Path", "경로 복사"), null, (_, _) =>
+            menu.Items.Add(Ctx(LT("Copy Path", "경로 복사"), () =>
             {
                 try { Clipboard.SetText(tab.Path); }
                 catch (Exception ex) { Debug.WriteLine($"[Tabs] clipboard: {ex.Message}"); }
-            });
-            var openFolder = menu.Items.Add(LT("Open Folder", "폴더 열기"), null, (_, _) => OpenTabFolder(tab));
-            openFolder.Enabled = File.Exists(tab.Path);
+            }));
+            menu.Items.Add(Ctx(LT("Open Folder", "폴더 열기"), () => OpenTabFolder(tab), File.Exists(tab.Path)));
             AddWorkspaceTabMenuItems(menu, tab);
-            _tabMenu = menu;
-            menu.Show(screenPoint);
+            return menu;
         }
 
         private static void OpenTabFolder(DocumentTab tab)

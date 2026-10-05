@@ -28,7 +28,7 @@ namespace NanumCsvViewer
                 BackColor = palette.Surface,
                 ForeColor = palette.Text,
                 Font = new Font("Segoe UI", 9.5f),
-                Text = Loc.T("Usage_Text").Replace("\n", "\r\n"),
+                Text = Loc.T("Usage_Text").Replace("{SHORTCUTS}", ShortcutList()).Replace("\n", "\r\n"),
             };
             text.Select(0, 0);
 
@@ -50,6 +50,19 @@ namespace NanumCsvViewer
             Controls.Add(bottom);
             AcceptButton = ok;
             CancelButton = ok;
+        }
+
+        // 단축키 표(CommandShortcuts)에서 만든 목록 — 메뉴와 설정의 "단축키" 쪽과 같은 단일 소스. 키가 같은 명령은 한 줄에 묶지 않는다(한 줄 = 한 명령).
+        private static string ShortcutList()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var e in CommandShortcuts.All)
+            {
+                string keys = e.KeyText;
+                if (e.Alternates is { Length: > 0 } alt) keys += " / " + string.Join(" / ", alt.Select(CommandShortcuts.Display));
+                sb.Append("  ").Append(keys).Append("  —  ").Append(e.Name).Append('\n');
+            }
+            return sb.ToString().TrimEnd('\n');
         }
     }
 }

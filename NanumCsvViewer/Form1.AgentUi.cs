@@ -12,7 +12,7 @@ namespace NanumCsvViewer
         private AgentChatPanel? _agentPanel;
         private ChatController? _agentController;
         private ToolStripButton? _agentButton;
-        private ToolStripMenuItem? _agentPanelMenu, _agentSettingsMenu;
+        private ToolStripMenuItem? _agentPanelMenu;
         private bool _syncingAgentToggle;
 
         // Form1.Features.BuildFeatureMenus에서 호출.
@@ -31,26 +31,7 @@ namespace NanumCsvViewer
             Controls.Add(_agentSplit);
             Controls.SetChildIndex(_agentSplit, index);
 
-            _agentPanelMenu = MakeItem("AI Agent Panel", "AI 에이전트 패널", (_, _) => SetAgentPanelVisible(!AgentPanelVisible));
-            _agentPanelMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.A;
-            _agentSettingsMenu = MakeItem("AI Agent Settings…", "AI 에이전트 설정…", (_, _) => ShowAgentSettings());
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            viewToolStripMenuItem.DropDownItems.Add(_agentPanelMenu);
-            viewToolStripMenuItem.DropDownItems.Add(_agentSettingsMenu);
-
-            _agentButton = new ToolStripButton
-            {
-                Text = "✦ AI",
-                CheckOnClick = true,
-                Alignment = ToolStripItemAlignment.Right,
-                DisplayStyle = ToolStripItemDisplayStyle.Text,
-                Overflow = ToolStripItemOverflow.Never,
-            };
-            _agentButton.CheckedChanged += (_, _) =>
-            {
-                if (!_syncingAgentToggle) SetAgentPanelVisible(_agentButton.Checked);
-            };
-            toolStrip1.Items.Add(_agentButton);
+            _agentPanelMenu = MakeCmd("view.ai", (_, _) => SetAgentPanelVisible(!AgentPanelVisible));
             BuildWorkspaceFileFeatures();   // File ▸ 작업 공간 열기·저장·최근 목록 (BuildFeatureMenus가 에이전트와 함께 한 번 호출한다)
             LocalizeAgentUi();
         }
@@ -59,8 +40,6 @@ namespace NanumCsvViewer
 
         private void LocalizeAgentUi()
         {
-            if (_agentButton is not null)
-                _agentButton.ToolTipText = LT("AI agent panel (Ctrl+Shift+A)", "AI 에이전트 패널 (Ctrl+Shift+A)");
             string lang = Loc.CurrentLanguage == "ko" ? "ko" : "en";
             _agentPanel?.SetLanguage(lang);
             if (_agentController is not null) _agentController.Options = AgentOptions();
@@ -72,7 +51,10 @@ namespace NanumCsvViewer
         /// </summary>
         private AgentHostOptions AgentOptions() => WorkspaceAgentPolicy.Apply(AppAgentOptions(), _wfAgent);
 
-        private void SetAgentPanelVisible(bool visible)
+        private void SetAgentPanelVisible(bool visible) => SetAgentPanelVisible(visible, focus: true);
+
+        /// <summary>AI 패널을 보이거나 숨긴다. focus=false면 채팅 입력창으로 포커스를 옮기지 않는다(시작·작업 공간 레이아웃 복원).</summary>
+        private void SetAgentPanelVisible(bool visible, bool focus)
         {
             if (_agentSplit is null) return;
             _syncingAgentToggle = true;
@@ -86,6 +68,7 @@ namespace NanumCsvViewer
             if (!visible)
             {
                 _agentSplit.Panel2Collapsed = true;
+                RaisePanelChanged(PanelKind.Agent);
                 return;
             }
             EnsureAgentPanel();
@@ -96,7 +79,7 @@ namespace NanumCsvViewer
             // 저장 폭은 96 DPI 기준 논리 단위. 고해상도 화면에서도 같은 체감 폭이 되도록 장치 픽셀로 바꾼다.
             int total = _agentSplit.Width;
             int min = LogicalToDeviceUnits(320);
-            int width = Math.Clamp(LogicalToDeviceUnits(_settings.AgentPanelWidth), min, Math.Max(min, total - LogicalToDeviceUnits(300)));
+            int width = Math.Clamp(LogicalToDeviceUnits(AgentWidthLogical), min, Math.Max(min, total - LogicalToDeviceUnits(300)));
             int distance = total - width - _agentSplit.SplitterWidth;
             if (distance > _agentSplit.Panel1MinSize)
             {
@@ -106,7 +89,23 @@ namespace NanumCsvViewer
                 if (_agentSplit.Panel2MinSize < min && total - _agentSplit.SplitterDistance - _agentSplit.SplitterWidth >= min)
                     _agentSplit.Panel2MinSize = min;
             }
-            _agentPanel!.FocusInput();
+            if (focus) _agentPanel!.FocusInput();
+            RaisePanelChanged(PanelKind.Agent);
+        }
+
+        /// <summary>AI 패널 폭(논리 단위). 작업 공간 레이아웃이 정한 값이 있으면 그것, 아니면 앱 설정.</summary>
+        private int AgentWidthLogical => _agentWidthOverride > 0 ? _agentWidthOverride : _settings.AgentPanelWidth;
+        private int _agentWidthOverride;
+
+        /// <summary>
+        /// 질문을 AI 채팅에 보낸다(컨텍스트 메뉴 "AI에게 묻기"): 패널을 열고(포커스는 입력창으로) 메시지를 보낸다.
+        /// omp가 아직 시작 전이면 이 메시지로 시작한다. 이미 작업 중이면 채팅 규칙대로 대기열에 들어간다.
+        /// </summary>
+        internal void AskAgent(string prompt)
+        {
+            if (string.IsNullOrWhiteSpace(prompt) || _agentSplit is null) return;
+            SetAgentPanelVisible(true);
+            _agentController?.Submit(prompt);
         }
 
         /// <summary>폼에 직접 붙은 본문(Fill) 컨트롤. 에이전트 분할이 있으면 그것, 없으면 outerSplit. 띠·패널의 z-순서 기준.</summary>
@@ -124,6 +123,7 @@ namespace NanumCsvViewer
                 int logical = (int)Math.Round(_agentSplit.Panel2.Width * 96.0 / DeviceDpi);
                 if (logical < 320) return; // 접힘·배치 중간값은 저장하지 않는다
                 _settings.AgentPanelWidth = logical;
+                _agentWidthOverride = 0;   // 사용자가 직접 끈 폭이 이제 기준이다
                 _settings.Save();
             };
             _agentPanel.ApplyTheme(_theme == AppTheme.Dark, Font);
@@ -137,8 +137,9 @@ namespace NanumCsvViewer
             _agentController.ApprovalModeApplier = ApplyApprovalFromChat;
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
-            // 작업 공간 파일이 열려 있으면 그 작업 공간의 대화를 이어 간다(없거나 사라졌으면 새 대화 + 알림). 파일이 없으면 지금까지처럼 새 대화.
-            _ = _agentController.StartAsync(AgentWorkingDirectory(), _wfFilePath is null ? null : WorkspaceConversationOf(_wfAgent));
+            // omp는 첫 메시지를 보낼 때 시작한다(패널이 시작할 때부터 떠 있어도 프로세스를 만들지 않는다). 작업 공간 파일이 열려 있으면 그 작업 공간의
+            // 대화를 이어 가고(없거나 사라졌으면 새 대화 + 알림), 파일이 없으면 새 대화. 작업 폴더는 시작하는 순간의 열린 파일 기준.
+            _agentController.StartOnFirstUse(AgentWorkingDirectory, _wfFilePath is null ? null : WorkspaceConversationOf(_wfAgent));
             PostAgentContext();
         }
 
@@ -279,73 +280,24 @@ namespace NanumCsvViewer
             _settings.Save();
         }
 
-        private void ShowAgentSettings()
-        {
-            bool ko = Loc.CurrentLanguage == "ko";
-            bool hasWorkspace = _wfFilePath is not null;
-            using var dlg = new ParamDialog(LT("AI Agent Settings", "AI 에이전트 설정"), _palette);
-            // 작업 공간 파일이 열려 있으면 승인 모드·데이터 공유·로컬 Python을 어디에 적용할지 먼저 고른다(기본: 이 작업 공간).
-            ComboBox? scope = null;
-            if (hasWorkspace)
-            {
-                scope = dlg.AddCombo(LT("Apply settings to", "설정 적용 대상"), new[]
-                {
-                    LT("This workspace", "이 작업 공간") + " (" + Path.GetFileName(_wfFilePath) + ")",
-                    LT("App default (all workspaces)", "앱 기본값 (모든 작업 공간)"),
-                }, 0);
-                dlg.AddNote(LT(
-                    "Data sharing, approval mode and local Python can be set per workspace. A workspace setting is saved in the workspace file and can only make the app default stricter: the stricter of the two always applies. To loosen a setting, choose 'App default'. The other settings are app-wide.",
-                    "데이터 공유·승인 모드·로컬 Python은 작업 공간별로 정할 수 있습니다. 작업 공간 설정은 작업 공간 파일에 저장되며 앱 기본값을 더 엄격하게만 바꿀 수 있습니다. 둘 중 더 엄격한 쪽이 항상 적용됩니다. 풀려면 '앱 기본값'을 고르세요. 나머지 설정은 앱 전체에 적용됩니다."));
-            }
-            var baseline = ScopeBaseline(hasWorkspace);
-            var policy = dlg.AddCombo(LT("Data sharing with the AI", "AI와의 데이터 공유"), new[]
-            {
-                LT("Summary only (no raw rows)", "요약만 (원시 행 보내지 않음)"),
-                LT("Rows with approval", "행 값 — 요청마다 승인"),
-                LT("Rows allowed (up to the limit)", "행 값 — 승인 없이(상한까지)"),
-            }, (int)baseline.Policy);
-            var maxRows = dlg.AddNumeric(LT("Row limit per request", "요청당 행 상한"), 1, 5000, Math.Clamp(_settings.AgentMaxRows, 1, 5000));
-            var ompPath = dlg.AddText(LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"), _settings.AgentOmpPath ?? "");
-            var extra = dlg.AddText(LT("Extra omp arguments", "omp 추가 인자"), _settings.AgentExtraArgs ?? "");
-            var approval = dlg.AddCombo(LT("Approval mode", "승인 모드"),
-                Enum.GetValues<AgentApprovalMode>().Select(m => ApprovalTexts.Label(m, ko)).ToArray(),
-                (int)baseline.Mode);
-            // omp 추가 인자(--approval-mode·--yolo·--auto-approve)가 모드를 고정하면 선택을 막고 이유를 보여 준다.
-            if (AgentApprovalPolicy.ForcedByArgs(_settings.AgentExtraArgs) is { } forced)
-            {
-                approval.SelectedIndex = (int)forced.Mode;
-                approval.Enabled = false;
-                dlg.AddNote(ApprovalTexts.Locked(forced.Flag, ko));
-            }
-            var localPython = dlg.AddCheckedList(LT("Local Python analysis", "로컬 Python 분석"),
-                new[] { LT("Allow local Python analysis", "로컬 Python 분석 허용") }, 1);
-            localPython.CheckOnClick = true;
-            localPython.SetItemChecked(0, baseline.Python);
-            // 적용 대상을 바꾸면 세 항목이 그 범위의 값을 보여 준다.
-            if (scope is not null)
-                scope.SelectedIndexChanged += (_, _) =>
-                {
-                    var b = ScopeBaseline(scope.SelectedIndex == 0);
-                    policy.SelectedIndex = (int)b.Policy;
-                    if (approval.Enabled) approval.SelectedIndex = (int)b.Mode;
-                    localPython.SetItemChecked(0, b.Python);
-                };
-            dlg.AddNote(LT(
-                "When on, the agent may export the current view to a file in the analysis folder (<workspace name>_분석결과 next to the workspace file, or <first file name>_분석결과 next to the first data file you opened; it stays the same when you switch tabs) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
-                "켜면 에이전트가 현재 보기를 분석 폴더(작업 공간 파일 옆의 <작업 공간 이름>_분석결과, 없으면 처음 연 데이터 파일 옆의 <파일 이름>_분석결과 — 탭을 바꿔도 그대로)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
-            dlg.AddNote(LT(
-                "Approval mode: 'Always ask' asks for every write or run, in the app and in omp. 'Auto-approve edits' lets undoable data edits run without a card and lets omp write files, but still asks for Python/shell runs, saving to a new file and sharing raw rows. 'Allow everything' also skips those (raw-row sharing still follows the data sharing setting). Changing it restarts the agent on the same conversation.",
-                "승인 모드: '항상 묻기'는 앱과 omp 모두 쓰기·실행마다 묻습니다. '편집 자동 승인'은 되돌릴 수 있는 데이터 편집을 카드 없이 실행하고 omp의 파일 쓰기도 허용하지만 Python·셸 실행, 새 파일 저장, 원시 행 공유는 묻습니다. '모두 허용'은 그것들도 묻지 않습니다(원시 행 공유는 데이터 공유 설정을 따름). 바꾸면 같은 대화로 에이전트를 다시 시작합니다."));
-            dlg.AddNote(LT(
-                "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits are stored in an undoable overlay; the original file is never written.",
-                "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집은 되돌릴 수 있는 덮개에 쌓이고 원본 파일은 쓰지 않습니다."));
-            if (!dlg.ShowOk(this)) return;
+        /// <summary>채팅 ⚙·슬래시 /settings가 부르는 진입점: 설정 대화 상자를 AI 쪽으로 연다.</summary>
+        private void ShowAgentSettings() => ShowSettings("ai");
 
-            bool workspaceScope = scope is not null && scope.SelectedIndex == 0;
-            var wantMode = (AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2);
-            var wantPolicy = (AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2);
-            bool wantPython = localPython.GetItemChecked(0);
-            bool approvalEditable = approval.Enabled && AgentApprovalPolicy.ForcedByArgs(extra.Text) is null;
+        /// <summary>설정 대화 상자 AI 쪽의 입력값.</summary>
+        internal readonly record struct AgentSettingsInput(bool WorkspaceScope, AgentApprovalMode Mode, AgentDataPolicy Policy, bool Python,
+            bool ApprovalEditable, int MaxRows, string OmpPath, string ExtraArgs);
+
+        /// <summary>
+        /// 설정 대화 상자 AI 쪽의 적용(확인·적용). 작업 공간 범위면 작업 공간 파일에 적고(앱 기본값과 같고 아직 값이 없으면 적지 않음 — 앱 설정을 따름),
+        /// 앱 범위면 앱 설정에 적는다. 승인 모드·데이터 공유·로컬 Python은 둘 중 더 엄격한 쪽이 이기므로 풀리지 않은 값은 알린다.
+        /// </summary>
+        internal void ApplyAgentSettings(AgentSettingsInput v)
+        {
+            bool workspaceScope = v.WorkspaceScope && _wfFilePath is not null;
+            var wantMode = v.Mode;
+            var wantPolicy = v.Policy;
+            bool wantPython = v.Python;
+            bool approvalEditable = v.ApprovalEditable && AgentApprovalPolicy.ForcedByArgs(v.ExtraArgs) is null;
             var app = AppAgentOptions();
 
             if (workspaceScope)
@@ -371,9 +323,9 @@ namespace NanumCsvViewer
             }
 
             string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
-            _settings.AgentMaxRows = (int)maxRows.Value;
-            _settings.AgentOmpPath = ompPath.Text.Trim();
-            _settings.AgentExtraArgs = extra.Text.Trim();
+            _settings.AgentMaxRows = Math.Clamp(v.MaxRows, 1, 5000);
+            _settings.AgentOmpPath = v.OmpPath.Trim();
+            _settings.AgentExtraArgs = v.ExtraArgs.Trim();
             _settings.Save();
             ExplainNotApplied(approvalEditable ? wantMode : null, wantPolicy, wantPython);
             if (_agentController is null) return;

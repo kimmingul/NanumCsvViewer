@@ -147,6 +147,7 @@ namespace NanumCsvViewer
 
         // 화면 상태
         internal int[]? ColumnWidths;
+        internal int FrozenColumns;   // 왼쪽부터 고정한 열 수
         internal int CurrentRow = -1, CurrentColumn = -1, FirstRow = -1, HorizontalScroll;
         internal string FilterBoxText = "";
         internal int FilterColumnIndex;

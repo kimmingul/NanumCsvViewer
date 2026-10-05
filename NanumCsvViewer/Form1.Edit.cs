@@ -16,7 +16,6 @@ namespace NanumCsvViewer
         private ToolStripMenuItem? _undoMenu, _redoMenu, _pasteMenu, _clearCellsMenu, _renameColumnMenu,
             _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, _regexReplaceMenu, _extractColumnMenu,
             _insertColumnMenu, _deleteColumnMenu, _moveColumnLeftMenu, _moveColumnRightMenu;
-        private readonly List<ToolStripItem> _editContextItems = new();
         private ToolStripButton? _editCellButton, _editSheetButton;
         private bool _sheetEditing;
         private bool _editWired;
@@ -28,23 +27,16 @@ namespace NanumCsvViewer
 
         private bool EditsReady => _doc is not null && _doc.IndexingComplete && !_busy && !ActiveTabReadOnly;
 
+        // 항목만 만든다: 메뉴 조립은 Ui/Form1.MainMenu.cs, 툴바 버튼은 Ui/Form1.Toolbar.cs, 우클릭 메뉴는 Ui/Form1.ContextMenus.cs.
         private void BuildEditFeatures()
         {
-            editToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            _undoMenu = MakeItem("Undo", "되돌리기", (_, _) => UndoEdit());
-            _undoMenu.ShortcutKeyDisplayString = "Ctrl+Z";
-            _redoMenu = MakeItem("Redo", "다시 실행", (_, _) => RedoEdit());
-            _redoMenu.ShortcutKeyDisplayString = "Ctrl+Y";
-            _editCellMenu = MakeItem("Edit Cell…", "셀 편집…", (_, _) => EditCurrentCell());
-            _editCellMenu.ShortcutKeys = Keys.F2;
-            _editSheetMenu = MakeItem("Sheet Edit Mode", "시트 편집 모드", (_, _) => SetSheetEditing(!_sheetEditing));
-            _editSheetMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.E;
-            _pasteMenu = MakeItem("Paste Cells", "셀 붙여넣기", (_, _) => PasteFromClipboard());
-            _pasteMenu.ShortcutKeyDisplayString = "Ctrl+V";
-            _clearCellsMenu = MakeItem("Clear Selected Cells", "선택한 셀 지우기", (_, _) => ClearSelectedCells());
-            _clearCellsMenu.ShortcutKeyDisplayString = "Del";
-            _regexReplaceMenu = MakeItem("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", async (_, _) => await RegexReplaceAsync());
-            _regexReplaceMenu.ShortcutKeys = Keys.Control | Keys.H;
+            _undoMenu = MakeCmd("edit.undo", (_, _) => UndoEdit());
+            _redoMenu = MakeCmd("edit.redo", (_, _) => RedoEdit());
+            _editCellMenu = MakeCmd("edit.cell", (_, _) => EditCurrentCell());
+            _editSheetMenu = MakeCmd("edit.sheet", (_, _) => SetSheetEditing(!_sheetEditing));
+            _pasteMenu = MakeCmd("edit.paste", (_, _) => PasteFromClipboard());
+            _clearCellsMenu = MakeCmd("edit.clear", (_, _) => ClearSelectedCells());
+            _regexReplaceMenu = MakeCmd("edit.replace", async (_, _) => await RegexReplaceAsync());
             _extractColumnMenu = MakeItem("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", async (_, _) => await ExtractColumnAsync());
             _renameColumnMenu = MakeItem("Rename Column…", "컬럼 이름 변경…", (_, _) => RenameCurrentColumn());
             _insertColumnMenu = MakeItem("Insert Column…", "컬럼 삽입…", (_, _) => InsertColumnFromUi());
@@ -57,61 +49,11 @@ namespace NanumCsvViewer
             _revertCellMenu = MakeItem("Revert This Cell", "이 셀 편집 되돌리기", (_, _) => RevertCurrentCell());
             _saveEditsMenu = MakeItem("Save Edits As…", "편집 내용 저장…", async (_, _) => await SaveEditsAsync());
             _discardEditsMenu = MakeItem("Discard All Edits", "모든 편집 버리기", (_, _) => DiscardAllEdits());
-            foreach (var m in new ToolStripItem?[]
-                     {
-                         _undoMenu, _redoMenu, new ToolStripSeparator(),
-                         _editCellMenu, _editSheetMenu, _pasteMenu, _clearCellsMenu, _regexReplaceMenu, _extractColumnMenu, _renameColumnMenu,
-                         _insertColumnMenu, _moveColumnLeftMenu, _moveColumnRightMenu, _deleteColumnMenu,
-                         _insertAboveMenu, _insertBelowMenu, _deleteRowsMenu, new ToolStripSeparator(),
-                         _revertCellMenu, _saveEditsMenu, _discardEditsMenu,
-                     })
-                editToolStripMenuItem.DropDownItems.Add(m!);
-
-            // 셀 우클릭 메뉴(시트 편집 모드에서만 보임)
-            gridContextMenu.Items.Add(new ToolStripSeparator());
-            _editContextItems.Add(gridContextMenu.Items[^1]);
-            foreach (var (en, ko, act) in new (string, string, Action)[]
-                     {
-                         ("Paste Cells", "셀 붙여넣기", PasteFromClipboard),
-                         ("Clear Selected Cells", "선택한 셀 지우기", ClearSelectedCells),
-                         ("Insert Row Above", "위에 행 삽입", () => InsertRow(above: true)),
-                         ("Insert Row Below", "아래에 행 삽입", () => InsertRow(above: false)),
-                         ("Delete Selected Rows", "선택한 행 삭제", DeleteSelectedRows),
-                         ("Find && Replace (regex)…", "찾아 바꾸기 (정규식)…", () => _ = RegexReplaceAsync()),
-                         ("Extract to New Column (regex)…", "정규식으로 새 컬럼에 추출…", () => _ = ExtractColumnAsync()),
-                         ("Insert Column…", "컬럼 삽입…", InsertColumnFromUi),
-                         ("Move Column Left", "컬럼 왼쪽으로 이동", () => MoveCurrentColumn(-1)),
-                         ("Move Column Right", "컬럼 오른쪽으로 이동", () => MoveCurrentColumn(+1)),
-                         ("Delete Column", "컬럼 삭제", () => { if (grid.CurrentCell is { ColumnIndex: >= 0 } c) DeleteColumnFromUi(c.ColumnIndex); }),
-                     })
-            {
-                var item = MakeItem(en, ko, (_, _) => act());
-                gridContextMenu.Items.Add(item);
-                _editContextItems.Add(item);
-            }
-
-            // 별도 편집 버튼(툴바). 보기 모드에서는 둘 다 꺼져 있다.
-            _editCellButton = new ToolStripButton
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "editCellButton",
-                Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never,
-            };
-            _editCellButton.Click += (_, _) => EditCurrentCell();
-            _editSheetButton = new ToolStripButton
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.Text, CheckOnClick = false, Name = "editSheetButton",
-                Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never,
-            };
-            _editSheetButton.Click += (_, _) => SetSheetEditing(!_sheetEditing);
-            // 우측 정렬은 나중에 추가한 것이 왼쪽에 놓인다: [셀][시트] 순서로 보이게 시트를 먼저 추가.
-            toolStrip1.Items.Add(_editSheetButton);
-            toolStrip1.Items.Add(_editCellButton);
 
             _settleTimer.Tick += async (_, _) => await SettleAfterEditAsync();
             _journalTimer.Tick += (_, _) => FlushJournal();
             WireAddressBox();
             BuildFormatFeatures();
-            Shown += (_, _) => grid.CellContextMenuStripNeeded += OnEditHeaderMenuNeeded; // 타입 메뉴(Features)가 만든 뒤에 항목을 덧붙이려면 그 핸들러보다 늦게 연결해야 한다
 
             if (_editWired) return;
             _editWired = true;
@@ -127,19 +69,10 @@ namespace NanumCsvViewer
             grid.Paint += OnColumnDragPaint;
         }
 
+        // 툴바 글자·툴팁은 LocalizeToolbar가 맡는다. 여기서는 시트 편집 버튼의 눌림(켜짐) 상태와 되돌리기 항목 글자만 맞춘다.
         private void LocalizeEditButtons()
         {
-            if (_editCellButton is not null)
-            {
-                _editCellButton.Text = LT("✎ Cell", "✎ 셀");
-                _editCellButton.ToolTipText = LT("Edit Cell — edit the selected cell; returns to view mode right after (F2)", "셀 편집 — 선택한 셀 하나를 편집하고 바로 보기 모드로 돌아옵니다 (F2)");
-            }
-            if (_editSheetButton is not null)
-            {
-                _editSheetButton.Text = _sheetEditing ? LT("✎ Sheet ON", "✎ 시트 ON") : LT("✎ Sheet", "✎ 시트");
-                _editSheetButton.ToolTipText = LT("Sheet Edit Mode — turn on/off editing of many cells, paste, rename columns, insert/delete rows (off = view mode)", "시트 편집 모드 — 여러 셀 편집·붙여넣기·컬럼 이름 변경·행 삽입/삭제를 켜고 끕니다(끄면 보기 모드)");
-                _editSheetButton.Checked = _sheetEditing;
-            }
+            if (_editSheetButton is not null) _editSheetButton.Checked = _sheetEditing;
             RefreshHistoryMenuText();
         }
 
@@ -170,7 +103,6 @@ namespace NanumCsvViewer
             if (_insertAboveMenu is not null) _insertAboveMenu.Enabled = structure;
             if (_insertBelowMenu is not null) _insertBelowMenu.Enabled = structure;
             if (_deleteRowsMenu is not null) _deleteRowsMenu.Enabled = structure && hasCell;
-            foreach (var item in _editContextItems) { item.Visible = _sheetEditing; item.Enabled = sheet; }
             UpdateEditStateMenusOnly();
             LocalizeEditButtons();
             UpdateEditTitle();
@@ -187,6 +119,8 @@ namespace NanumCsvViewer
                 _revertCellMenu.Enabled = ready && grid.CurrentCell is { RowIndex: >= 0 } && CurrentCellIsEdited();
             if (_undoMenu is not null) _undoMenu.Enabled = ready && _doc!.Edits.CanUndo;
             if (_redoMenu is not null) _redoMenu.Enabled = ready && _doc!.Edits.CanRedo;
+            if (_undoButton is not null && _undoMenu is not null) _undoButton.Enabled = _undoMenu.Enabled;
+            if (_redoButton is not null && _redoMenu is not null) _redoButton.Enabled = _redoMenu.Enabled;
             RefreshHistoryMenuText();
         }
 
@@ -341,7 +275,28 @@ namespace NanumCsvViewer
             UpdateFeatureState();
         }
 
+        // 현재 셀이 바뀔 때마다 가볍게: 셀 편집 메뉴·단추의 켜짐만 맞춘다(전체 상태 갱신은 UpdateEditState).
+        private void UpdateCellSelectionState()
+        {
+            bool hasCell = EditsReady && grid.CurrentCell is { RowIndex: >= 0, ColumnIndex: >= 0 };
+            bool enabled = hasCell && !_sheetEditing;
+            if (_editCellMenu is not null && _editCellMenu.Enabled != enabled) _editCellMenu.Enabled = enabled;
+            if (_editCellButton is not null && _editCellButton.Enabled != enabled) _editCellButton.Enabled = enabled;
+        }
+
         // ---------------------------------------------------------------- 시트 편집 모드
+
+        /// <summary>시트 편집 켜기 확인 대화상자를 대신하는 이음매(테스트용). null이면 실제 MessageBox를 띄운다.</summary>
+        internal Func<bool>? SheetEditConfirm;
+
+        private bool ConfirmSheetEditOn()
+        {
+            if (SheetEditConfirm is { } seam) return seam();
+            return MessageBox.Show(this,
+                LT("Turn on sheet edit mode?\n\nCells can be edited, pasted and cleared, columns renamed and rows inserted or deleted until you turn it off. Edits are kept in memory (Ctrl+Z undoes them) and never written to the original file; save them with Edit ▸ Save Edits As… (a new file).\nValues are stored exactly as typed (001 stays 001).",
+                   "시트 편집 모드를 켤까요?\n\n끌 때까지 셀 편집·붙여넣기·지우기, 컬럼 이름 변경, 행 삽입/삭제를 할 수 있습니다. 편집은 메모리에만 쌓이고(Ctrl+Z로 되돌림) 원본 파일에는 쓰이지 않으며, 편집 ▸ 편집 내용 저장…으로 새 파일에 저장합니다.\n값은 입력한 그대로 저장됩니다(001은 001 그대로)."),
+                ProgramName, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
+        }
 
         private void SetSheetEditing(bool on, bool silent = false)
         {
@@ -355,10 +310,7 @@ namespace NanumCsvViewer
                                           "이 탭은 읽기 전용입니다(뷰 테이블 또는 질의 결과) — 편집할 수 없습니다.");
                     return;
                 }
-                if (MessageBox.Show(this,
-                        LT("Turn on sheet edit mode?\n\nCells can be edited, pasted and cleared, columns renamed and rows inserted or deleted until you turn it off. Edits are kept in memory (Ctrl+Z undoes them) and never written to the original file; save them with Edit ▸ Save Edits As… (a new file).\nValues are stored exactly as typed (001 stays 001).",
-                           "시트 편집 모드를 켤까요?\n\n끌 때까지 셀 편집·붙여넣기·지우기, 컬럼 이름 변경, 행 삽입/삭제를 할 수 있습니다. 편집은 메모리에만 쌓이고(Ctrl+Z로 되돌림) 원본 파일에는 쓰이지 않으며, 편집 ▸ 편집 내용 저장…으로 새 파일에 저장합니다.\n값은 입력한 그대로 저장됩니다(001은 001 그대로)."),
-                        ProgramName, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                if (!ConfirmSheetEditOn()) return;
             }
             else if (grid.IsCurrentCellInEditMode) grid.EndEdit();
 
@@ -390,32 +342,21 @@ namespace NanumCsvViewer
             RenameColumn(e.ColumnIndex);
         }
 
-        // 시트 편집 모드 단축키. 입력란(필터·찾기)이나 셀 인라인 편집 중에는 그 입력란의 자체 동작(텍스트 되돌리기 등)을 쓴다.
+        // 메뉴에 바인딩되지 않은 단축키(탭 전환·그리드의 되돌리기/붙여넣기/지우기)와 시트 편집 모드 F2. 키는 CommandShortcuts 표가 정한다.
+        // 입력란(필터·찾기)이나 셀 인라인 편집 중에는 그 입력란의 자체 동작(텍스트 되돌리기 등)을 쓴다.
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             // 탭 전환: Ctrl+Tab / Ctrl+Shift+Tab (그리드·입력란 어디에 포커스가 있어도)
-            if (keyData == (Keys.Control | Keys.Tab)) { CycleTab(+1); return true; }
-            if (keyData == (Keys.Control | Keys.Shift | Keys.Tab)) { CycleTab(-1); return true; }
+            if (CommandShortcuts.Matches("view.nextTab", keyData)) { CycleTab(+1); return true; }
+            if (CommandShortcuts.Matches("view.prevTab", keyData)) { CycleTab(-1); return true; }
             if (_doc is not null && grid.Focused && !grid.IsCurrentCellInEditMode)
             {
-                switch (keyData)
-                {
-                    case Keys.Control | Keys.Z:
-                        UndoEdit();
-                        return true;
-                    case Keys.Control | Keys.Y:
-                    case Keys.Control | Keys.Shift | Keys.Z:
-                        RedoEdit();
-                        return true;
-                    case Keys.Control | Keys.V:
-                        PasteFromClipboard();
-                        return true;
-                    case Keys.Delete when _sheetEditing:
-                        ClearSelectedCells();
-                        return true;
-                }
+                if (CommandShortcuts.Matches("edit.undo", keyData)) { UndoEdit(); return true; }
+                if (CommandShortcuts.Matches("edit.redo", keyData)) { RedoEdit(); return true; }
+                if (CommandShortcuts.Matches("edit.paste", keyData)) { PasteFromClipboard(); return true; }
+                if (_sheetEditing && CommandShortcuts.Matches("edit.clear", keyData)) { ClearSelectedCells(); return true; }
             }
-            if (_sheetEditing && keyData == Keys.F2 && grid.Focused && !grid.IsCurrentCellInEditMode && grid.CurrentCell is { RowIndex: >= 0 })
+            if (_sheetEditing && CommandShortcuts.Matches("edit.cell", keyData) && grid.Focused && !grid.IsCurrentCellInEditMode && grid.CurrentCell is { RowIndex: >= 0 })
             {
                 grid.BeginEdit(false);
                 return true;
@@ -475,30 +416,6 @@ namespace NanumCsvViewer
                 }
             }
             if (!cf.IsEmpty) ApplyFormatToCell(e, cf, systemBack);
-        }
-
-        // 헤더 우클릭 메뉴(Features의 타입 메뉴)에 시트 편집 모드의 컬럼 항목을 덧붙인다. 타입 메뉴가 없으면(요약 계산 전) 항목만 있는 메뉴를 만든다.
-        private ContextMenuStrip? _editHeaderMenu;
-
-        private void OnEditHeaderMenuNeeded(object? sender, DataGridViewCellContextMenuStripNeededEventArgs e)
-        {
-            if (e.RowIndex != -1 || e.ColumnIndex < 0 || !_sheetEditing || _doc is null || !_doc.IndexingComplete || _busy) return;
-            var menu = e.ContextMenuStrip;
-            if (menu is null)
-            {
-                _editHeaderMenu?.Dispose();
-                menu = _editHeaderMenu = new ContextMenuStrip();
-                e.ContextMenuStrip = menu;
-            }
-            int col = e.ColumnIndex;
-            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(LT("Rename Column…", "컬럼 이름 변경…"), null, (_, _) => RenameColumn(col));
-            menu.Items.Add(LT("Insert Column…", "컬럼 삽입…"), null, (_, _) => InsertColumnFromUi());
-            var del = menu.Items.Add(LT("Delete Column", "컬럼 삭제"), null, (_, _) => DeleteColumnFromUi(col));
-            int left = AdjacentVisibleColumn(col, -1), right = AdjacentVisibleColumn(col, +1);
-            menu.Items.Add(LT("Move Column Left", "컬럼 왼쪽으로 이동"), null, (_, _) => MoveColumnFromUi(col, left)).Enabled = left >= 0;
-            menu.Items.Add(LT("Move Column Right", "컬럼 오른쪽으로 이동"), null, (_, _) => MoveColumnFromUi(col, right)).Enabled = right >= 0;
-            del.Enabled = _doc.ColumnCount > 1;
         }
 
         // ---------------------------------------------------------------- 저장

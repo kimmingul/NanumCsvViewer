@@ -108,6 +108,7 @@ namespace NanumCsvViewer.Agent.Chat
                 o["state"] = s.State;
                 o["error"] = s.Error;
                 o["connected"] = s.Connected;
+                o["ready"] = s.Ready;
                 o["busy"] = s.Busy;
                 o["shell"] = s.Shell;
                 o["activity"] = s.Activity;
@@ -234,6 +235,8 @@ namespace NanumCsvViewer.Agent.Chat
         public string State { get; init; } = "";
         public bool Error { get; init; }
         public bool Connected { get; init; }
+        /// <summary>메시지를 보낼 수 있다: 연결됐거나, omp를 첫 메시지 때 시작하도록 미뤄 둔 상태(보내면 그때 시작).</summary>
+        public bool Ready { get; init; }
         public bool Busy { get; init; }
         public bool Shell { get; init; }
         public string Activity { get; init; } = "";

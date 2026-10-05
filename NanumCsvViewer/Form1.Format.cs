@@ -21,30 +21,17 @@ namespace NanumCsvViewer
         private CancellationTokenSource? _cfScaleCts;
         private Font? _cfBoldFont, _cfBoldBase;
         private ToolStripMenuItem? _cfMenu, _cfUndoMenu, _cfRedoMenu;
-        private ToolStripButton? _cfUndoButton;
         private ConditionalFormatHistory _cfHistory = new();
         private System.Windows.Forms.Timer? _cfReportTimer;
         private int _cfReportedTimeouts;
         private int _cfFailureShown;
 
+        // 항목만 만든다(View 메뉴 조립은 Ui/Form1.MainMenu.cs, 툴바 단추는 Ui/Form1.Toolbar.cs, 우클릭 항목은 Ui/Form1.ContextMenus.cs).
         private void BuildFormatFeatures()
         {
-            viewToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
             _cfMenu = MakeItem("Conditional Formatting…", "조건부 서식…", (_, _) => ShowConditionalFormatManager());
-            viewToolStripMenuItem.DropDownItems.Add(_cfMenu);
             _cfUndoMenu = MakeItem("Undo Conditional Format", "조건부 서식 되돌리기", (_, _) => OnFormatHistoryStep(undo: true));
             _cfRedoMenu = MakeItem("Redo Conditional Format", "조건부 서식 다시 실행", (_, _) => OnFormatHistoryStep(undo: false));
-            viewToolStripMenuItem.DropDownItems.Add(_cfUndoMenu);
-            viewToolStripMenuItem.DropDownItems.Add(_cfRedoMenu);
-            _cfUndoButton = new ToolStripButton
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "cfUndoButton",
-                Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never, Enabled = false,
-            };
-            _cfUndoButton.Click += (_, _) => OnFormatHistoryStep(undo: true);
-            toolStrip1.Items.Add(_cfUndoButton);
-            gridContextMenu.Items.Add(new ToolStripSeparator());
-            gridContextMenu.Items.Add(MakeItem("Conditional Formatting…", "조건부 서식…", (_, _) => ShowConditionalFormatManager()));
             _cfReportTimer = new System.Windows.Forms.Timer { Interval = 700 };
             _cfReportTimer.Tick += (_, _) => ReportConditionalFormatTimeouts();
         }
@@ -56,13 +43,7 @@ namespace NanumCsvViewer
             if (_cfMenu is not null) _cfMenu.Enabled = _doc is not null;
             if (_cfUndoMenu is not null) _cfUndoMenu.Enabled = undo;
             if (_cfRedoMenu is not null) _cfRedoMenu.Enabled = redo;
-            if (_cfUndoButton is not null)
-            {
-                _cfUndoButton.Enabled = undo;
-                _cfUndoButton.Text = LT("↶ Format", "↶ 서식");
-                _cfUndoButton.ToolTipText = LT("Undo conditional format — undoes the last conditional-formatting change (separate from Ctrl+Z)",
-                                               "조건부 서식 되돌리기 — 마지막 조건부 서식 변경을 되돌립니다(Ctrl+Z와 별개)");
-            }
+            if (_cfButton is not null) _cfButton.Enabled = _doc is not null;
         }
 
         // 다크/라이트 전환은 컴파일된 규칙이 두 테마의 색을 모두 들고 있으므로 플래그만 맞추면 된다(다시 그릴 때 호출).

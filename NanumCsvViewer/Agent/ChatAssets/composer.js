@@ -46,13 +46,13 @@
     sendBtn.textContent = stop ? '■' : '↑';
     sendBtn.title = stop ? T('page.composer.stopTitle') :
       state.busy ? T('page.composer.steerTitle') : T('page.composer.sendTitle');
-    sendBtn.disabled = stop ? false : !(state.connected && input.value.trim());
+    sendBtn.disabled = stop ? false : !((state.connected || state.ready) && input.value.trim());
   }
 
   // followUp: while the agent works, send after the turn instead of at its next step.
   function submit(followUp) {
     const text = input.value.trim();
-    if (!text || state.shell || !state.connected) return;
+    if (!text || state.shell || !(state.connected || state.ready)) return;
     const id = 's' + (++nextSubmission);
     pending.set(id, { raw: input.value, text });
     post({ t: 'submit', id, text, followUp: !!followUp });

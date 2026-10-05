@@ -22,20 +22,15 @@ namespace NanumCsvViewer
         /// <summary>작업 공간을 열거나 저장하는 중인가.</summary>
         internal bool IsWorkspaceFileBusy => _wfBusy;
 
-        // Form1.AgentUi.BuildAgentFeatures에서 호출(File 메뉴는 이 시점에 열기 항목 뒤가 비어 있다).
+        // Form1.AgentUi.BuildAgentFeatures에서 호출. 항목만 만든다(파일 메뉴 조립은 Ui/Form1.MainMenu.cs).
         private void BuildWorkspaceFileFeatures()
         {
-            _wfOpenMenu = MakeItem("Open Workspace…", "작업 공간 열기…", async (_, _) => await OpenWorkspaceDialogAsync());
-            _wfOpenMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.O;
-            _wfSaveMenu = MakeItem("Save Workspace", "작업 공간 저장", (_, _) => SaveWorkspace(saveAs: false));
+            _wfOpenMenu = MakeCmd("file.openWorkspace", async (_, _) => await OpenWorkspaceDialogAsync());
+            _wfSaveMenu = MakeCmd("file.saveWorkspace", (_, _) => SaveWorkspace(saveAs: false)); // 작업 공간 파일이 없으면 다른 이름으로 저장 대화상자
             _wfSaveAsMenu = MakeItem("Save Workspace As…", "작업 공간을 다른 이름으로 저장…", (_, _) => SaveWorkspace(saveAs: true));
             _wfRecentMenu = MakeItem("Recent Workspaces", "최근 작업 공간", (_, _) => { });
             _wfRecentMenu.DropDownItems.Add(new ToolStripMenuItem { Enabled = false });
             _wfRecentMenu.DropDownOpening += (_, _) => FillRecentWorkspaceMenu();
-
-            int at = fileToolStripMenuItem.DropDownItems.IndexOf(openToolStripMenuItem) + 1;
-            var items = new ToolStripItem[] { new ToolStripSeparator(), _wfOpenMenu, _wfRecentMenu, _wfSaveMenu, _wfSaveAsMenu, new ToolStripSeparator() };
-            for (int i = 0; i < items.Length; i++) fileToolStripMenuItem.DropDownItems.Insert(at + i, items[i]);
 
             // 열기 대화 상자에서 .ncvws도 고를 수 있게(고르면 OpenFileCoreAsync가 작업 공간으로 연다).
             openFileDialog1.Filter = openFileDialog1.Filter
@@ -68,9 +63,12 @@ namespace NanumCsvViewer
         private void OnWorkspaceFormClosing(object? sender, FormClosingEventArgs e)
         {
             if (e.Cancel || _wfCloseDecided) return;
-            // 종료가 이미 정해진 경우(Windows 종료·작업 관리자)에는 묻지 않는다. 두 번째 닫기 시도(비동기 정리 뒤)에도 다시 묻지 않도록 결정을 기억한다.
-            if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing) { _wfCloseDecided = true; return; }
+            // 종료가 이미 정해진 경우(Windows 종료·작업 관리자·다른 프로세스의 WM_CLOSE)에는 묻지 않는다. 두 번째 닫기 시도(비동기 정리 뒤)에도 다시 묻지 않도록 결정을 기억한다.
+            // 패널 배치만 파일에 조용히 반영한다(파일의 다른 내용은 건드리지 않는다).
+            if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing) { SaveWorkspaceLayoutOnClose(); _wfCloseDecided = true; return; }
+            bool hadChanges = WorkspaceNeedsSave();
             if (!ConfirmWorkspaceSaved()) { e.Cancel = true; return; }
+            if (!hadChanges) SaveWorkspaceLayoutOnClose();   // 내용 변경이 없었으면 패널 배치만 파일에 반영(저장 확인은 띄우지 않는다)
             _wfCloseDecided = true;
         }
 
@@ -138,7 +136,8 @@ namespace NanumCsvViewer
                 if (ReferenceEquals(t, _t)) active = tabs.Count;
                 tabs.Add(c);
             }
-            return WorkspaceFile.Capture(workspacePath, sources, views, _wfCarriedViews, tabs, active, WorkspaceDockVisible, CaptureAgentInfo());
+            return WorkspaceFile.Capture(workspacePath, sources, views, _wfCarriedViews, tabs, active, WorkspaceDockVisible, CaptureAgentInfo(),
+                LayoutReady ? CaptureLayout() : null);
         }
 
         private string SuggestWorkspaceFolder()
@@ -197,6 +196,7 @@ namespace NanumCsvViewer
             _wfFilePath = target;
             _wfAgent = model.Agent?.Clone() ?? new WorkspaceFileAgent();   // 저장된 대화 연결이 이제 "읽어 둔" 연결이다
             _wfSavedSignature = WorkspaceFile.Signature(model);
+            if (model.Layout is not null) _wfAppliedLayout = model.Layout.Clone();
             RememberRecentWorkspace(target);
             statusLabel.Text = LT("Workspace saved: ", "작업 공간을 저장했습니다: ") + target;
             PostAgentContext();   // 작업 공간 파일이 생기면 에이전트의 분석 폴더가 그 옆으로 바뀐다
@@ -480,7 +480,7 @@ namespace NanumCsvViewer
             for (int k = 0; k < order.Count; k++) MoveTab(order[k], k);
             if (active is not null) await ActivateTabAsync(active);
             else if (order.Count > 0 && ActiveTab is null) await ActivateTabAsync(order[0]);
-            WorkspaceDockVisible = model.ExplorerVisible;
+            ApplyWorkspaceLayout(model);   // 저장된 패널 배치(없는 옛 파일은 앱 기본)
         }
 
         private void TryRestoreName(DataWorkspace ws, WorkspaceSource source, string savedName, List<string> problems)

@@ -292,12 +292,14 @@ namespace NanumCsvViewer.Agent
             SetStatus("", false);
             RefreshStatus(force: true);
             PostApprovalNoticeOnce();
+            FlushPendingSubmit();   // 첫 메시지로 시작한 경우: 이제 그 메시지를 보낸다(그러면 작업 중이 되어 아래 재시작은 턴 뒤로 미뤄진다)
             RunPendingWorkspaceRestart();
         }
 
         private void Fail(string message)
         {
             _connected = false;
+            DropPendingSubmit();
             TearDown(force: true);
             SetStatus(message, true);
             _stream.Emit(ChatPageMessages.Notice("error", message));
@@ -322,6 +324,7 @@ namespace NanumCsvViewer.Agent
 
         private async Task RestartSessionAsync()
         {
+            if (IsStartDeferred) return;   // 아직 시작한 적이 없다: 설정은 첫 메시지 때 반영된다
             string? resume = _sessionFile;
             bool otherFolder = FolderStale();   // 새 작업 폴더로 가는 재시작: 세션은 명령줄로 이어받는다
             if (_activity.Busy) { _activity.NoteStopRequested(); TearDown(force: true); EndTurn(stopped: true); }
@@ -401,6 +404,7 @@ namespace NanumCsvViewer.Agent
                 string msg = T($"omp exited.{reason}", $"omp가 종료되었습니다.{reason}");
                 SetStatus(msg, true);
                 _stream.Emit(ChatPageMessages.Notice("error", msg));
+                DropPendingSubmit();
             }
         }
 
@@ -449,6 +453,7 @@ namespace NanumCsvViewer.Agent
                 State = _statusText,
                 Error = _statusError,
                 Connected = _connected,
+                Ready = _connected || IsStartDeferred,
                 Busy = _activity.Busy || _shellRunning,
                 Shell = _shellRunning,
                 Activity = _activity.Busy ? _activity.Text : "",

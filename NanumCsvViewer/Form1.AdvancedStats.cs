@@ -22,7 +22,7 @@ namespace NanumCsvViewer
 
         private void BuildAdvancedStatsMenu()
         {
-            _advMenu = new ToolStripMenuItem();
+            _advMenu = new ToolStripMenuItem { Name = "statisticsMenu" };
 
             var models = new ToolStripMenuItem();
             RegisterLabel(models, "Models", "모형");
@@ -78,7 +78,7 @@ namespace NanumCsvViewer
             _advMenu.DropDownItems.Add(MakeItem("Apply Saved Model…", "저장된 모형 적용…", (_, _) => AdvApplyModel()));
             _advMenu.DropDownItems.Add(MakeItem("Variable Mapping Suggestions (OMOP/CDISC)…", "변수 매핑 추천(OMOP/CDISC)…", (_, _) => AdvVariableMapping()));
 
-            RegisterLabel(_advMenu, "Advanced Stats", "고급 통계");
+            RegisterLabel(_advMenu, "Statistics", "통계");
         }
 
         // ---------------------------------------------------------------- 공용 실행기

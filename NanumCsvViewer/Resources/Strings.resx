@@ -51,47 +51,11 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
 
-  <data name="Menu_File" xml:space="preserve"><value>File</value></data>
-  <data name="Menu_Open" xml:space="preserve"><value>Open...</value></data>
-  <data name="Menu_Quit" xml:space="preserve"><value>Quit</value></data>
-  <data name="Menu_Edit" xml:space="preserve"><value>Edit</value></data>
-  <data name="Menu_Find" xml:space="preserve"><value>Find...</value></data>
-  <data name="Menu_FindNext" xml:space="preserve"><value>Find Next</value></data>
-  <data name="Menu_ApplyFilter" xml:space="preserve"><value>Apply Filter</value></data>
-  <data name="Menu_FilterByCell" xml:space="preserve"><value>Filter by Selected Cell</value></data>
-  <data name="Menu_ClearFilter" xml:space="preserve"><value>Clear Filter</value></data>
-  <data name="Menu_SortAsc" xml:space="preserve"><value>Sort Ascending (current column)</value></data>
-  <data name="Menu_SortDesc" xml:space="preserve"><value>Sort Descending (current column)</value></data>
-  <data name="Menu_ClearSort" xml:space="preserve"><value>Clear Sort</value></data>
-  <data name="Menu_View" xml:space="preserve"><value>View</value></data>
-  <data name="Menu_Encoding" xml:space="preserve"><value>Encoding</value></data>
-  <data name="Menu_DetailPanel" xml:space="preserve"><value>Detail Panel</value></data>
-  <data name="Menu_Language" xml:space="preserve"><value>Language</value></data>
+  <!-- 메뉴·툴바·우클릭 메뉴의 글자는 Ui/CommandShortcuts.cs(단축키가 있는 명령)와 각 메뉴 구성 코드(LT en/ko)에 있다 — 여기에는 언어 이름만 남긴다. -->
   <data name="Lang_English" xml:space="preserve"><value>English</value></data>
   <data name="Lang_Korean" xml:space="preserve"><value>한국어</value></data>
-  <data name="Menu_Help" xml:space="preserve"><value>Help</value></data>
-  <data name="Menu_Usage" xml:space="preserve"><value>How to Use</value></data>
-  <data name="Menu_About" xml:space="preserve"><value>About</value></data>
 
-  <data name="Tb_Open" xml:space="preserve"><value>Open</value></data>
-  <data name="Tb_FindLabel" xml:space="preserve"><value>Find:</value></data>
-  <data name="Tb_FindNext" xml:space="preserve"><value>Next</value></data>
-  <data name="Tb_FilterByCell" xml:space="preserve"><value>Filter by Cell</value></data>
-  <data name="Tb_FilterLabel" xml:space="preserve"><value>Filter:</value></data>
-  <data name="Tb_Apply" xml:space="preserve"><value>Apply</value></data>
-  <data name="Tb_Clear" xml:space="preserve"><value>Clear</value></data>
-  <data name="Tb_Details" xml:space="preserve"><value>Details (F4)</value></data>
-
-  <data name="Tip_FilterByCell" xml:space="preserve"><value>Filter by the selected cell's column = its value (AND with existing filters)</value></data>
-  <data name="Tip_SortAsc" xml:space="preserve"><value>Sort the current column ascending</value></data>
-  <data name="Tip_SortDesc" xml:space="preserve"><value>Sort the current column descending</value></data>
-  <data name="Tip_ClearSort" xml:space="preserve"><value>Clear sort (restore file order)</value></data>
-  <data name="Tip_Detail" xml:space="preserve"><value>Show the full content of the selected row in the right panel</value></data>
-  <data name="Tip_Encoding" xml:space="preserve"><value>Text encoding (click to change)</value></data>
-  <data name="Tip_Theme" xml:space="preserve"><value>Toggle light/dark theme</value></data>
-  <data name="Ctx_FilterByCell" xml:space="preserve"><value>Filter by this cell value</value></data>
-
-  <data name="Status_OpenPrompt" xml:space="preserve"><value>Open a file (File ▸ Open).</value></data>
+  <data name="Status_OpenPrompt" xml:space="preserve"><value>Open a file (File ▸ Open…).</value></data>
   <data name="Status_Loading" xml:space="preserve"><value>Loading...</value></data>
   <data name="Status_LoadingProgressFmt" xml:space="preserve"><value>Loading...  {0} rows indexed  ({1} / {2})</value></data>
   <data name="Status_ReadyFmt" xml:space="preserve"><value>Ready · {0} rows · {1} · {2} cols · delimiter '{3}' · {4} mode · {5} ms · filter/sort ready{6}</value></data>
@@ -138,14 +102,14 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
   <data name="Usage_Text" xml:space="preserve"><value>Nanum CSV Viewer — Quick Guide
 
 [Open]
-• File ▸ Open (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls), SAS (.sas7bdat), and SPSS (.sav).
+• File ▸ Open… (Ctrl+O) opens .csv / .txt as well as Excel (.xlsx/.xls), SAS (.sas7bdat), and SPSS (.sav).
 • The first page appears instantly; the rest is indexed in the background (progress bar at the bottom). You can scroll while indexing.
 • Multi-sheet Excel workbooks switch via the sheet tabs at the bottom.
-• For SPSS/SAS, View ▸ Show Field Labels swaps codes and names for value labels and variable labels.
+• For SPSS/SAS, View ▸ Field Labels swaps codes and names for value labels and variable labels.
 • SPSS/SAS declared types (currency, percent, date, categorical, ordinal…) are matched automatically; currency and percent columns show their symbols.
 
 [Encoding]
-• Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use View ▸ Encoding. No re-indexing needed.
+• Auto-detected (UTF-8 / UTF-8 BOM / CP949·EUC-KR). If wrong, click the encoding widget at the right of the status bar, or use Data ▸ Encoding. No re-indexing needed.
 
 [Find]
 • Type in the Find box and press Enter, or F3, to jump to the next match (case-insensitive, wraps around).
@@ -153,7 +117,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 [Filter]
 • Use the funnel icon on a header for type-aware filters: range for numbers/time, checkboxes for categories/booleans, text predicates (contains/regex/list/blank) for strings/identifiers.
 • Active conditions appear as chips above the grid — remove with ✕, click to edit, toggle ALL (AND) / ANY (OR).
-• Filter by Cell (Ctrl+B) and the Advanced expression filter (NOT/AND/OR/parentheses; regex via matches / matches_cs / !matches; * = any column, e.g. * matches "x"). A regex that times out on a cell counts that cell as non-matching and is reported with ⚠. Clear removes all.
+• Filter by This Cell Value (Ctrl+B), Exclude This Value, ≥ / ≤ This Value (right-click a cell; ≥/≤ follow the column type — numbers, dates, text) and the Advanced expression filter (Ctrl+Shift+F; NOT/AND/OR/parentheses; regex via matches / matches_cs / !matches; * = any column, e.g. * matches "x"). A regex that times out on a cell counts that cell as non-matching and is reported with ⚠. Clear Filter removes all.
 
 [Sort]
 • Click a column header to sort (click again to toggle direction).
@@ -162,31 +126,35 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 
 [Analysis]
 • Facets panel (F6): see per-column distributions (histogram / top values) and click a bar to filter instantly (cross-filtering).
-• Analyze / Statistics / Pivot menus: distributions, correlation, tests, group aggregation, pivot table/chart. Export: CSV/Markdown/JSON/HTML.
+• Data / Statistics / Visualization menus: distributions, correlation, tests, models, group aggregation, pivot table (Data) and pivot chart (Visualization). Export: File ▸ Export View ▸ CSV/Markdown/JSON/HTML.
 
 [Detail Panel]
-• Toggle with the Details button or F4. Shows every column of the selected row as name + value — handy for cells with line breaks.
+• Toggle with the toolbar button, View ▸ Row Detail Panel, or F4 (off at startup unless you turn it on in Settings ▸ Panels &amp; Layout). Shows every column of the selected row as name + value — handy for cells with line breaks.
 
 [Status Light]
 • The colored dot at the right end of the status bar: ⚪ Idle · 🟡 Loading · 🟠 Busy · 🟢 Ready.
 
-[Theme]
-• Use the theme toggle at the right of the toolbar to switch light/dark.
+[Settings]
+• Tools ▸ Settings… (Ctrl+,) — General (theme system / light / dark, language auto / English / Korean; View ▸ Theme and Language also work), Panels &amp; Layout, Grid, Files, AI Agent, Shortcuts.
+• At startup the AI panel is on; the row detail panel, facets and explorer are off. Change this in Panels &amp; Layout, or turn on "remember last state". The AI agent (omp) starts when you send the first message, not at launch.
 
 [Workspace (several files)]
 • Each open file is a tab: Ctrl+Tab / Ctrl+Shift+Tab switch, Ctrl+W or middle-click closes. A workbook (Excel/SAS/SPSS/SQLite) is one tab with sheet buttons at the bottom.
 • View ▸ Workspace Explorer (Ctrl+Shift+W) lists sources, tables and views. Add a data file as a source, then join, append, compare or group with the wizards (join diagnostics show unmatched/duplicate keys first).
 • Workspace ▸ New Query (Ctrl+Alt+Q) opens the SQL editor (DuckDB; a single SELECT only). CSV columns are typed in table "T"; "T__raw" keeps every column as original text. ID-like columns are text — use CAST("id" AS BIGINT) to compare numerically.
 • Views are read-only tabs (save as a file, then open it, to edit). ⚠ marks a stale view; refresh recomputes it and resets that tab's filters/sort. A source used by a view cannot be renamed or removed.
-• File ▸ Open Workspace (Ctrl+Shift+O) / Save Workspace store sources and view definitions in a .ncvws file (data is not stored; Locate/Skip for missing files).
+• File ▸ Open Workspace… (Ctrl+Shift+O) / Save Workspace (Ctrl+S; asks for a name the first time) store sources and view definitions — and the panel layout — in a .ncvws file (data is not stored; Locate/Skip for missing files). Opening a workspace restores its own layout instead of the app defaults.
 • Workspace ▸ Workspace Notes… stores free text (data description, key relations, analysis goals; up to 20,000 characters) in the .ncvws file. The AI agent reads it (ws.notes) as user-written data — it never overrides the data policy, approval mode or your requests.
 • A saved .ncvws (format v2) also remembers the AI agent's conversation (session link), the workspace's approval mode / data sharing / local Python settings, and who created each view. Opening the workspace resumes that conversation; if it no longer exists (e.g. the file came from another PC) a new one starts and the chat shows a notice. Workspace ▸ Start New Conversation for This Workspace replaces the link.
-• Workspace agent settings can only tighten: the effective value is the stricter of the app setting and the workspace value (approval: always ask > edits auto > allow all; data: summary only > rows with approval > rows allowed; local Python: off > on). To loosen, change the app default (View ▸ AI Agent Settings…, choose "App default"). The chat shows a "🔒 Workspace" chip when the workspace limits something.
+• Workspace agent settings can only tighten: the effective value is the stricter of the app setting and the workspace value (approval: always ask > edits auto > allow all; data: summary only > rows with approval > rows allowed; local Python: off > on). To loosen, change the app default (Tools ▸ Settings… ▸ AI Agent, choose "App default"). The chat shows a "🔒 Workspace" chip when the workspace limits something.
 • In the Workspace Explorer, views made by the AI agent show ✦ instead of ◈; the tooltip tells who created the view, when, and the request that led to it. Views from older (v1) files have no such info.
 
-[Shortcuts]
-Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Cell (row · R12C3 · C3 · Name:12)
-Ctrl+B Filter by Cell · Ctrl+Shift+L Clear Filter · Ctrl+Shift+S Clear Sort
-F4 Detail Panel · F6 Facets Panel · F1 This help
-Ctrl+Tab / Ctrl+Shift+Tab Next / Previous Tab · Ctrl+W Close Tab · Ctrl+Shift+W Workspace Explorer · Ctrl+Alt+Q New Query · Ctrl+Shift+O Open Workspace</value></data>
+[Context menus]
+• Right-click a cell: Copy, Filter ▸ (this value / exclude / ≥ / ≤), sort this column, hide column, conditional formatting, Ask AI ▸ (summarize the column / analyze rows with this value — opens the AI panel and sends the question), plus the edit commands (disabled until Sheet Edit is on; "Turn On Sheet Edit" is at the top).
+• Right-click a column header: sort, filter, hide, freeze columns up to here, auto-fit width, change type, Quick Analysis ▸ (descriptive / frequency / distribution for that column), and rename/insert/delete column in Sheet Edit mode.
+• Right-click a row number: copy the row, show the row detail, insert/delete row (Sheet Edit mode).
+• Right-click a tab: close, close others, close all, copy path, open folder, and workspace commands.
+
+[Shortcuts]  (all of them are also listed in Tools ▸ Settings… ▸ Shortcuts)
+{SHORTCUTS}</value></data>
 </root>

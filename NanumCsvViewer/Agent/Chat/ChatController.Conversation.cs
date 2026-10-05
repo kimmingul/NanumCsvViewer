@@ -89,6 +89,15 @@ namespace NanumCsvViewer.Agent
         private Task RestartOnConversationAsync(WorkspaceConversation? conversation, string? notice = null)
         {
             if (_disposed) return Task.CompletedTask;
+            if (IsStartDeferred)
+            {
+                // 아직 시작하지 않았다: 이 작업 공간의 대화로 바꿔 두고 첫 메시지 때 시작한다.
+                string? deferredResume = BeginConversation(conversation);
+                _deferred = (_deferred!.Value.WorkingDirectory, deferredResume, deferredResume != null);
+                if (notice != null) _stream.Emit(ChatPageMessages.Notice("info", notice));
+                RefreshStatus(force: true);
+                return Task.CompletedTask;
+            }
             if (_activity.Busy) { _activity.NoteStopRequested(); TearDown(force: true); EndTurn(stopped: true); }
             string? resume = BeginConversation(conversation);
             if (notice != null) _stream.Emit(ChatPageMessages.Notice("info", notice));
