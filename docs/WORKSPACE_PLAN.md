@@ -72,7 +72,7 @@
 - DuckDB 때문에 포터블 exe가 x64 기준 약 48 MB로 커진다.
 - 뷰가 쓰는 원본의 이름 바꾸기·제거는 거부된다.
 
-## 7. v3.1.0 (미출시) — `.ncvws` v2: `agent` 섹션·뷰 출처·메모
+## 7. v3.1.0 — `.ncvws` v2: `agent` 섹션·뷰 출처·메모
 
 - **형식**: `version: 2`. v1 파일은 그대로 읽는다(`agent` 없음, 뷰에 출처 없음). v1만 아는 앱은 v2 파일을 "더 새로운 버전이 만든 파일"로 거부한다.
 - **`agent`(모두 선택)**: `{ "session": {"id","file"}, "approvalMode": "always-ask|write|yolo", "dataPolicy": "SummaryOnly|RowsWithApproval|RowsAllowed", "allowLocalPython": bool, "notes": "텍스트" }`.
@@ -82,7 +82,7 @@
 - **뷰 출처**: 뷰마다 `createdBy`(`user` | `agent` | `wizard:join|append|compare|group`), `createdUtc`, 에이전트 뷰는 `request`(그 턴의 사용자 메시지, 500자까지). 작업 공간 탐색기: 에이전트 뷰는 ✦(사용자·마법사 뷰는 ◈), 툴팁은 "✦ AI 에이전트가 만듦 · 시각 / 요청: …"(사용자: "직접 만듦", 마법사: "조인 마법사로 만듦" 등)으로 시작. v1에서 읽은 뷰는 출처 없음. SQL 편집기에서 뷰 SQL을 다시 쓰면 사용자 뷰가 되고 이름만 바꾸면 유지된다.
 - **에이전트**: `ws.list_tables`에 `workspace_notes`(앞 1,000자 + 전체 글자 수)와 뷰별 `created_by`·`created_utc`·`user_request`가 추가된다. 자세한 설계는 `AGENT_INTEGRATION_PLAN.md` 11절.
 
-### 구현 현황 (v3.1.0, 미출시)
+### 구현 현황 (v3.1.0 릴리즈)
 
 - `.ncvws` v2 읽기/쓰기(v1 호환), 작업 공간별 대화 연결·이어 가기·새 대화, 작업 공간별 에이전트 설정(더 엄격한 쪽 우선), 작업 공간 메모(대화상자·`ws.notes`·`ws.set_notes`·시스템 안내문 주입), 뷰 출처와 탐색기 표시(✦·툴팁).
 
