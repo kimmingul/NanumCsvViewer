@@ -161,6 +161,9 @@ body.hide-thinking .tool-group.only-thinking { display: none; }
 #approval-select.yolo { color: var(--warn); }
 #approval-wrap { display: inline-flex; flex-shrink: 0; }
 #approval-select.locked { pointer-events: none; opacity: .65; }
+/* Shown when the workspace file (.ncvws) made the agent settings stricter than the app settings; the tooltip says what. */
+#ws-limit { flex-shrink: 0; font-size: 11px; color: var(--warn); cursor: help; white-space: nowrap; }
+#ws-limit[hidden] { display: none; }
 #ctx-ring { width: 16px; height: 16px; flex: none; }
 #conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex: none; }
 #conn-dot.off { background: var(--muted); }

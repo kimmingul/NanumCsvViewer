@@ -122,3 +122,19 @@ NanumCsvViewer.exe
 - 분석 폴더(로컬 Python 허용 시 omp `--cwd`)는 **작업 공간 단위로 고정**: `<작업 공간 파일 폴더>\<작업 공간 이름>_분석결과`, 작업 공간 파일이 없으면 첫 데이터 파일의 폴더. 탭을 바꿔도 omp가 재시작되지 않는다.
   `AgentGuide.md`에 같은 내용(작업 흐름, SQL 규칙, 정책별 `ws.query` 동작)을 담았다.
 
+## 11. v3.1.0 (미출시) — 작업 공간별 대화·설정·메모
+
+`.ncvws` v2의 `agent` 섹션(형식은 `WORKSPACE_PLAN.md` 7절)을 에이전트가 사용하는 방식.
+
+- **작업 공간별 대화**: 작업 공간 저장 시 지금 omp 세션(id + `.jsonl` 경로, `get_state.sessionFile`)을 기록한다(세션 파일이 디스크에 있을 때만). 작업 공간을 열면 `ChatController.ResolveConversation`이 저장된 경로를 먼저, 없으면 id로 `~/.omp/agent/sessions/*`를 찾고, 찾으면 omp를 `--resume <파일>`로 시작해 채팅 기록을 다시 불러오며 안내를 올린다. 못 찾으면(다른 PC 등) 새 대화 + 경고. 작업 공간 파일이 없으면 예전처럼 항상 새 대화.
+  - 작업 공간 전환은 `ChatController.SwitchWorkspaceAsync(options, context, conversation)`: 진행 중이면 중단하고 설정·작업 공간 상태를 바꾼 뒤 그 작업 공간의 대화와 분석 폴더로 omp를 재시작한다(RPC `switch_session`은 다른 폴더의 세션을 거절하므로 쓰지 않고 명령줄 `--resume`을 쓴다).
+  - 작업 공간 ▸ "이 작업 공간의 새 대화 시작"(작업 공간 파일이 열려 있을 때만; 확인 → `StartNewConversationAsync`): 같은 작업 공간·설정으로 새 세션에서 재시작하고 저장된 연결을 비운다. 작업 공간을 저장하면 새 연결로 바뀌며 이전 대화는 omp 세션 목록에 남는다.
+- **작업 공간별 설정 — 더 엄격한 쪽이 이긴다**: 승인 모드·데이터 정책·로컬 Python의 실제 값 = 앱 설정과 작업 공간 값 중 엄격한 쪽. 순서: 승인 always-ask > write > yolo, 데이터 SummaryOnly > RowsWithApproval > RowsAllowed, 로컬 Python 끔 > 켬. 받은 작업 공간 파일은 조일 수만 있고 풀 수 없다(보안 규칙). omp 추가 인자 잠금(`--yolo`·`--auto-approve`·`--approval-mode X`)은 승인 모드에서 여전히 우선하며, 그때는 작업 공간의 승인 제한을 표시하지 않는다.
+  - 설정 창(보기 ▸ AI 에이전트 설정…): 작업 공간 파일이 열려 있으면 맨 위에 "설정 적용 대상" 선택(이 작업 공간(파일명) 기본 / 앱 기본값(모든 작업 공간)); 세 컨트롤은 고른 범위의 값을 보여 주고, 규칙 설명이 붙으며, OK 뒤 더 엄격한 값이 이겨 적용되지 않은 항목은 메시지 상자로 알린다. omp 경로·추가 인자·행 상한은 앱 전체 설정.
+  - 채팅 승인 드롭다운: 컨트롤러가 yolo 확인까지 마친 뒤 `ChatController.ApprovalModeApplier` 훅을 호출한다. 호스트(`Form1`)는 작업 공간 파일이 열려 있으면 선택 대화상자(TaskDialog: "이 작업 공간" / "앱 기본값" / 취소)를 띄워 고른 곳에 저장하고 작업 공간 제한을 합친 옵션을 돌려준다(null = 취소). 작업 공간 파일이 없으면 예전처럼 앱 설정에 저장.
+  - 상태: 상태 JSON에 `workspaceLimit`(툴팁 글. 작업 공간이 실제로 무언가를 조일 때만 채워지고, 아니면 빈 문자열)와 `workspaceLimitLabel`("🔒 Workspace" / "🔒 작업 공간")이 추가되어, 채팅 표시줄에 승인 선택 옆 칩으로 나온다. 툴팁: "작업 공간 설정으로 제한됨: 승인 모드 …, 데이터 공유 …, 로컬 Python 분석 꺼짐…"(영문 "Limited by the workspace settings: …"). 제한이 나타날 때 채팅에 안내를 올린다.
+- **메모 도구**: `ws.notes`(현재 메모 읽기), `ws.set_notes`(`notes`, `mode: replace|append`; 전/후 승인 카드; 승인 종류 DataEdit → write·yolo에서 자동, always-ask에서는 묻기). 메모는 최대 20,000자.
+- **시스템 안내문 주입**: omp를 시작하거나 이어 갈 때마다 메모를 안내문에 넣는다(최대 4,000자; 넘으면 앞 4,000자 + `ws.notes` 안내). **사용자가 쓴 데이터**로 틀을 씌워 안내문·데이터 정책·승인 모드·사용자 요청을 덮어쓰지 못한다고 명시한다. 실행 중 메모를 고쳐도 omp를 재시작하지 않는다 — 에이전트는 `ws.notes`·`ws.list_tables`(`workspace_notes`: 앞 1,000자 + 전체 글자 수)로 현재 값을 보고, 안내문 사본은 다음 시작·이어 가기 때 갱신된다.
+- **출처**: 에이전트가 만든 뷰(`ws.create_view`·`append`·`compare`·`group`)는 `createdBy: "agent"` + 그 턴의 사용자 메시지(`request`, 500자)와 함께 기록된다. `ws.list_tables`의 뷰별 `created_by`·`created_utc`·`user_request`로 에이전트도 볼 수 있다.
+- **위험과 한계**: 출처 불명의 작업 공간 파일이 자기 메모를 넣을 수 있다(에이전트에게는 데이터로만 보이고 정책은 못 바꾼다). 작업 공간 설정은 조이기만 한다. 대화 연결은 저장 시에만·세션 파일이 있을 때만 기록되고 경로는 이 PC 고유다. 공유한 `.ncvws`에는 로컬 경로 외에 새는 것이 없고 대화 내용은 저장되지 않는다.
+

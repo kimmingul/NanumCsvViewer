@@ -179,6 +179,10 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Workspace ▸ New Query (Ctrl+Alt+Q) opens the SQL editor (DuckDB; a single SELECT only). CSV columns are typed in table "T"; "T__raw" keeps every column as original text. ID-like columns are text — use CAST("id" AS BIGINT) to compare numerically.
 • Views are read-only tabs (save as a file, then open it, to edit). ⚠ marks a stale view; refresh recomputes it and resets that tab's filters/sort. A source used by a view cannot be renamed or removed.
 • File ▸ Open Workspace (Ctrl+Shift+O) / Save Workspace store sources and view definitions in a .ncvws file (data is not stored; Locate/Skip for missing files).
+• Workspace ▸ Workspace Notes… stores free text (data description, key relations, analysis goals; up to 20,000 characters) in the .ncvws file. The AI agent reads it (ws.notes) as user-written data — it never overrides the data policy, approval mode or your requests.
+• A saved .ncvws (format v2) also remembers the AI agent's conversation (session link), the workspace's approval mode / data sharing / local Python settings, and who created each view. Opening the workspace resumes that conversation; if it no longer exists (e.g. the file came from another PC) a new one starts and the chat shows a notice. Workspace ▸ Start New Conversation for This Workspace replaces the link.
+• Workspace agent settings can only tighten: the effective value is the stricter of the app setting and the workspace value (approval: always ask > edits auto > allow all; data: summary only > rows with approval > rows allowed; local Python: off > on). To loosen, change the app default (View ▸ AI Agent Settings…, choose "App default"). The chat shows a "🔒 Workspace" chip when the workspace limits something.
+• In the Workspace Explorer, views made by the AI agent show ✦ instead of ◈; the tooltip tells who created the view, when, and the request that led to it. Views from older (v1) files have no such info.
 
 [Shortcuts]
 Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Cell (row · R12C3 · C3 · Name:12)

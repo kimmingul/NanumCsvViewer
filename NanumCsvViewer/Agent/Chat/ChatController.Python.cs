@@ -53,10 +53,15 @@ namespace NanumCsvViewer.Agent
         /// </summary>
         public void SetWorkspaceContext(AgentWorkspaceContext context)
         {
+            ApplyWorkspaceContext(context);
+            RunPendingWorkspaceRestart();
+        }
+
+        private void ApplyWorkspaceContext(AgentWorkspaceContext context)
+        {
             _workspaceContext = context ?? AgentWorkspaceContext.Empty;
             _firstDataFile ??= _workspaceContext.FirstDataFile;
             _workspaceFile = string.IsNullOrWhiteSpace(_workspaceContext.WorkspaceFile) ? null : _workspaceContext.WorkspaceFile;
-            RunPendingWorkspaceRestart();
         }
 
         /// <summary>omp가 지금 써야 할 작업 폴더(폴더를 만들지 않는다).</summary>

@@ -48,6 +48,12 @@ namespace NanumCsvViewer.Agent
         /// <summary>사용자가 채팅 선택으로 모드를 바꿔 적용됐을 때(호스트가 설정에 저장한다).</summary>
         public event Action<AgentApprovalMode>? ApprovalModeChanged;
 
+        /// <summary>
+        /// 설정하면 채팅 선택으로 고른 모드를 컨트롤러가 직접 저장·적용하지 않고 호스트에게 맡긴다(작업 공간 파일이 열린 때 저장 위치를 고르기 위해).
+        /// 인자는 고른 모드, 돌려주는 값은 저장 뒤의 새 옵션(앱 설정 + 작업 공간 제한 합친 것)이며 null이면 취소.
+        /// </summary>
+        public Func<AgentApprovalMode, AgentHostOptions?>? ApprovalModeApplier { get; set; }
+
         /// <summary>기본 모드 안내를 채팅에 보였을 때(호스트가 '보였음'을 설정에 저장한다).</summary>
         public event Action? ApprovalNoticeShown;
 
@@ -73,6 +79,19 @@ namespace NanumCsvViewer.Agent
             {
                 RefreshStatus(force: true);   // 페이지의 선택을 이전 모드로 되돌린다
                 return false;
+            }
+            if (ApprovalModeApplier is { } apply)
+            {
+                // 작업 공간 파일이 열려 있으면 호스트가 "이 작업 공간 / 앱 기본값"을 묻고 알맞은 곳에 저장한 뒤, 작업 공간 제한까지 합친 새 옵션을 돌려준다
+                // (null = 취소). 합친 값이 고른 값보다 엄격할 수 있다(작업 공간 파일은 앱 설정을 풀 수 없다).
+                var next = apply(mode);
+                if (next is null) { RefreshStatus(force: true); return false; }
+                Options = next with { ApprovalNoticePending = false };
+                if (_options.ApprovalMode != mode)
+                    _stream.Emit(ChatPageMessages.Notice("info", T(
+                        $"The effective approval mode stays {AgentApprovalPolicy.ToOmp(_options.ApprovalMode)}: the app or workspace setting is stricter than {AgentApprovalPolicy.ToOmp(mode)} (the stricter one applies).",
+                        $"적용되는 승인 모드는 {AgentApprovalPolicy.ToOmp(_options.ApprovalMode)} 그대로입니다. 앱 또는 작업 공간 설정이 {AgentApprovalPolicy.ToOmp(mode)}보다 엄격합니다(더 엄격한 쪽이 적용됨).")));
+                return _options.ApprovalMode == mode;
             }
             Options = _options with { ApprovalMode = mode, ApprovalNoticePending = false };
             ApprovalModeChanged?.Invoke(mode);

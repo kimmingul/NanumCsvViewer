@@ -66,16 +66,11 @@ namespace NanumCsvViewer
             if (_agentController is not null) _agentController.Options = AgentOptions();
         }
 
-        private AgentHostOptions AgentOptions() => new(
-            OmpPath: string.IsNullOrWhiteSpace(_settings.AgentOmpPath) ? null : _settings.AgentOmpPath,
-            ExtraArgs: string.IsNullOrWhiteSpace(_settings.AgentExtraArgs) ? null : _settings.AgentExtraArgs,
-            Language: Loc.CurrentLanguage == "ko" ? "ko" : "en",
-            DataPolicy: Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) ? p : AgentDataPolicy.SummaryOnly,
-            MaxRowsPerRequest: Math.Clamp(_settings.AgentMaxRows, 1, 5000),
-            AppVersion: AppInfo.Version,
-            AllowLocalPython: _settings.AgentAllowLocalPython,
-            ApprovalMode: AgentApprovalPolicy.Parse(_settings.AgentApprovalMode),
-            ApprovalNoticePending: !_settings.AgentApprovalNoticeShown);
+        /// <summary>
+        /// 에이전트가 실제로 따르는 옵션 = 앱 설정에 작업 공간 파일의 설정을 합친 것. 승인 모드·데이터 정책·로컬 Python은 둘 중 <b>더 엄격한 쪽</b>이다
+        /// (받은 작업 공간 파일이 앱 설정을 풀 수 없다). omp 추가 인자의 승인 모드 고정은 여전히 이긴다.
+        /// </summary>
+        private AgentHostOptions AgentOptions() => WorkspaceAgentPolicy.Apply(AppAgentOptions(), _wfAgent);
 
         private void SetAgentPanelVisible(bool visible)
         {
@@ -138,10 +133,12 @@ namespace NanumCsvViewer
             _agentController = new ChatController(_agentPanel, new CsvHostTools(this, AgentOptions), options);
             _agentController.PageMessageUnhandled += OnAgentPageMessage;
             _agentController.StatusChanged += _ => { };
-            _agentController.ApprovalModeChanged += mode => SaveAgentApprovalMode(mode);
+            // 채팅 승인 선택: 작업 공간 파일이 열려 있으면 "이 작업 공간 / 앱 기본값"을 묻고 알맞은 곳에 저장한다.
+            _agentController.ApprovalModeApplier = ApplyApprovalFromChat;
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
-            _ = _agentController.StartAsync(AgentWorkingDirectory());
+            // 작업 공간 파일이 열려 있으면 그 작업 공간의 대화를 이어 간다(없거나 사라졌으면 새 대화 + 알림). 파일이 없으면 지금까지처럼 새 대화.
+            _ = _agentController.StartAsync(AgentWorkingDirectory(), _wfFilePath is null ? null : WorkspaceConversationOf(_wfAgent));
             PostAgentContext();
         }
 
@@ -169,7 +166,7 @@ namespace NanumCsvViewer
                 bool hasFile = tab.Kind is TabKind.File or TabKind.Sheet;
                 entries.Add(new AgentTableEntry(tab.DisplayName, hasFile ? tab.Path : null, kind, ReferenceEquals(tab, _t)));
             }
-            return new AgentWorkspaceContext(WorkspaceFilePath, entries);
+            return new AgentWorkspaceContext(WorkspaceFilePath, entries, _wfAgent.Notes);
         }
 
         /// <summary>작업 공간 단위의 고정 분석 폴더(만들지 않음). 로컬 Python이 꺼져 있거나 에이전트가 아직 없으면 null.</summary>
@@ -282,36 +279,37 @@ namespace NanumCsvViewer
             _settings.Save();
         }
 
-        /// <summary>
-        /// 설정 대화 상자에서 고른 승인 모드를 적용한다. 바뀌었고 모두 허용(yolo)이면 확인 대화 상자를 먼저 띄우고 취소하면 이전 모드를 유지한다.
-        /// 에이전트가 떠 있으면 컨트롤러가(확인·재시작·저장) 맡고, 없으면 설정만 저장한다.
-        /// </summary>
-        private void ApplyApprovalChoice(AgentApprovalMode mode)
-        {
-            if (mode == AgentApprovalPolicy.Parse(_settings.AgentApprovalMode)) return;
-            if (_agentController is not null) { _agentController.TrySetApprovalMode(mode); return; }
-            bool ko = Loc.CurrentLanguage == "ko";
-            if (mode == AgentApprovalMode.Yolo && MessageBox.Show(this, ApprovalTexts.YoloConfirm(ko), ApprovalTexts.YoloTitle(ko),
-                    MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
-            SaveAgentApprovalMode(mode);
-        }
-
         private void ShowAgentSettings()
         {
+            bool ko = Loc.CurrentLanguage == "ko";
+            bool hasWorkspace = _wfFilePath is not null;
             using var dlg = new ParamDialog(LT("AI Agent Settings", "AI 에이전트 설정"), _palette);
+            // 작업 공간 파일이 열려 있으면 승인 모드·데이터 공유·로컬 Python을 어디에 적용할지 먼저 고른다(기본: 이 작업 공간).
+            ComboBox? scope = null;
+            if (hasWorkspace)
+            {
+                scope = dlg.AddCombo(LT("Apply settings to", "설정 적용 대상"), new[]
+                {
+                    LT("This workspace", "이 작업 공간") + " (" + Path.GetFileName(_wfFilePath) + ")",
+                    LT("App default (all workspaces)", "앱 기본값 (모든 작업 공간)"),
+                }, 0);
+                dlg.AddNote(LT(
+                    "Data sharing, approval mode and local Python can be set per workspace. A workspace setting is saved in the workspace file and can only make the app default stricter: the stricter of the two always applies. To loosen a setting, choose 'App default'. The other settings are app-wide.",
+                    "데이터 공유·승인 모드·로컬 Python은 작업 공간별로 정할 수 있습니다. 작업 공간 설정은 작업 공간 파일에 저장되며 앱 기본값을 더 엄격하게만 바꿀 수 있습니다. 둘 중 더 엄격한 쪽이 항상 적용됩니다. 풀려면 '앱 기본값'을 고르세요. 나머지 설정은 앱 전체에 적용됩니다."));
+            }
+            var baseline = ScopeBaseline(hasWorkspace);
             var policy = dlg.AddCombo(LT("Data sharing with the AI", "AI와의 데이터 공유"), new[]
             {
                 LT("Summary only (no raw rows)", "요약만 (원시 행 보내지 않음)"),
                 LT("Rows with approval", "행 값 — 요청마다 승인"),
                 LT("Rows allowed (up to the limit)", "행 값 — 승인 없이(상한까지)"),
-            }, (int)AgentOptions().DataPolicy);
+            }, (int)baseline.Policy);
             var maxRows = dlg.AddNumeric(LT("Row limit per request", "요청당 행 상한"), 1, 5000, Math.Clamp(_settings.AgentMaxRows, 1, 5000));
             var ompPath = dlg.AddText(LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"), _settings.AgentOmpPath ?? "");
             var extra = dlg.AddText(LT("Extra omp arguments", "omp 추가 인자"), _settings.AgentExtraArgs ?? "");
-            bool ko = Loc.CurrentLanguage == "ko";
             var approval = dlg.AddCombo(LT("Approval mode", "승인 모드"),
                 Enum.GetValues<AgentApprovalMode>().Select(m => ApprovalTexts.Label(m, ko)).ToArray(),
-                (int)AgentApprovalPolicy.Parse(_settings.AgentApprovalMode));
+                (int)baseline.Mode);
             // omp 추가 인자(--approval-mode·--yolo·--auto-approve)가 모드를 고정하면 선택을 막고 이유를 보여 준다.
             if (AgentApprovalPolicy.ForcedByArgs(_settings.AgentExtraArgs) is { } forced)
             {
@@ -322,7 +320,16 @@ namespace NanumCsvViewer
             var localPython = dlg.AddCheckedList(LT("Local Python analysis", "로컬 Python 분석"),
                 new[] { LT("Allow local Python analysis", "로컬 Python 분석 허용") }, 1);
             localPython.CheckOnClick = true;
-            localPython.SetItemChecked(0, _settings.AgentAllowLocalPython);
+            localPython.SetItemChecked(0, baseline.Python);
+            // 적용 대상을 바꾸면 세 항목이 그 범위의 값을 보여 준다.
+            if (scope is not null)
+                scope.SelectedIndexChanged += (_, _) =>
+                {
+                    var b = ScopeBaseline(scope.SelectedIndex == 0);
+                    policy.SelectedIndex = (int)b.Policy;
+                    if (approval.Enabled) approval.SelectedIndex = (int)b.Mode;
+                    localPython.SetItemChecked(0, b.Python);
+                };
             dlg.AddNote(LT(
                 "When on, the agent may export the current view to a file in the analysis folder (<workspace name>_분석결과 next to the workspace file, or <first file name>_분석결과 next to the first data file you opened; it stays the same when you switch tabs) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
                 "켜면 에이전트가 현재 보기를 분석 폴더(작업 공간 파일 옆의 <작업 공간 이름>_분석결과, 없으면 처음 연 데이터 파일 옆의 <파일 이름>_분석결과 — 탭을 바꿔도 그대로)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
@@ -334,18 +341,41 @@ namespace NanumCsvViewer
                 "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집은 되돌릴 수 있는 덮개에 쌓이고 원본 파일은 쓰지 않습니다."));
             if (!dlg.ShowOk(this)) return;
 
+            bool workspaceScope = scope is not null && scope.SelectedIndex == 0;
+            var wantMode = (AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2);
+            var wantPolicy = (AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2);
             bool wantPython = localPython.GetItemChecked(0);
-            if (wantPython && !_settings.AgentAllowLocalPython && !ConfirmLocalPython()) wantPython = false;
-            if (approval.Enabled && AgentApprovalPolicy.ForcedByArgs(extra.Text) is null)
-                ApplyApprovalChoice((AgentApprovalMode)Math.Clamp(approval.SelectedIndex, 0, 2));
+            bool approvalEditable = approval.Enabled && AgentApprovalPolicy.ForcedByArgs(extra.Text) is null;
+            var app = AppAgentOptions();
+
+            if (workspaceScope)
+            {
+                // 작업 공간 파일에 적는다. 앱 기본값과 같고 아직 값이 없으면 따로 적지 않는다(앱 설정을 따름). 켜기 확인(로컬 Python)은 필요 없다 — 더 엄격한 쪽이 이기므로 풀지 못한다.
+                if (approvalEditable)
+                {
+                    bool had = WorkspaceAgentPolicy.ParseApproval(_wfAgent) is not null;
+                    if (wantMode == app.ApprovalMode && !had) _wfAgent.ApprovalMode = null;
+                    else if (wantMode != (WorkspaceAgentPolicy.ParseApproval(_wfAgent) ?? app.ApprovalMode) && wantMode == AgentApprovalMode.Yolo && !ConfirmYolo()) { }
+                    else { _wfAgent.ApprovalMode = AgentApprovalPolicy.ToOmp(wantMode); _settings.AgentApprovalNoticeShown = true; }
+                }
+                _wfAgent.DataPolicy = wantPolicy == app.DataPolicy && WorkspaceAgentPolicy.ParseDataPolicy(_wfAgent) is null ? null : wantPolicy.ToString();
+                _wfAgent.AllowLocalPython = wantPython == app.AllowLocalPython && _wfAgent.AllowLocalPython is null ? null : wantPython;
+            }
+            else
+            {
+                if (wantPython && !_settings.AgentAllowLocalPython && !ConfirmLocalPython()) wantPython = false;
+                if (approvalEditable && wantMode != app.ApprovalMode && (wantMode != AgentApprovalMode.Yolo || ConfirmYolo()))
+                    SaveAgentApprovalMode(wantMode);
+                _settings.AgentDataPolicy = wantPolicy.ToString();
+                _settings.AgentAllowLocalPython = wantPython;
+            }
 
             string oldPath = _settings.AgentOmpPath ?? "", oldArgs = _settings.AgentExtraArgs ?? "";
-            _settings.AgentDataPolicy = ((AgentDataPolicy)Math.Clamp(policy.SelectedIndex, 0, 2)).ToString();
             _settings.AgentMaxRows = (int)maxRows.Value;
             _settings.AgentOmpPath = ompPath.Text.Trim();
             _settings.AgentExtraArgs = extra.Text.Trim();
-            _settings.AgentAllowLocalPython = wantPython;
             _settings.Save();
+            ExplainNotApplied(approvalEditable ? wantMode : null, wantPolicy, wantPython);
             if (_agentController is null) return;
             _agentController.Options = AgentOptions();
             if (oldPath != _settings.AgentOmpPath || oldArgs != _settings.AgentExtraArgs)

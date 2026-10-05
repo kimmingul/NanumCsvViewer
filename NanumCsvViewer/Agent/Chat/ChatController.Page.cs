@@ -187,6 +187,8 @@ namespace NanumCsvViewer.Agent
                 return false;
             }
             _stream.Emit(ChatPageMessages.User(message, _clock.UnixMs));
+            // 이 턴에서 에이전트가 만드는 뷰의 출처에 적는다(슬래시 명령은 사용자 요청이 아니다).
+            if (!message.StartsWith('/')) _lastUserRequest = message;
             _activity.PromptSent();
             Track(client, task, "prompt",
                 data =>
@@ -460,18 +462,23 @@ namespace NanumCsvViewer.Agent
         }
 
         /// <summary>get_messages_page를 끝까지 읽어 history 메시지로 보낸다(세션 전환 뒤 화면 복원).</summary>
-        private void LoadHistory(string? cursor = null, List<HistoryItem>? items = null)
+        private void LoadHistory(string? cursor = null, List<HistoryItem>? items = null, Action? done = null)
         {
             items ??= new List<HistoryItem>();
+            void Finish()
+            {
+                _stream.Emit(ChatPageMessages.History(items));
+                done?.Invoke();   // history 메시지가 화면을 새로 그리므로 그 뒤에 보여야 하는 알림은 여기서
+            }
             Ask("get_messages_page", o => { o["limit"] = 256; if (cursor != null) o["cursor"] = cursor; },
                 data =>
                 {
                     HistoryItem.Append(items, data.Child("messages"));
                     string next = data.Str("nextCursor");
-                    if (next.Length > 0 && items.Count < 4000) LoadHistory(next, items);
-                    else _stream.Emit(ChatPageMessages.History(items));
+                    if (next.Length > 0 && items.Count < 4000) LoadHistory(next, items, done);
+                    else Finish();
                 },
-                _ => _stream.Emit(ChatPageMessages.History(items)));
+                _ => Finish());
         }
 
         private static JsonElement Synthetic(string json)

@@ -312,6 +312,7 @@ namespace NanumCsvViewer
         private TreeNode ViewNode(DataWorkspace ws, WorkspaceView v, IReadOnlyList<DocumentTab> tabs)
         {
             string tip = v.Error is not null ? "⚠ " + v.Error : v.Sql;
+            if (ProvenanceText(v.Provenance) is { } made) tip = made + "\n\n" + tip;
             var node = new TreeNode(v.Name) { Tag = new NodeInfo(NodeKind.View, v, "view:" + v.Id), ToolTipText = tip };
             if (v.Columns.Count > 0) node.Nodes.Add(Placeholder());
             return node;
@@ -398,10 +399,47 @@ namespace NanumCsvViewer
             }
         }
 
+        /// <summary>에이전트가 만든 뷰의 배지 글리프(탐색기 ✦ — 툴바의 "✦ AI"와 같은 표지).</summary>
+        internal const string AgentGlyph = "✦";
+
+        /// <summary>
+        /// 뷰의 출처 설명(툴팁 머리): 누가 언제 만들었는지, 에이전트 뷰는 그 턴의 사용자 요청도. 출처를 모르면(작업 공간 파일 v1에서 온 뷰) null.
+        /// </summary>
+        internal static string? ProvenanceText(ViewProvenance? p)
+        {
+            if (p is null) return null;
+            string when = p.CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            if (p.IsAgent)
+            {
+                string head = LT($"{AgentGlyph} Created by the AI agent · {when}", $"{AgentGlyph} AI 에이전트가 만듦 · {when}");
+                return p.Request is { Length: > 0 } req ? head + "\n" + LT("Request: ", "요청: ") + req : head;
+            }
+            if (p.WizardName is { } wizard)
+            {
+                string name = wizard switch
+                {
+                    "join" => LT("Join wizard", "조인 마법사"),
+                    "append" => LT("Append wizard", "이어 붙이기 마법사"),
+                    "compare" => LT("Compare wizard", "비교 마법사"),
+                    "group" => LT("Group wizard", "그룹 집계 마법사"),
+                    _ => LT("Wizard", "마법사"),
+                };
+                return LT($"Created with the {name} · {when}", $"{name}로 만듦 · {when}");
+            }
+            return LT($"Created by you · {when}", $"직접 만듦 · {when}");
+        }
+
+        /// <summary>노드 앞에 그려지는 글리프와 툴팁 글. 테스트·자동화용.</summary>
+        internal static string GlyphText(NodeInfo info) => GlyphOf(info);
+
+        internal static string TooltipText(NodeInfo info, string fallback = "") =>
+            info.Item is WorkspaceView v && ProvenanceText(v.Provenance) is { } made ? made + "\n\n" + (v.Error is not null ? "⚠ " + v.Error : v.Sql) : fallback;
+
         private static string GlyphOf(NodeInfo info) => info.Kind switch
         {
             NodeKind.Source => "▣",
             NodeKind.Table => "▦",
+            NodeKind.View when info.Item is WorkspaceView { Provenance.IsAgent: true } => AgentGlyph,
             NodeKind.View => "◈",
             NodeKind.Tab => "▤",
             NodeKind.Result => "▷",

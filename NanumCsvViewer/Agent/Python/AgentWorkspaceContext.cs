@@ -13,10 +13,11 @@ namespace NanumCsvViewer.Agent
     }
 
     /// <summary>
-    /// 에이전트 호스트가 컨트롤러에 알려 주는 작업 공간 상태: 작업 공간 파일(.ncvws, 저장했다면)과 열린 탭 목록.
+    /// 에이전트 호스트가 컨트롤러에 알려 주는 작업 공간 상태: 작업 공간 파일(.ncvws, 저장했다면)과 열린 탭 목록, 작업 공간 메모.
     /// 탭을 바꾸거나 열고 닫아도 omp는 다시 시작하지 않는다 — 분석 폴더는 작업 공간 파일(있으면) 또는 이 세션에서 처음 연 데이터 파일로 정해진다.
     /// </summary>
-    public sealed record AgentWorkspaceContext(string? WorkspaceFile, IReadOnlyList<AgentTableEntry> Tables)
+    /// <param name="Notes">작업 공간 메모(자료 설명·핵심 관계·분석 목표). omp를 (다시) 시작할 때 가이드에 자료로 실린다. 없으면 null.</param>
+    public sealed record AgentWorkspaceContext(string? WorkspaceFile, IReadOnlyList<AgentTableEntry> Tables, string? Notes = null)
     {
         public static AgentWorkspaceContext Empty { get; } = new(null, Array.Empty<AgentTableEntry>());
 

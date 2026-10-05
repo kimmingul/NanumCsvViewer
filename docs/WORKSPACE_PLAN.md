@@ -72,3 +72,25 @@
 - DuckDB 때문에 포터블 exe가 x64 기준 약 48 MB로 커진다.
 - 뷰가 쓰는 원본의 이름 바꾸기·제거는 거부된다.
 
+## 7. v3.1.0 (미출시) — `.ncvws` v2: `agent` 섹션·뷰 출처·메모
+
+- **형식**: `version: 2`. v1 파일은 그대로 읽는다(`agent` 없음, 뷰에 출처 없음). v1만 아는 앱은 v2 파일을 "더 새로운 버전이 만든 파일"로 거부한다.
+- **`agent`(모두 선택)**: `{ "session": {"id","file"}, "approvalMode": "always-ask|write|yolo", "dataPolicy": "SummaryOnly|RowsWithApproval|RowsAllowed", "allowLocalPython": bool, "notes": "텍스트" }`.
+  - `session`: 이 작업 공간의 omp 대화. **작업 공간을 저장할 때만**, 세션 `.jsonl`이 디스크에 있을 때만 기록한다(메시지가 없는 대화는 저장 안 함). 경로는 이 PC의 것이다: 열 때 `omp --resume <file>`로 이어 가고, 파일이 옮겨졌으면 `~/.omp/agent/sessions/*`에서 id로 찾으며, 없으면(다른 PC 등) 새 대화 + 채팅 경고. 대화 내용은 파일에 저장하지 않는다. 연결이 바뀌면 작업 공간이 "수정됨"이 되어 저장 안내가 나온다.
+  - `approvalMode`·`dataPolicy`·`allowLocalPython`: **앱 설정과 작업 공간 값 중 더 엄격한 쪽이 실제 값**이다(승인 always-ask > write > yolo, 데이터 SummaryOnly > RowsWithApproval > RowsAllowed, 로컬 Python 끔 > 켬). 받은 작업 공간 파일은 조일 수만 있고 풀 수 없다. omp 추가 인자 잠금(`--yolo`·`--auto-approve`·`--approval-mode X`)이 승인 모드에서는 여전히 우선한다.
+  - `notes`: 사용자 메모(최대 20,000자). 작업 공간 ▸ 작업 공간 메모…로 편집, 에이전트는 `ws.notes` 읽기 / `ws.set_notes`(`notes`, `mode: replace|append`) 수정 제안(전/후 승인 카드, DataEdit 승인 종류). omp 시작·이어 가기 때마다 시스템 안내문에 4,000자까지 데이터로 주입(더 길면 앞 4,000자 + `ws.notes` 안내).
+- **뷰 출처**: 뷰마다 `createdBy`(`user` | `agent` | `wizard:join|append|compare|group`), `createdUtc`, 에이전트 뷰는 `request`(그 턴의 사용자 메시지, 500자까지). 작업 공간 탐색기: 에이전트 뷰는 ✦(사용자·마법사 뷰는 ◈), 툴팁은 "✦ AI 에이전트가 만듦 · 시각 / 요청: …"(사용자: "직접 만듦", 마법사: "조인 마법사로 만듦" 등)으로 시작. v1에서 읽은 뷰는 출처 없음. SQL 편집기에서 뷰 SQL을 다시 쓰면 사용자 뷰가 되고 이름만 바꾸면 유지된다.
+- **에이전트**: `ws.list_tables`에 `workspace_notes`(앞 1,000자 + 전체 글자 수)와 뷰별 `created_by`·`created_utc`·`user_request`가 추가된다. 자세한 설계는 `AGENT_INTEGRATION_PLAN.md` 11절.
+
+### 구현 현황 (v3.1.0, 미출시)
+
+- `.ncvws` v2 읽기/쓰기(v1 호환), 작업 공간별 대화 연결·이어 가기·새 대화, 작업 공간별 에이전트 설정(더 엄격한 쪽 우선), 작업 공간 메모(대화상자·`ws.notes`·`ws.set_notes`·시스템 안내문 주입), 뷰 출처와 탐색기 표시(✦·툴팁).
+
+### 알려진 제한 (v3.1.0)
+
+- 대화 연결은 작업 공간 저장 시에만, 세션 파일이 있을 때만 저장된다. 경로는 이 PC 고유라 다른 PC에서는 새 대화 + 안내, 파일을 옮겼으면 id로 찾는다.
+- 메모를 고쳐도 omp는 다시 시작하지 않는다. 시스템 안내문 사본은 다음 시작·이어 가기 때 갱신되고, `ws.notes`는 현재 텍스트를 준다.
+- 작업 공간 설정은 조이기만 한다. 풀려면 앱 기본값을 바꾼다.
+- 출처를 모르는 작업 공간 파일도 자기 메모를 가질 수 있다(에이전트에게는 데이터로만 보이며 정책을 바꾸지 못한다).
+- 공유한 `.ncvws`의 세션 id·경로는 로컬 경로 외에 새는 정보가 없고, 대화 내용은 저장되지 않는다.
+

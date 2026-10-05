@@ -82,8 +82,8 @@ namespace NanumCsvViewer
         {
             if (!WorkspaceNeedsSave()) return true;
             string text = _wfFilePath is null
-                ? LT("This workspace has views that exist only in this session. Save it as a workspace file?",
-                     "이 작업 공간에는 이번 실행에만 있는 뷰가 있습니다. 작업 공간 파일로 저장할까요?")
+                ? LT("This workspace has views or notes that exist only in this session. Save it as a workspace file?",
+                     "이 작업 공간에는 이번 실행에만 있는 뷰나 메모가 있습니다. 작업 공간 파일로 저장할까요?")
                 : LT($"Save changes to the workspace '{Path.GetFileName(_wfFilePath)}'?", $"작업 공간 '{Path.GetFileName(_wfFilePath)}'의 변경 사항을 저장할까요?");
             var answer = MessageBox.Show(this, text, LT("Workspace", "작업 공간"), MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (answer == DialogResult.Cancel) return false;
@@ -94,7 +94,7 @@ namespace NanumCsvViewer
         {
             if (_wfFilePath is not null)
                 return WorkspaceFile.Signature(CaptureWorkspaceModel(_wfFilePath)) != _wfSavedSignature;
-            return ExistingWorkspace is { } ws && ws.Views.Count > 0;
+            return ExistingWorkspace is { } ws && ws.Views.Count > 0 || !string.IsNullOrWhiteSpace(_wfAgent.Notes);
         }
 
         // ---- 저장 ----------------------------------------------------------------------------------------
@@ -120,7 +120,7 @@ namespace NanumCsvViewer
                             s.Tables.Select(t => t.Name).ToList()));
                     }
                 }
-                foreach (var v in ws.Views) views.Add(new WorkspaceFileView { Name = v.Name, Sql = v.Sql, IncludeUnsavedEdits = v.IncludeUnsavedEdits });
+                foreach (var v in ws.Views) views.Add(WorkspaceFileView.From(v.Name, v.Sql, v.IncludeUnsavedEdits, v.Provenance));
             }
 
             var tabs = new List<WorkspaceCaptureTab>();
@@ -138,7 +138,7 @@ namespace NanumCsvViewer
                 if (ReferenceEquals(t, _t)) active = tabs.Count;
                 tabs.Add(c);
             }
-            return WorkspaceFile.Capture(workspacePath, sources, views, _wfCarriedViews, tabs, active, WorkspaceDockVisible);
+            return WorkspaceFile.Capture(workspacePath, sources, views, _wfCarriedViews, tabs, active, WorkspaceDockVisible, CaptureAgentInfo());
         }
 
         private string SuggestWorkspaceFolder()
@@ -195,6 +195,7 @@ namespace NanumCsvViewer
             }
 
             _wfFilePath = target;
+            _wfAgent = model.Agent?.Clone() ?? new WorkspaceFileAgent();   // 저장된 대화 연결이 이제 "읽어 둔" 연결이다
             _wfSavedSignature = WorkspaceFile.Signature(model);
             RememberRecentWorkspace(target);
             statusLabel.Text = LT("Workspace saved: ", "작업 공간을 저장했습니다: ") + target;
@@ -300,6 +301,7 @@ namespace NanumCsvViewer
             try
             {
                 _wfFilePath = null;
+                _wfAgent = new WorkspaceFileAgent();   // 이전 작업 공간의 제한·메모를 버린다
                 _wfCarriedViews.Clear();
                 progress.Report(LT("Clearing the current workspace…", "현재 작업 공간을 정리하는 중…"));
                 ClearWorkspaceState(problems);
@@ -320,11 +322,14 @@ namespace NanumCsvViewer
             if (cancelled)
             {
                 statusLabel.Text = LT("Opening the workspace was cancelled; what was already opened stays open.", "작업 공간 열기를 취소했습니다. 이미 연 것은 그대로 남습니다.");
+                if (_agentController is not null) _agentController.Options = AgentOptions();
                 PostAgentContext();
                 return false;
             }
 
             _wfFilePath = full;
+            _wfAgent = model.Agent?.Clone() ?? new WorkspaceFileAgent();
+            SwitchAgentToOpenedWorkspace();   // 이 작업 공간의 설정·메모·대화로(이어 가거나 새 대화)
             _wfSavedSignature = WorkspaceFile.Signature(CaptureWorkspaceModel(full));
             RememberRecentWorkspace(full);
             statusLabel.Text = LT("Workspace opened: ", "작업 공간을 열었습니다: ") + full;
@@ -441,7 +446,7 @@ namespace NanumCsvViewer
             foreach (var v in model.Views)
             {
                 if (ws is null) { _wfCarriedViews.Add(v); continue; }
-                try { ws.CreateView(v.Name, v.Sql, v.IncludeUnsavedEdits); }
+                try { ws.CreateView(v.Name, v.Sql, v.IncludeUnsavedEdits, v.ToProvenance()); }
                 catch (Exception ex) when (ex is WorkspaceQueryException or ArgumentException or InvalidOperationException)
                 {
                     problems.Add(LT($"View '{v.Name}' could not be restored (kept in the workspace file): ", $"뷰 '{v.Name}'을(를) 복원하지 못했습니다(작업 공간 파일에는 남겨 둡니다): ") + ex.Message);

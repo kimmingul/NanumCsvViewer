@@ -38,6 +38,9 @@ namespace NanumCsvViewer.Agent
         /// <param name="kind">승인 모드 정책이 쓰는 종류. 기본값(RowSharing)은 가장 엄격해서 항상 묻는다.</param>
         Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation,
             ApprovalKind kind = ApprovalKind.RowSharing);
+
+        /// <summary>이번 턴을 시작한 사용자 메시지(에이전트가 만든 뷰의 출처에 적는다). 모르면 null.</summary>
+        string? CurrentUserRequest => null;
     }
 
     /// <summary>csv.* host tool 실행기. 모든 호출은 UI 스레드에서 들어온다(구현이 필요하면 내부에서 백그라운드로 넘긴다).</summary>

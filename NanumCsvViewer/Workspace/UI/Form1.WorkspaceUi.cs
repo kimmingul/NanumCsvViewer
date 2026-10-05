@@ -78,6 +78,7 @@ namespace NanumCsvViewer
             workspaceDockHost.VisibleChanged += (_, _) => { if (workspaceDockHost.Visible) EnsureExplorer(); UpdateWorkspaceCheckStates(); };
             WorkspaceChanged += () => _explorer?.ScheduleRefresh();
             Activated += (_, _) => _explorer?.ScheduleRefresh(); // 다른 프로그램에서 파일이 바뀌었을 수 있다(⚠ 표시 갱신)
+            BuildWorkspaceAgentMenu();   // 작업 공간 ▸ 메모… · 이 작업 공간의 새 대화 시작
         }
 
         private static Bitmap WorkspaceIcon()
@@ -536,13 +537,16 @@ namespace NanumCsvViewer
             return null;
         }
 
-        /// <summary>뷰를 만들고 View 탭으로 연다. 실패(이름 중복·SQL 오류)는 안내하고 null.</summary>
-        internal async Task<WorkspaceView?> CreateAndOpenViewAsync(string name, string sql, bool includeUnsavedEdits)
+        /// <summary>
+        /// 뷰를 만들고 View 탭으로 연다. 실패(이름 중복·SQL 오류)는 안내하고 null. <paramref name="provenance"/>는 누가 만들었는지
+        /// (기본: 사용자 — SQL 편집기의 "뷰로 저장"; 마법사는 <see cref="ViewProvenance.Wizard"/>). 작업 공간 파일에 저장되고 탐색기에 보인다.
+        /// </summary>
+        internal async Task<WorkspaceView?> CreateAndOpenViewAsync(string name, string sql, bool includeUnsavedEdits, ViewProvenance? provenance = null)
         {
             var ws = Workspace;
             if (ws is null) { ShowWorkspaceMessage(WorkspaceUnavailableReason ?? ""); return null; }
             WorkspaceView view;
-            try { view = ws.CreateView(name, sql, includeUnsavedEdits); }
+            try { view = ws.CreateView(name, sql, includeUnsavedEdits, provenance ?? ViewProvenance.User()); }
             catch (Exception ex) when (ex is WorkspaceQueryException or ArgumentException or InvalidOperationException)
             {
                 ShowWorkspaceMessage(ErrorText(ex));
@@ -563,7 +567,7 @@ namespace NanumCsvViewer
         }
 
         /// <summary>SQL을 뷰로 저장하는 흐름(이름 묻기 → 만들기 → 탭 열기).</summary>
-        internal async Task<WorkspaceView?> SaveSqlAsViewAsync(string sql, string suggestedName, string? summary)
+        internal async Task<WorkspaceView?> SaveSqlAsViewAsync(string sql, string suggestedName, string? summary, ViewProvenance? provenance = null)
         {
             var ws = Workspace;
             if (ws is null) { ShowWorkspaceMessage(WorkspaceUnavailableReason ?? ""); return null; }
@@ -571,7 +575,7 @@ namespace NanumCsvViewer
             if (!a.IsValid) { ShowWorkspaceMessage((a.Error ?? "") + WorkspaceQueryException.Where(a.Line, a.Column)); return null; }
             string prompt = LT("Name for the new view table:", "새 뷰 테이블의 이름:") + (string.IsNullOrWhiteSpace(summary) ? "" : "\n" + summary);
             if (PromptViewName(ws, LT("Save as view", "뷰로 저장"), prompt, ws.SuggestName(suggestedName, "view"), null, LT("Create", "만들기")) is not { } pick) return null;
-            return await CreateAndOpenViewAsync(pick.Name, sql, pick.IncludeEdits);
+            return await CreateAndOpenViewAsync(pick.Name, sql, pick.IncludeEdits, provenance);
         }
 
         // 편집기의 "뷰로 저장…"
@@ -602,7 +606,8 @@ namespace NanumCsvViewer
             if (ws is null) return false;
             try
             {
-                ws.UpdateView(view, sql, includeUnsavedEdits);
+                ws.UpdateView(view, sql, includeUnsavedEdits,
+                    string.Equals(sql, view.Sql, StringComparison.Ordinal) ? null : ViewProvenance.User());   // SQL을 다시 쓴 사람이 새 출처(이름만 바꾸면 그대로)
                 if (!string.Equals(newName, view.Name, StringComparison.Ordinal)) ws.RenameView(view, newName);
             }
             catch (Exception ex) when (ex is WorkspaceQueryException or ArgumentException or InvalidOperationException)
@@ -644,7 +649,7 @@ namespace NanumCsvViewer
                 _ => WorkspaceWizards.ShowGroup(this, ws, _palette, preselect),
             };
             if (result is null) return null;
-            return await SaveSqlAsViewAsync(result.Sql, result.SuggestedViewName, result.Summary);
+            return await SaveSqlAsViewAsync(result.Sql, result.SuggestedViewName, result.Summary, ViewProvenance.Wizard(kind.ToString()));
         }
 
         // ---------------------------------------------------------------- 이름 바꾸기 · 제거

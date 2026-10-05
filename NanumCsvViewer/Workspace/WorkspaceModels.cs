@@ -99,11 +99,56 @@ namespace NanumCsvViewer.Workspace
         public override string ToString() => Name;
     }
 
+    /// <summary>
+    /// 뷰를 누가 어떻게 만들었나: "user"(SQL 편집기 등 직접), "agent"(AI 에이전트 ws.* 도구), "wizard:join|append|compare|group"(마법사).
+    /// 에이전트가 만든 뷰는 그 턴의 사용자 요청 글(<see cref="MaxRequestChars"/>자까지)을 함께 적는다. 작업 공간 파일(.ncvws v2)에 저장된다.
+    /// </summary>
+    public sealed record ViewProvenance(string CreatedBy, DateTime CreatedUtc, string? Request = null)
+    {
+        public const string UserKind = "user";
+        public const string AgentKind = "agent";
+        public const string WizardPrefix = "wizard:";
+        /// <summary>에이전트 뷰에 적는 사용자 요청 글의 최대 길이.</summary>
+        public const int MaxRequestChars = 500;
+
+        public bool IsAgent => string.Equals(CreatedBy, AgentKind, StringComparison.Ordinal);
+        public bool IsWizard => CreatedBy.StartsWith(WizardPrefix, StringComparison.Ordinal);
+        /// <summary>마법사 종류(join·append·compare·group), 마법사가 아니면 null.</summary>
+        public string? WizardName => IsWizard ? CreatedBy[WizardPrefix.Length..] : null;
+
+        public static ViewProvenance User(DateTime? utc = null) => new(UserKind, Stamp(utc));
+        public static ViewProvenance Agent(string? request, DateTime? utc = null) => new(AgentKind, Stamp(utc), ClipRequest(request));
+        public static ViewProvenance Wizard(string kind, DateTime? utc = null) => new(WizardPrefix + kind.Trim().ToLowerInvariant(), Stamp(utc));
+
+        /// <summary>저장 파일에서 읽은 값 검사: 알려진 종류만 받는다(그 밖은 null — 출처 모름).</summary>
+        public static bool IsKnownKind(string? createdBy) =>
+            createdBy is UserKind or AgentKind
+            || createdBy is not null && createdBy.StartsWith(WizardPrefix, StringComparison.Ordinal)
+               && createdBy[WizardPrefix.Length..] is "join" or "append" or "compare" or "group";
+
+        /// <summary>공백을 정리하고 <see cref="MaxRequestChars"/>자로 줄인다(넘으면 …). 비면 null.</summary>
+        public static string? ClipRequest(string? request)
+        {
+            if (string.IsNullOrWhiteSpace(request)) return null;
+            string t = request.Trim();
+            return t.Length <= MaxRequestChars ? t : t[..(MaxRequestChars - 1)] + "…";
+        }
+
+        private static DateTime Stamp(DateTime? utc)
+        {
+            var t = utc ?? DateTime.UtcNow;
+            return t.Kind == DateTimeKind.Utc ? t : t.ToUniversalTime();
+        }
+    }
+
     /// <summary>뷰 테이블: 이름 + SQL. 결과는 <see cref="DataWorkspace.MaterializeViewAsync"/>가 임시 CSV로 쓴다.</summary>
     public sealed class WorkspaceView : IWorkspaceRelation
     {
         internal WorkspaceView(Guid id, string name, string sql, bool includeUnsavedEdits)
         { Id = id; Name = name; Sql = sql; IncludeUnsavedEdits = includeUnsavedEdits; }
+
+        /// <summary>누가 언제 만들었나(작업 공간 파일 v1에서 온 뷰처럼 모르면 null).</summary>
+        public ViewProvenance? Provenance { get; internal set; }
 
         public Guid Id { get; }
         public string Name { get; internal set; }

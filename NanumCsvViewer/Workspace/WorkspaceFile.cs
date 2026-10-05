@@ -53,12 +53,71 @@ namespace NanumCsvViewer.Workspace
         public const string KindDatabase = "database";
     }
 
-    /// <summary>뷰 정의: 이름 + SQL + 저장 안 한 편집 포함 여부. 결과는 저장하지 않는다(열 때 다시 계산 — 그때까지 "오래된" 상태).</summary>
+    /// <summary>
+    /// 뷰 정의: 이름 + SQL + 저장 안 한 편집 포함 여부 + (v2) 출처. 결과는 저장하지 않는다(열 때 다시 계산 — 그때까지 "오래된" 상태).
+    /// 출처(<see cref="CreatedBy"/>·<see cref="CreatedUtc"/>·<see cref="Request"/>)는 v1 파일에는 없고 null이다.
+    /// </summary>
     public sealed class WorkspaceFileView
     {
         public string Name { get; set; } = "";
         public string Sql { get; set; } = "";
         public bool IncludeUnsavedEdits { get; set; }
+        /// <summary>"user" · "agent" · "wizard:join|append|compare|group". 모르면 null.</summary>
+        public string? CreatedBy { get; set; }
+        public DateTime? CreatedUtc { get; set; }
+        /// <summary>에이전트가 만든 뷰에서 그 턴의 사용자 요청 글(<see cref="ViewProvenance.MaxRequestChars"/>자까지).</summary>
+        public string? Request { get; set; }
+
+        /// <summary>엔진 쪽 출처 → 파일 쪽 뷰 정의(출처를 모르면 세 값 모두 null).</summary>
+        public static WorkspaceFileView From(string name, string sql, bool includeUnsavedEdits, ViewProvenance? p) => new()
+        {
+            Name = name, Sql = sql, IncludeUnsavedEdits = includeUnsavedEdits,
+            CreatedBy = p?.CreatedBy, CreatedUtc = p?.CreatedUtc, Request = p?.Request,
+        };
+
+        /// <summary>파일 쪽 출처 → 엔진 쪽(모르면 null). 종류가 없거나 알 수 없으면 모르는 것으로 본다.</summary>
+        public ViewProvenance? ToProvenance() =>
+            ViewProvenance.IsKnownKind(CreatedBy)
+                ? new ViewProvenance(CreatedBy!, (CreatedUtc ?? DateTime.UtcNow).ToUniversalTime(), ViewProvenance.ClipRequest(Request))
+                : null;
+    }
+
+    /// <summary>이 작업 공간의 에이전트 대화(omp 세션). 경로는 이 PC의 것이라 다른 PC에서는 없을 수 있다(그러면 새 대화로 시작).</summary>
+    public sealed class WorkspaceFileSession
+    {
+        /// <summary>세션 id(세션 파일 이름 "…_&lt;id&gt;.jsonl"의 id). 파일을 옮겼을 때 id로 다시 찾는다.</summary>
+        public string? Id { get; set; }
+        /// <summary>omp 세션 파일(.jsonl) 전체 경로.</summary>
+        public string? File { get; set; }
+    }
+
+    /// <summary>
+    /// (v2) 작업 공간의 에이전트 정보. 승인 모드·데이터 정책·로컬 Python은 <b>제한만</b> 한다: 실제 값은 앱 설정과 이 값 중 더 엄격한 쪽이다
+    /// (<see cref="NanumCsvViewer.Agent.WorkspaceAgentPolicy"/>). 받은 파일이 앱 설정을 풀 수는 없다.
+    /// </summary>
+    public sealed class WorkspaceFileAgent
+    {
+        public WorkspaceFileSession? Session { get; set; }
+        /// <summary>"always-ask" | "write" | "yolo". null이면 앱 설정을 따른다.</summary>
+        public string? ApprovalMode { get; set; }
+        /// <summary>"SummaryOnly" | "RowsWithApproval" | "RowsAllowed". null이면 앱 설정을 따른다.</summary>
+        public string? DataPolicy { get; set; }
+        /// <summary>false면 이 작업 공간에서는 로컬 Python 분석을 끈다(true는 앱 설정을 풀지 못한다). null이면 앱 설정을 따른다.</summary>
+        public bool? AllowLocalPython { get; set; }
+        /// <summary>작업 공간 메모(자료 설명·핵심 관계·분석 목표). 사용자 글이며 에이전트에게는 지시가 아니라 자료로 전달된다.</summary>
+        public string? Notes { get; set; }
+
+        /// <summary>메모 최대 글자 수(저장·도구 공통).</summary>
+        public const int MaxNotesChars = 20_000;
+
+        [JsonIgnore]
+        public bool IsEmpty => Session is null && ApprovalMode is null && DataPolicy is null && AllowLocalPython is null && string.IsNullOrEmpty(Notes);
+
+        public WorkspaceFileAgent Clone() => new()
+        {
+            Session = Session is null ? null : new WorkspaceFileSession { Id = Session.Id, File = Session.File },
+            ApprovalMode = ApprovalMode, DataPolicy = DataPolicy, AllowLocalPython = AllowLocalPython, Notes = Notes,
+        };
     }
 
     /// <summary>
@@ -92,6 +151,8 @@ namespace NanumCsvViewer.Workspace
         /// <summary>활성 탭의 <see cref="Tabs"/> 순번(없으면 -1).</summary>
         public int ActiveTab { get; set; } = -1;
         public bool ExplorerVisible { get; set; }
+        /// <summary>(v2) 에이전트 대화·제한 설정·메모. v1 파일에는 없다(null).</summary>
+        public WorkspaceFileAgent? Agent { get; set; }
     }
 
     /// <summary>저장 직전의 원본 한 개(작업 공간·탭에서 읽은 값).</summary>
@@ -107,7 +168,7 @@ namespace NanumCsvViewer.Workspace
         public const string Extension = ".ncvws";
         public const string FormatName = "ncvws";
         /// <summary>이 앱이 쓰고 읽을 수 있는 최신 버전. 파일의 버전이 이보다 높으면 열지 않는다.</summary>
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -180,6 +241,14 @@ namespace NanumCsvViewer.Workspace
             // 원본은 순번이 탭의 참조이므로 걸러 내지 않는다(경로가 비면 열 때 누락으로 보고된다). null 항목만 빈 원본으로 둔다.
             m.Sources = (m.Sources ?? new()).Select(s => s ?? new WorkspaceFileSource()).ToList();
             m.Views = (m.Views ?? new()).Where(v => v is not null && !string.IsNullOrWhiteSpace(v.Name) && !string.IsNullOrWhiteSpace(v.Sql)).ToList();
+            foreach (var v in m.Views)
+            {
+                // 출처: 알 수 없는 종류는 "모름"으로 — 요청 글은 에이전트 뷰에서만 의미가 있고 길이를 제한한다.
+                if (!ViewProvenance.IsKnownKind(v.CreatedBy)) { v.CreatedBy = null; v.CreatedUtc = null; v.Request = null; continue; }
+                v.CreatedUtc = v.CreatedUtc?.ToUniversalTime();
+                v.Request = v.CreatedBy == ViewProvenance.AgentKind ? ViewProvenance.ClipRequest(v.Request) : null;
+            }
+            m.Agent = NormalizeAgent(m.Agent);
             var tabs = new List<WorkspaceFileTab>();
             int active = -1;
             for (int i = 0; i < (m.Tabs?.Count ?? 0); i++)
@@ -195,6 +264,29 @@ namespace NanumCsvViewer.Workspace
             }
             m.Tabs = tabs;
             m.ActiveTab = active;
+        }
+
+        private static WorkspaceFileView CopyView(WorkspaceFileView v) => new()
+        {
+            Name = v.Name, Sql = v.Sql, IncludeUnsavedEdits = v.IncludeUnsavedEdits,
+            CreatedBy = v.CreatedBy, CreatedUtc = v.CreatedUtc, Request = v.Request,
+        };
+
+        /// <summary>손으로 고친 에이전트 절을 검사한다: 알 수 없는 값은 버리고(앱 설정을 따름), 메모는 길이를 제한한다. 비면 null.</summary>
+        private static WorkspaceFileAgent? NormalizeAgent(WorkspaceFileAgent? a)
+        {
+            if (a is null) return null;
+            if (a.Session is { } s)
+            {
+                s.Id = string.IsNullOrWhiteSpace(s.Id) ? null : s.Id.Trim();
+                s.File = string.IsNullOrWhiteSpace(s.File) ? null : s.File.Trim();
+                if (s.Id is null && s.File is null) a.Session = null;
+            }
+            a.ApprovalMode = Agent.AgentApprovalPolicy.TryParse(a.ApprovalMode, out var mode) ? Agent.AgentApprovalPolicy.ToOmp(mode) : null;
+            a.DataPolicy = Enum.TryParse<Agent.AgentDataPolicy>(a.DataPolicy, ignoreCase: true, out var policy) && Enum.IsDefined(policy) ? policy.ToString() : null;
+            if (string.IsNullOrWhiteSpace(a.Notes)) a.Notes = null;
+            else if (a.Notes.Length > WorkspaceFileAgent.MaxNotesChars) a.Notes = a.Notes[..WorkspaceFileAgent.MaxNotesChars];
+            return a.IsEmpty ? null : a;
         }
 
         public static WorkspaceFileModel Load(string path) => Parse(File.ReadAllText(path, Encoding.UTF8));
@@ -287,7 +379,8 @@ namespace NanumCsvViewer.Workspace
             IEnumerable<WorkspaceFileView> carriedViews,
             IEnumerable<WorkspaceCaptureTab> tabs,
             int activeTab,
-            bool explorerVisible)
+            bool explorerVisible,
+            WorkspaceFileAgent? agent = null)
         {
             string dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(workspacePath)) ?? "";
             var model = new WorkspaceFileModel { ExplorerVisible = explorerVisible };
@@ -315,9 +408,10 @@ namespace NanumCsvViewer.Workspace
 
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var v in views)
-                if (names.Add(v.Name)) model.Views.Add(new WorkspaceFileView { Name = v.Name, Sql = v.Sql, IncludeUnsavedEdits = v.IncludeUnsavedEdits });
+                if (names.Add(v.Name)) model.Views.Add(CopyView(v));
             foreach (var v in carriedViews)
-                if (names.Add(v.Name)) model.Views.Add(new WorkspaceFileView { Name = v.Name, Sql = v.Sql, IncludeUnsavedEdits = v.IncludeUnsavedEdits });
+                if (names.Add(v.Name)) model.Views.Add(CopyView(v));
+            model.Agent = agent is null || agent.IsEmpty ? null : agent.Clone();
 
             int index = 0;
             foreach (var t in tabs)
@@ -366,6 +460,10 @@ namespace NanumCsvViewer.Workspace
                   .Append(s.Encoding).Append('|').Append(s.Delimiter).Append('|').Append(s.HasHeader).Append('\n');
             foreach (var v in model.Views.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase))
                 sb.Append("V|").Append(v.Name).Append('|').Append(v.IncludeUnsavedEdits).Append('|').Append(v.Sql.Replace("\r\n", "\n")).Append('\n');
+            // 에이전트 정보(대화·제한 설정·메모)도 작업 공간의 내용이다 — 바뀌면 저장 대상.
+            if (model.Agent is { } a)
+                sb.Append("A|").Append(a.Session?.File?.ToLowerInvariant()).Append('|').Append(a.ApprovalMode).Append('|').Append(a.DataPolicy).Append('|')
+                  .Append(a.AllowLocalPython).Append('|').Append((a.Notes ?? "").Replace("\r\n", "\n")).Append('\n');
             return sb.ToString();
         }
     }

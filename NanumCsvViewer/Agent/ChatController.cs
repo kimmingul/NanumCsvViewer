@@ -123,8 +123,12 @@ namespace NanumCsvViewer.Agent
             set
             {
                 bool languageChanged = _options.IsKorean != value.IsKorean;
+                var previousLimits = _options.Limits;
                 _options = value;
                 if (languageChanged) PostCommands();
+                // 작업 공간 설정이 앱 설정을 새로 조였으면(작업 공간 열기·설정 변경) 채팅에 한 번 알린다.
+                if (value.Limits.Any && value.Limits != previousLimits)
+                    _stream.Emit(ChatPageMessages.Notice("info", WorkspaceAgentPolicy.LimitTooltip(value, Korean)));
                 RefreshStatus(force: true);
                 // 로컬 Python 켜기/끄기·결과 폴더·데이터 정책이 바뀌면 쉬는 대로(작업 중이면 턴 뒤) 같은 대화로 다시 시작한다.
                 RunPendingWorkspaceRestart();
@@ -213,7 +217,10 @@ namespace NanumCsvViewer.Agent
                 string? pythonSection = await PreparePythonAsync(exe, launch, cancellation);
                 if (launch != _launchId || _disposed) return;
                 _launchedApproval = _options.ApprovalMode;
-                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, pythonSection, _launchedApproval);
+                // 작업 공간 메모는 (다시) 시작할 때마다 가이드에 실린다 — 이어받은 대화에서도 같다.
+                string? notesSection = WorkspaceNotesGuide.Build(_workspaceContext.Notes, Korean);
+                string? guideExtra = string.Join("\n\n", new[] { pythonSection, notesSection }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, guideExtra.Length == 0 ? null : guideExtra, _launchedApproval);
                 // 작업 폴더가 바뀐 재시작은 omp가 RPC switch_session을 거절한다(다른 cwd의 세션). 명령줄 --resume은 폴더가 달라도 이어 간다.
                 string? cliResume = resumeViaCli && !string.IsNullOrEmpty(resumeSession) ? resumeSession : null;
                 if (cliResume != null) resumeSession = null;
@@ -274,6 +281,14 @@ namespace NanumCsvViewer.Agent
                 RequestState();
             }
             _connected = true;
+            if (_historyOnConnect)
+            {
+                // 작업 공간의 대화를 이어받았다: 화면은 비어 있으니 omp에 저장된 기록을 다시 불러온다.
+                _historyOnConnect = false;
+                RequestState();
+                LoadHistory(done: () => _stream.Emit(ChatPageMessages.Notice("info",
+                    T("Resumed this workspace's previous conversation.", "이 작업 공간의 이전 대화를 이어 갔습니다."))));
+            }
             SetStatus("", false);
             RefreshStatus(force: true);
             PostApprovalNoticeOnce();
@@ -446,6 +461,8 @@ namespace NanumCsvViewer.Agent
                 Pid = _client?.ProcessId ?? 0,
                 Approval = AgentApprovalPolicy.ToOmp(_options.EffectiveApprovalMode),
                 ApprovalLocked = _options.ForcedApproval is { } forced ? ApprovalTexts.Locked(forced.Flag, Korean) : "",
+                WorkspaceLimit = WorkspaceAgentPolicy.LimitTooltip(_options, Korean),
+                WorkspaceLimitLabel = _options.Limits.Any ? WorkspaceAgentPolicy.LimitLabel(Korean) : "",
             };
             if (!force && s == _lastStatus) return;
             _lastStatus = s;

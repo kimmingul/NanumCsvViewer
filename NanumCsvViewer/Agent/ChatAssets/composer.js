@@ -254,6 +254,11 @@
     approval.disabled = !msg.connected || !!msg.approvalLocked;
     approval.classList.toggle('locked', !!msg.approvalLocked);
     $('approval-wrap').title = msg.approvalLocked || '';
+    // The workspace file (.ncvws) tightened the agent settings: show a lock with the details on hover.
+    const wsLimit = $('ws-limit');
+    wsLimit.hidden = !msg.workspaceLimit;
+    wsLimit.textContent = msg.workspaceLimit ? (msg.workspaceLimitLabel || '\u{1F512}') : '';
+    wsLimit.title = msg.workspaceLimit || '';
     input.placeholder = msg.busy && !msg.shell ? T('page.composer.busyPlaceholder') : T('page.composer.placeholder');
     const pct = msg.context >= 0 ? Math.min(100, msg.context) : 0;
     $('ctx-arc').setAttribute('stroke-dasharray', (pct / 100 * 50.3).toFixed(1) + ' 50.3');

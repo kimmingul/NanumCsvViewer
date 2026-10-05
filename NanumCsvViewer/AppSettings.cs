@@ -60,8 +60,11 @@ namespace NanumCsvViewer
         public void RemoveRecentWorkspace(string path)
             => RecentWorkspaces?.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
 
+        /// <summary>테스트가 사용자의 실제 설정 파일(%APPDATA%\NanumCsvViewer\settings.json)을 건드리지 않도록 설정 폴더를 바꾸는 이음매. 앱은 쓰지 않는다.</summary>
+        internal static string? DirectoryOverride { get; set; }
+
         private static string Dir =>
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");
+            DirectoryOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");
         private static string FilePath => Path.Combine(Dir, "settings.json");
 
         public static AppSettings Load()

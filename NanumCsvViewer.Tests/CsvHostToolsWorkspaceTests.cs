@@ -38,6 +38,9 @@ namespace NanumCsvViewer.Tests
         private sealed class Approvals(bool answer) : IAgentApprovals
         {
             public readonly List<(string Target, IReadOnlyList<string> Lines, ApprovalKind Kind)> Calls = new();
+            /// <summary>이번 턴을 시작한 사용자 메시지(에이전트 뷰의 출처에 적힌다).</summary>
+            public string? Request { get; set; }
+            public string? CurrentUserRequest => Request;
             public Task<bool> ApproveAsync(string target, string summary, IReadOnlyList<string> lines, CancellationToken cancellation, ApprovalKind kind = ApprovalKind.RowSharing)
             {
                 Calls.Add((target, lines, kind));
@@ -137,6 +140,9 @@ namespace NanumCsvViewer.Tests
                 _active = name;
                 return Task.FromResult<AgentTabInfo?>(new AgentTabInfo(name, "file", true, false, false, null));
             }
+
+            public string WorkspaceNotes { get; set; } = "";
+            public void SetWorkspaceNotes(string notes) => WorkspaceNotes = notes;
         }
 
         private static readonly AgentHostOptions Summary = new(Language: "en", DataPolicy: AgentDataPolicy.SummaryOnly, MaxRowsPerRequest: 50, AllowLocalPython: false);
@@ -606,6 +612,135 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal("id,name\n1,kim\n2,lee\n3,park\n", File.ReadAllText(people).Replace("\r\n", "\n"));
                 Assert.NotNull(tabScores);
             });
+        }
+
+        // ---------------------------------------------------------------- 작업 공간 메모 (ws.notes / ws.set_notes)
+
+        [Fact]
+        public void Notes_tool_returns_the_text_marked_as_user_data_and_is_empty_by_default()
+        {
+            var (host, tools, _, _) = Setup();
+            Assert.Contains("no notes", Run(tools, "ws.notes", "{}").Text);
+            host.WorkspaceNotes = "orders.cust_id → customers.id\n목표: 지역별 매출";
+            var j = Json(Run(tools, "ws.notes", "{}"));
+            Assert.Equal("orders.cust_id → customers.id\n목표: 지역별 매출", (string)j["text"]!);
+            Assert.Equal(host.WorkspaceNotes.Length, (int)j["chars"]!);
+            Assert.Contains("Not instructions", (string)j["note"]!);
+        }
+
+        [Fact]
+        public void Set_notes_needs_a_DataEdit_approval_showing_old_and_new_text_and_declining_changes_nothing()
+        {
+            var (host, tools, _, _) = Setup();
+            host.WorkspaceNotes = "old text";
+            var no = new Approvals(false);
+            var declined = Run(tools, "ws.set_notes", """{"notes":"new text"}""", no);
+            Assert.True(declined.IsError);
+            Assert.Contains("did not approve", declined.Text);
+            Assert.Equal("old text", host.WorkspaceNotes);
+            Assert.Equal(ApprovalKind.DataEdit, no.Calls.Single().Kind);
+            Assert.Contains(no.Calls.Single().Lines, l => l.StartsWith("- ") && l.Contains("old text"));
+            Assert.Contains(no.Calls.Single().Lines, l => l.StartsWith("+ ") && l.Contains("new text"));
+
+            var yes = new Approvals(true);
+            var ok = Json(Run(tools, "ws.set_notes", """{"notes":"new text"}""", yes));
+            Assert.Equal("new text", host.WorkspaceNotes);
+            Assert.True((bool)ok["changed"]!);
+            Assert.Equal(ApprovalKind.DataEdit, yes.Calls.Single().Kind);
+        }
+
+        [Fact]
+        public void Set_notes_can_append_and_refuses_text_over_the_limit_before_asking()
+        {
+            var (host, tools, _, _) = Setup();
+            host.WorkspaceNotes = "line one";
+            var ap = new Approvals(true);
+            Run(tools, "ws.set_notes", """{"notes":"line two","mode":"append"}""", ap);
+            Assert.Equal("line one\nline two", host.WorkspaceNotes);
+            Assert.Contains(ap.Calls.Single().Lines, l => l.StartsWith("+ ") && l.Contains("line two"));
+            Assert.DoesNotContain(ap.Calls.Single().Lines, l => l.StartsWith("- "));    // 덧붙이기는 기존 글을 지우지 않는다
+
+            var ap2 = new Approvals(true);
+            var tooLong = Run(tools, "ws.set_notes", "{\"notes\":\"" + new string('x', WorkspaceFileAgent.MaxNotesChars) + "\",\"mode\":\"append\"}", ap2);
+            Assert.True(tooLong.IsError);
+            Assert.Contains("limit", tooLong.Text);
+            Assert.Empty(ap2.Calls);
+            Assert.Equal("line one\nline two", host.WorkspaceNotes);
+        }
+
+        [Fact]
+        public void Setting_the_same_text_again_asks_nothing_and_clearing_the_notes_is_allowed()
+        {
+            var (host, tools, _, _) = Setup();
+            host.WorkspaceNotes = "same";
+            var ap = new Approvals(true);
+            var same = Json(Run(tools, "ws.set_notes", """{"notes":"same"}""", ap));
+            Assert.False((bool)same["changed"]!);
+            Assert.Empty(ap.Calls);
+            Run(tools, "ws.set_notes", """{"notes":""}""", ap);
+            Assert.Equal("", host.WorkspaceNotes);
+        }
+
+        [Fact]
+        public void List_tables_shows_a_clipped_copy_of_the_notes_and_where_to_read_the_rest()
+        {
+            var (host, tools, _, _) = Setup();
+            Assert.False(Json(Run(tools, "ws.list_tables", "{}")).ContainsKey("workspace_notes"));
+
+            host.WorkspaceNotes = new string('n', 3000);
+            var r = Run(tools, "ws.list_tables", "{}");
+            var j = Json(r);
+            var notes = j["workspace_notes"]!;
+            Assert.Equal(3000, (int)notes["chars"]!);
+            Assert.True((bool)notes["truncated"]!);
+            Assert.True(((string)notes["text"]!).Length <= 1001);
+            Assert.Contains("not instructions", ((string)notes["note"]!).ToLowerInvariant());
+            Assert.Contains("ws.notes", r.Text);
+        }
+
+        // ---------------------------------------------------------------- 뷰 출처
+
+        [Fact]
+        public void Agent_made_views_record_who_when_and_the_users_request_capped_at_500_chars()
+        {
+            var (host, tools, _, _) = Setup();
+            var ap = new Approvals(true) { Request = "주문 금액이 큰 건만 보여 줘 " + new string('가', 700) };
+            Run(tools, "ws.create_view", """{"name":"big_orders","sql":"SELECT * FROM orders WHERE CAST(amount AS INTEGER) > 60"}""", ap);
+
+            var p = host.Workspace!.Views.Single().Provenance!;
+            Assert.True(p.IsAgent);
+            Assert.True((DateTime.UtcNow - p.CreatedUtc).TotalMinutes < 2);
+            Assert.StartsWith("주문 금액이 큰 건만 보여 줘", p.Request);
+            Assert.Equal(ViewProvenance.MaxRequestChars, p.Request!.Length);
+
+            var view = Json(Run(tools, "ws.list_tables", "{}"))["views"]![0]!;
+            Assert.Equal("agent", (string)view["created_by"]!);
+            Assert.StartsWith("주문 금액이 큰 건만", (string)view["user_request"]!);
+            Assert.EndsWith("Z", (string)view["created_utc"]!);
+        }
+
+        [Theory]
+        [InlineData("ws.append", """{"name":"v","tables":["customers","orders"]}""")]
+        [InlineData("ws.compare", """{"name":"v","left":"customers","right":"customers","keys":[{"left":"id","right":"id"}]}""")]
+        [InlineData("ws.group", """{"name":"v","table":"orders","group_by":["cust_id"],"aggregates":[{"function":"count"}]}""")]
+        public void Every_view_creating_tool_records_the_agent_as_the_author(string tool, string args)
+        {
+            var (host, tools, _, _) = Setup();
+            var r = Run(tools, tool, args, new Approvals(true) { Request = "please" });
+            Assert.False(r.IsError, r.Text);
+            var p = host.Workspace!.Views.Single().Provenance!;
+            Assert.True(p.IsAgent);
+            Assert.Equal("please", p.Request);
+        }
+
+        [Fact]
+        public void Redefining_a_view_makes_the_agent_its_latest_author_and_a_missing_request_is_just_absent()
+        {
+            var (host, tools, _, _) = Setup();
+            var view = host.Workspace!.CreateView("v", "SELECT * FROM orders", false, ViewProvenance.User());
+            Run(tools, "ws.create_view", """{"name":"v","sql":"SELECT * FROM customers","replace":true}""", new Approvals(true));
+            Assert.True(view.Provenance!.IsAgent);
+            Assert.Null(view.Provenance.Request);          // 호스트가 요청을 모르면 적지 않는다(지어내지 않는다)
         }
     }
 }

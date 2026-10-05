@@ -15,6 +15,8 @@ namespace NanumCsvViewer.Agent
     /// 현재 뷰를 로컬 파일로 내보내 omp eval(Python)로 분석하며 가이드에 Python 절이 추가된다.</param>
     /// <param name="ApprovalMode">승인 모드. host.yml의 tools.approvalMode와 앱 승인 카드 정책을 정한다. 바뀌면 같은 대화로 omp를 다시 시작한다.</param>
     /// <param name="ApprovalNoticePending">true면 다음 연결 때 기본 모드(yolo) 안내를 채팅에 한 번 보이고 ApprovalNoticeShown을 올린다.</param>
+    /// <param name="Limits">작업 공간 파일(.ncvws)의 설정이 앱 설정보다 엄격해서 실제로 조여진 항목(<see cref="WorkspaceAgentPolicy.Apply"/>가 채운다).
+    /// ApprovalMode·DataPolicy·AllowLocalPython은 이미 합쳐진(더 엄격한) 값이다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
@@ -24,7 +26,8 @@ namespace NanumCsvViewer.Agent
         string AppVersion = "",
         bool AllowLocalPython = false,
         AgentApprovalMode ApprovalMode = AgentApprovalPolicy.Default,
-        bool ApprovalNoticePending = false)
+        bool ApprovalNoticePending = false,
+        WorkspaceLimits Limits = default)
     {
         public bool IsKorean => !string.Equals(Language, "en", StringComparison.OrdinalIgnoreCase);
 

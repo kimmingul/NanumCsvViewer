@@ -26,6 +26,36 @@ namespace NanumCsvViewer.Agent.Chat
         public static string DefaultRoot() =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".omp", "agent", "sessions");
 
+        /// <summary>세션 파일 이름 "2026-09-23T12-38-48-237Z_&lt;id&gt;.jsonl"의 id(없거나 모양이 다르면 null). 작업 공간 파일이 대화를 가리키는 키다.</summary>
+        public static string? IdOf(string? sessionFile)
+        {
+            if (string.IsNullOrWhiteSpace(sessionFile)) return null;
+            string name = Path.GetFileNameWithoutExtension(sessionFile.Trim());
+            int us = name.IndexOf('_');
+            if (us < 0 || us == name.Length - 1) return null;
+            string id = name[(us + 1)..];
+            return IsValidId(id) ? id : null;
+        }
+
+        /// <summary>id는 파일 이름 조각으로 쓰므로 글자·숫자·'-'만(경로·와일드카드 문자 거부).</summary>
+        public static bool IsValidId(string? id) =>
+            !string.IsNullOrEmpty(id) && id.Length <= 64 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
+
+        /// <summary>모든 작업 폴더의 세션 저장소에서 id로 세션 파일을 찾는다(작업 공간 파일을 옮겨 작업 폴더가 달라졌을 때). 없으면 null.</summary>
+        public static string? FindById(string? id, string? root = null)
+        {
+            if (!IsValidId(id)) return null;
+            try
+            {
+                string r = root ?? DefaultRoot();
+                if (!Directory.Exists(r)) return null;
+                return Directory.EnumerateDirectories(r)
+                    .SelectMany(d => Directory.EnumerateFiles(d, "*_" + id + ".jsonl"))
+                    .FirstOrDefault();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        }
+
         /// <summary>sessionFile의 폴더, 없으면 root\&lt;cwd 인코딩&gt;. 폴더가 없으면 null.</summary>
         public static string? FindDirectory(string? sessionFile, string cwd, string? root = null)
         {

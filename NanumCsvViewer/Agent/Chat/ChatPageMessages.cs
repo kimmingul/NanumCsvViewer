@@ -120,6 +120,8 @@ namespace NanumCsvViewer.Agent.Chat
                 o["pid"] = s.Pid;
                 o["approval"] = s.Approval;
                 o["approvalLocked"] = s.ApprovalLocked;
+                o["workspaceLimit"] = s.WorkspaceLimit;
+                o["workspaceLimitLabel"] = s.WorkspaceLimitLabel;
             });
 
         public static string Catalog(IReadOnlyList<string> models, IReadOnlyList<string> levels, IReadOnlyDictionary<string, string> providers) =>
@@ -246,5 +248,9 @@ namespace NanumCsvViewer.Agent.Chat
         public string Approval { get; init; } = "";
         /// <summary>비어 있지 않으면 승인 모드가 omp 추가 인자로 고정됨(드롭다운 비활성, 이 문구를 툴팁으로).</summary>
         public string ApprovalLocked { get; init; } = "";
+        /// <summary>비어 있지 않으면 작업 공간 파일의 설정이 앱 설정을 조였다(채팅 바닥줄에 자물쇠 표시, 이 문구를 툴팁으로).</summary>
+        public string WorkspaceLimit { get; init; } = "";
+        /// <summary>자물쇠 표시의 짧은 글.</summary>
+        public string WorkspaceLimitLabel { get; init; } = "";
     }
 }

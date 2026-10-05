@@ -109,8 +109,9 @@ namespace NanumCsvViewer.Workspace
         /// 뷰 테이블을 만든다. 이름은 <see cref="SqlNames"/> 규칙에 맞아야 하고(고쳐서 쓰지 않는다 — 다르면 예외) 다른 원본·뷰와 겹치면 안 된다.
         /// SQL은 한 문장 SELECT여야 하며(아니면 <see cref="WorkspaceQueryException"/>) 다른 원본·뷰를 이름으로 쓸 수 있다(뷰 위의 뷰).
         /// <paramref name="includeUnsavedEdits"/>가 참이면 <see cref="MaterializeViewAsync"/>가 결과를 계산할 때 <see cref="EditSnapshotProvider"/>의 편집 반영본을 쓴다.
+        /// <paramref name="provenance"/>는 누가 만들었는지(없으면 모름 — 작업 공간 파일 v1에서 복원한 뷰). 작업 공간 파일(.ncvws v2)에 함께 저장된다.
         /// </summary>
-        public WorkspaceView CreateView(string name, string sql, bool includeUnsavedEdits = false)
+        public WorkspaceView CreateView(string name, string sql, bool includeUnsavedEdits = false, ViewProvenance? provenance = null)
         {
             WorkspaceView view;
             lock (_gate)
@@ -128,7 +129,7 @@ namespace NanumCsvViewer.Workspace
                 string body = RequireBody(analysis, sql);
                 string prefix = $"CREATE VIEW {SqlNames.Qualified("main", clean)} AS ";
                 Exec(_root, SqlText.Wrap(prefix, body, ""), prefix.Length);
-                view = new WorkspaceView(Guid.NewGuid(), clean, sql, includeUnsavedEdits) { Dependencies = ResolveDependencies(analysis) };
+                view = new WorkspaceView(Guid.NewGuid(), clean, sql, includeUnsavedEdits) { Dependencies = ResolveDependencies(analysis), Provenance = provenance };
                 _views.Add(view);
                 RefreshViewMetadata(view);
             }
@@ -155,8 +156,11 @@ namespace NanumCsvViewer.Workspace
             catch (DuckDBException ex) { throw WorkspaceQueryException.From(ex, sql, prefixLength); }
         }
 
-        /// <summary>뷰의 SQL·편집 포함 여부를 바꾼다. 이 뷰를 쓰는 다른 뷰의 컬럼 정보도 다시 확인하고, 결과는 오래된 것(<see cref="IsStale"/>)이 된다.</summary>
-        public void UpdateView(WorkspaceView view, string sql, bool includeUnsavedEdits)
+        /// <summary>
+        /// 뷰의 SQL·편집 포함 여부를 바꾼다. 이 뷰를 쓰는 다른 뷰의 컬럼 정보도 다시 확인하고, 결과는 오래된 것(<see cref="IsStale"/>)이 된다.
+        /// <paramref name="provenance"/>를 주면 출처를 바꾼 사람의 것으로 갈아 끼운다(정의를 다시 쓴 사람이 새 출처), 없으면 그대로 둔다.
+        /// </summary>
+        public void UpdateView(WorkspaceView view, string sql, bool includeUnsavedEdits, ViewProvenance? provenance = null)
         {
             lock (_gate)
             {
@@ -173,6 +177,7 @@ namespace NanumCsvViewer.Workspace
                 Exec(_root, SqlText.Wrap(prefix, body, ""), prefix.Length);
                 view.Sql = sql;
                 view.IncludeUnsavedEdits = includeUnsavedEdits;
+                if (provenance is not null) view.Provenance = provenance;
                 view.Dependencies = deps;
                 view.Version++;
                 RefreshViewMetadata(view);

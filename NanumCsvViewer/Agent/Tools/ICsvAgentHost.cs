@@ -243,5 +243,11 @@ namespace NanumCsvViewer.Agent.Tools
 
         /// <summary>탭 이름·표시 이름·표/뷰 이름으로 탭을 활성화한다. 없으면 null.</summary>
         Task<AgentTabInfo?> SwitchTabAsync(string name, CancellationToken ct);
+
+        /// <summary>작업 공간 메모(사용자가 쓴 자료 설명·핵심 관계·분석 목표). 없으면 빈 문자열.</summary>
+        string WorkspaceNotes { get; }
+
+        /// <summary>작업 공간 메모를 바꾼다(승인은 도구가 이미 받았고 길이도 검사했다). 작업 공간 파일을 저장할 때 함께 저장된다.</summary>
+        void SetWorkspaceNotes(string notes);
     }
 }
