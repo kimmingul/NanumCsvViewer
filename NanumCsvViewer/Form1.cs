@@ -36,9 +36,9 @@ namespace NanumCsvViewer
         private Func<string[], bool>? _textCondition;
         private string _textConditionDesc = "";
         // expr: 식 필터의 원본 표현식(재편집용). 셀값 등 식이 아닌 조건은 null.
-        private readonly List<(string desc, Func<string[], bool> pred, string? expr)> _valueConditions = new();
+        private List<(string desc, Func<string[], bool> pred, string? expr)> _valueConditions = new();
         // 다중 컬럼 정렬: 순서가 우선순위(앞이 1차). 헤더 클릭=단일 교체, Shift+클릭=차수 추가.
-        private readonly List<SortKey> _sortKeys = new();
+        private List<SortKey> _sortKeys = new();
 
         private bool HasAnyFilter => _textCondition is not null || _valueConditions.Count > 0 || !_columnFilters.IsEmpty;
 
@@ -64,8 +64,9 @@ namespace NanumCsvViewer
             BuildEncodingMenu();
             BuildLanguageMenu();
             BuildFacetsMenuItem();
-            FormClosed += (_, _) => DisposeWorkbook(); // 임시 변환 폴더 정리
             BuildFeatureMenus();
+            BuildTabFeatures();
+            BuildWorkspaceFeatures();
             ApplyIcons();
             ApplyLocalization();
 
@@ -269,6 +270,10 @@ namespace NanumCsvViewer
             themeToggleButton.Image = theme == AppTheme.Dark ? UiIcons.Sun() : UiIcons.Moon();
             if (_doc is not null) { _detailTimer.Stop(); UpdateDetailPanel(); } // 상세 패널 색 갱신
             _qualityPanel?.ApplyPalette(_palette); // 품질 패널은 서브아이템 색이 고정돼 별도 재적용 필요(이슈 #26)
+            tabStrip.ApplyPalette(_palette);
+            workspaceDockHost.BackColor = _palette.Window;
+            workspaceSplitter.BackColor = _palette.Border;
+            ApplyWorkspaceTheme();
             ApplyAgentTheme();
             grid.Invalidate();
         }
@@ -294,65 +299,39 @@ namespace NanumCsvViewer
         private async void OnOpenClick(object? sender, EventArgs e)
         {
             if (openFileDialog1.ShowDialog(this) != DialogResult.OK) return;
-            await OpenFileAsync(openFileDialog1.FileName);
+            await OpenFilesAsync(openFileDialog1.FileNames);
         }
 
-        private async Task OpenFileAsync(string path)
-        {
-            if (_closing) return;
-            if (!ConfirmDiscardEdits()) return; // 저장하지 않은 셀 편집이 있으면 확인
-            try
-            {
-                // 진행 중인 인덱싱/필터/정렬/검색을 취소하고 완료까지 기다린 뒤에야 옛 문서를 해제한다.
-                // (검색 스레드가 해제된 _doc/디스크 핸들을 참조해 NRE/ObjectDisposedException 나는 것을 방지)
-                await CancelAndDrainAsync();
-                if (_closing) return;
-                DeleteCurrentIndexIfRequested(); // 이전 파일을 닫기 전 캐시 정리(설정 시)
-                var old = _doc;
-                _doc = null;
-                old?.Dispose();
-
-                ResetView();
-                _hiddenColumns.Clear();
-                _userResizedRowHeader = false; // 새 파일에서는 자동 폭 조정 재개
-                DisposeWorkbook();
-
-                if (Import.TabularImporter.IsImportable(path))
-                {
-                    // 엑셀/SAS/SPSS: 시트별 임시 CSV로 변환 후 기존 엔진으로 연다. SPSS·SAS는 설정된 라벨 모드로.
-                    statusLabel.Text = LT("Importing…", "불러오는 중…");
-                    var wb = await Task.Run(() => Import.WorkbookSession.Create(path, _settings.ShowFieldLabels));
-                    _workbook = wb;
-                    BuildSheetTabs(wb);
-                    LoadSheet(0);
-                }
-                else
-                {
-                    HideSheetTabs();
-                    LoadDocument(path, Path.GetFileName(path));
-                }
-                UpdateFieldLabelsMenu();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, Loc.T("Title_OpenFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                statusLabel.Text = Loc.T("Status_OpenFailed");
-            }
-        }
-
-        // 실제 문서(파일/임시 CSV) 하나를 열고 인덱싱을 시작한다. 일반 열기·시트 전환 공용.
+        // 실제 문서(파일/임시 CSV) 하나를 현재 탭에 열고 인덱싱을 시작한다. 시트 전환·라벨 재임포트가 쓰는 "현재 탭의 문서 교체" 경로.
+        // 열린 탭이 없으면 탭을 만들어 활성 탭으로 삼는다(새 파일을 여는 일반 경로는 OpenFileTabAsync → CreateFileTab).
         private void LoadDocument(string filePath, string title)
         {
+            var doc = VirtualCsvDocument.Open(filePath); // 실패하면 아무것도 바꾸지 않는다
+            var tab = _t;
+            if (tab is null)
+            {
+                string source = _workbook?.SourcePath ?? filePath;
+                tab = new DocumentTab(this, _workbook is null ? TabKind.File : TabKind.Sheet, Path.GetFullPath(source),
+                    Path.GetFileName(source), readOnly: false, viewName: null);
+                _tabs.Add(tab);
+                _t = tab;
+                tab.ActivationStamp = ++_activationCounter;
+                AdoptTabCollections(tab);
+            }
             ResetEditUi(); // 새 문서는 항상 보기 모드
-            _doc = VirtualCsvDocument.Open(filePath);
+            _doc = doc;
             _currentPath = filePath;
             BuildColumns(_doc.Header);
             SyncEncodingUi(_doc.EncodingName);
             grid.RowCount = 0;
             Text = $"{ProgramName}  -  {title}";
-            StartIndexing();
+            tab.WindowTitle = title;
+            tab.SheetName = _workbook is not null && _currentSheetIndex >= 0 && _currentSheetIndex < _workbook.SheetNames.Count
+                ? _workbook.SheetNames[_currentSheetIndex] : null;
+            StartIndexing(tab, doc);
             UpdateFeatureState();
             PostAgentContext();
+            NotifyTabsChanged();
         }
 
         private void BuildColumns(string[] header)
@@ -382,48 +361,88 @@ namespace NanumCsvViewer
 
         // ---------------------------------------------------------------- Indexing
 
-        private void StartIndexing()
+        // 탭의 문서 인덱싱을 시작한다. 활성 탭이면 진행 표시줄·타이머를 쓰고, 백그라운드 탭은 상태만 탭에 기록한다(계속 인덱싱).
+        private void StartIndexing(DocumentTab tab, VirtualCsvDocument doc)
         {
-            _indexCts = new CancellationTokenSource();
-            _indexing = true;
-            progressBar.Visible = true;
-            progressBar.Value = 0;
-            progressLabel.Visible = true;
-            progressLabel.Text = "0%";
-            statusLabel.Text = Loc.T("Status_Loading");
-            _rowCountTimer.Start();
-            UpdateFeatureState();
+            var cts = new CancellationTokenSource();
+            tab.IndexCts = cts;
+            tab.Indexing = true;
+            tab.LastProgress = null;
+            tab.NeedsIndexFinalize = false;
+            if (ReferenceEquals(tab, _t))
+            {
+                _indexCts = cts;
+                _indexing = true;
+                progressBar.Visible = true;
+                progressBar.Value = 0;
+                progressLabel.Visible = true;
+                progressLabel.Text = "0%";
+                statusLabel.Text = Loc.T("Status_Loading");
+                _rowCountTimer.Start();
+                UpdateFeatureState();
+            }
 
-            var progress = new Progress<IndexProgress>(OnIndexProgress);
-            _indexTask = RunIndexingAsync(progress);
+            var progress = new Progress<IndexProgress>(p =>
+            {
+                if (tab.IsClosed) return;
+                tab.LastProgress = p;
+                if (ReferenceEquals(tab, _t)) OnIndexProgress(p);
+                else tabStrip.Invalidate();
+            });
+            var task = RunIndexingAsync(tab, doc, cts, progress);
+            tab.IndexTask = task;
+            if (ReferenceEquals(tab, _t)) _indexTask = task;
         }
 
-        private async Task RunIndexingAsync(IProgress<IndexProgress> progress)
+        private async Task RunIndexingAsync(DocumentTab tab, VirtualCsvDocument doc, CancellationTokenSource cts, IProgress<IndexProgress> progress)
         {
             var sw = Stopwatch.StartNew();
             try
             {
-                await _doc!.RunIndexingAsync(progress, _indexCts!.Token);
+                await doc.RunIndexingAsync(progress, cts.Token);
                 sw.Stop();
-                _rowCountTimer.Stop();
-                _indexing = false;
-                RefreshRowCount();
-                OnIndexingComplete(sw.ElapsedMilliseconds);
+                tab.Indexing = false;
+                tab.LastIndexMs = sw.ElapsedMilliseconds;
+                if (ReferenceEquals(tab, _t))
+                {
+                    _rowCountTimer.Stop();
+                    _indexing = false;
+                    RefreshRowCount();
+                    OnIndexingComplete(sw.ElapsedMilliseconds);
+                }
+                else if (!tab.IsClosed)
+                {
+                    // 백그라운드에서 끝났다: 컬럼 요약만 미리 계산하고(편집이 없는 새 문서이므로 컬럼 번호 = 원본 번호), 화면 마무리는 활성화 때.
+                    tab.Summaries = ComputeColumnSummaries(doc, tab.Wb, tab.SheetIndex, tab.ManualTypeOverrides, c => c);
+                    tab.NeedsIndexFinalize = true;
+                }
+                tabStrip.Invalidate();
             }
             catch (OperationCanceledException)
             {
-                _rowCountTimer.Stop();
-                _indexing = false;
-                UpdateFeatureState();
+                tab.Indexing = false;
+                if (ReferenceEquals(tab, _t))
+                {
+                    _rowCountTimer.Stop();
+                    _indexing = false;
+                    UpdateFeatureState();
+                }
+                tabStrip.Invalidate();
             }
             catch (Exception ex)
             {
-                _rowCountTimer.Stop();
-                _indexing = false;
-                progressBar.Visible = false;
-                progressLabel.Visible = false;
-                UpdateFeatureState();
-                MessageBox.Show(ex.Message, Loc.T("Title_IndexError"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                tab.Indexing = false;
+                if (ReferenceEquals(tab, _t))
+                {
+                    _rowCountTimer.Stop();
+                    _indexing = false;
+                    progressBar.Visible = false;
+                    progressLabel.Visible = false;
+                    UpdateFeatureState();
+                }
+                tabStrip.Invalidate();
+                if (!tab.IsClosed && !IsDisposed)
+                    MessageBox.Show(ex.Message, Loc.T("Title_IndexError") + " — " + tab.DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -1303,6 +1322,7 @@ namespace NanumCsvViewer
 
             UpdateFeatureMenuState();
             RefreshSignal();
+            UpdateTabMenuState();
         }
 
         // 상태바 우측 신호등(단일 점): 대기/로딩/작업중/준비완료
@@ -1423,8 +1443,8 @@ namespace NanumCsvViewer
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             CancelAll();
-            DeleteCurrentIndexIfRequested(); // 종료 시 현재 파일 캐시 정리(설정 시)
-            _doc?.Dispose();
+            DisposeAllTabs(); // 모든 탭의 문서·워크북 해제와 인덱스 캐시 정리(설정 시)
+            DisposeWorkspaceUi(); // 작업 공간 엔진·SQL 편집기 창·탐색기 해제
             CleanupTempImports();
             _detailBoldFont?.Dispose();
             _detailTimer?.Dispose();
@@ -1436,7 +1456,8 @@ namespace NanumCsvViewer
         {
             if (_closeReady) { base.OnFormClosing(e); return; }
             if (_closing) { e.Cancel = true; return; }
-            if (!ConfirmDiscardEdits()) { e.Cancel = true; return; }
+            // 저장하지 않은 편집이 있는 탭을 모두 나열해 한 번에 확인한다(예 = 버리고 종료).
+            if (!ConfirmDiscardTabs(_tabs.Where(t => t.HasUnsavedEdits).ToList())) { e.Cancel = true; return; }
             base.OnFormClosing(e);
             if (e.Cancel) return;
             e.Cancel = true;
@@ -1452,6 +1473,7 @@ namespace NanumCsvViewer
             await Task.Yield();
             ShutdownAgent();
             await CancelAndDrainAsync();
+            await DrainBackgroundTabsAsync();
             if (IsDisposed) return;
             _closeReady = true;
             Close();

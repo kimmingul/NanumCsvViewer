@@ -251,7 +251,7 @@ namespace NanumCsvViewer
                              "이 창을 만든 뒤 데이터가 편집되었습니다 — 편집을 반영하려면 분석을 다시 실행하세요(차트는 새로고침).");
             foreach (var f in OwnedForms)
             {
-                if (f.IsDisposed || f is not (AdvancedResultForm or ChartForm)) continue;
+                if (f.IsDisposed || !f.Visible || f is not (AdvancedResultForm or ChartForm)) continue; // 다른 탭의 숨겨 둔 창은 그 탭의 데이터이므로 건드리지 않는다
                 if (f.Controls.ContainsKey("staleBanner")) continue;
                 var banner = new Label
                 {
@@ -976,6 +976,7 @@ namespace NanumCsvViewer
 
         private void EnsureEditable()
         {
+            RequireEditableTab();
             if (_doc is null || !_doc.IndexingComplete)
                 throw new InvalidOperationException("The file is still being indexed (or nothing is open). Retry when indexing finishes.");
             if (_busy) throw new InvalidOperationException("Another operation is running. Retry when it finishes.");
@@ -1465,7 +1466,8 @@ namespace NanumCsvViewer
             _journalKey = src is null || _doc is null ? null : EditJournal.KeyFor(src, _journalSheet);
         }
 
-        private void FlushJournal()
+        // synchronous = 탭 전환·종료처럼 곧 문서 상태가 바뀔 때: 같은 스레드에서 바로 기록해 뒤이은 키 재계산이 기록을 무효화하지 못하게 한다.
+        private void FlushJournal(bool synchronous = false)
         {
             _journalTimer.Stop();
             var doc = _doc;
@@ -1479,7 +1481,7 @@ namespace NanumCsvViewer
             lock (_journalLock) generation = _journalGeneration;
             string source = _journalSource;
             int sheet = _journalSheet;
-            _ = Task.Run(() =>
+            void Write()
             {
                 try
                 {
@@ -1492,7 +1494,9 @@ namespace NanumCsvViewer
                     }
                 }
                 catch (Exception ex) { Debug.WriteLine($"[EditJournal] {ex.Message}"); }
-            });
+            }
+            if (synchronous) Write();
+            else _ = Task.Run(Write);
         }
 
         /// <summary>저장했거나 버렸을 때: 대기 중인 기록을 무효화하고 저널 파일을 지운다.</summary>

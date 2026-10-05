@@ -13,7 +13,7 @@ namespace NanumCsvViewer
     // 규칙을 다시 만들 때와 보기(필터·편집)가 바뀔 때마다 백그라운드에서 한 번 계산한다(그동안 눈금 규칙은 색을 입히지 않는다).
     public partial class Form1
     {
-        private readonly List<ConditionalFormatRule> _cfRules = new();
+        private List<ConditionalFormatRule> _cfRules = new();
         private ConditionalFormatStyler _cfStyler = new(ConditionalFormatSet.Empty);
         private VirtualCsvDocument? _cfDoc;
         private long _cfSeenEditsVersion = -1, _cfSeenHeaderVersion = -1;
@@ -22,7 +22,7 @@ namespace NanumCsvViewer
         private Font? _cfBoldFont, _cfBoldBase;
         private ToolStripMenuItem? _cfMenu, _cfUndoMenu, _cfRedoMenu;
         private ToolStripButton? _cfUndoButton;
-        private readonly ConditionalFormatHistory _cfHistory = new();
+        private ConditionalFormatHistory _cfHistory = new();
         private System.Windows.Forms.Timer? _cfReportTimer;
         private int _cfReportedTimeouts;
         private int _cfFailureShown;

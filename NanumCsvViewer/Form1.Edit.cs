@@ -26,7 +26,7 @@ namespace NanumCsvViewer
 
         private bool HasUnsavedEdits => _doc is not null && !_doc.Edits.IsEmpty && _doc.Edits.IsDirty;
 
-        private bool EditsReady => _doc is not null && _doc.IndexingComplete && !_busy;
+        private bool EditsReady => _doc is not null && _doc.IndexingComplete && !_busy && !ActiveTabReadOnly;
 
         private void BuildEditFeatures()
         {
@@ -219,6 +219,7 @@ namespace NanumCsvViewer
 
         private void UpdateEditTitle()
         {
+            tabStrip.Invalidate(); // 탭의 "저장 안 한 편집" 점
             string suffix = (_sheetEditing ? LT("   ✎ SHEET EDIT MODE", "   ✎ 시트 편집 모드") : "")
                           + (HasUnsavedEdits ? "   *" + LT("edited", "편집됨") : "");
             if (suffix == _editTitleSuffix) return;
@@ -252,9 +253,10 @@ namespace NanumCsvViewer
         }
 
         /// <summary>현재 편집 요약(예: "3 cells, 1 column name, 2 deleted rows").</summary>
-        private string EditSummary()
+        private string EditSummary() => EditSummary(_doc?.Edits);
+
+        private static string EditSummary(CellEdits? e)
         {
-            var e = _doc?.Edits;
             if (e is null) return "";
             var parts = new List<string>();
             if (e.Count > 0) parts.Add(LT($"{e.Count:N0} cell(s)", $"셀 {e.Count:N0}개"));
@@ -271,7 +273,7 @@ namespace NanumCsvViewer
 
         private void EditCurrentCell()
         {
-            if (_doc is null || !_doc.IndexingComplete || _busy || _sheetEditing) return;
+            if (_doc is null || !_doc.IndexingComplete || _busy || _sheetEditing || ActiveTabReadOnly) return;
             if (grid.CurrentCell is not { RowIndex: >= 0, ColumnIndex: >= 0 } cell) return;
             int viewRow = cell.RowIndex, col = cell.ColumnIndex;
             int rowId = _doc.GetRowId(viewRow);
@@ -295,7 +297,7 @@ namespace NanumCsvViewer
         /// <summary>텍스트를 그대로 덮개에 기록(한 단계). 줄바꿈은 원래 값의 스타일(CRLF/LF)에 맞춘다.</summary>
         private void CommitCellEdit(int viewRow, int col, string text)
         {
-            if (_doc is null) return;
+            if (_doc is null || ActiveTabReadOnly) return;
             int rowId = _doc.GetRowId(viewRow);
             if (rowId < 0) return;
             var originalRow = _doc.GetOriginalRow(rowId);
@@ -347,6 +349,12 @@ namespace NanumCsvViewer
             if (on)
             {
                 if (_doc is null || !_doc.IndexingComplete || _busy) return;
+                if (ActiveTabReadOnly)
+                {
+                    statusLabel.Text = LT("This tab is read-only (a view table or query result) — editing is not available.",
+                                          "이 탭은 읽기 전용입니다(뷰 테이블 또는 질의 결과) — 편집할 수 없습니다.");
+                    return;
+                }
                 if (MessageBox.Show(this,
                         LT("Turn on sheet edit mode?\n\nCells can be edited, pasted and cleared, columns renamed and rows inserted or deleted until you turn it off. Edits are kept in memory (Ctrl+Z undoes them) and never written to the original file; save them with Edit ▸ Save Edits As… (a new file).\nValues are stored exactly as typed (001 stays 001).",
                            "시트 편집 모드를 켤까요?\n\n끌 때까지 셀 편집·붙여넣기·지우기, 컬럼 이름 변경, 행 삽입/삭제를 할 수 있습니다. 편집은 메모리에만 쌓이고(Ctrl+Z로 되돌림) 원본 파일에는 쓰이지 않으며, 편집 ▸ 편집 내용 저장…으로 새 파일에 저장합니다.\n값은 입력한 그대로 저장됩니다(001은 001 그대로)."),
@@ -385,6 +393,9 @@ namespace NanumCsvViewer
         // 시트 편집 모드 단축키. 입력란(필터·찾기)이나 셀 인라인 편집 중에는 그 입력란의 자체 동작(텍스트 되돌리기 등)을 쓴다.
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            // 탭 전환: Ctrl+Tab / Ctrl+Shift+Tab (그리드·입력란 어디에 포커스가 있어도)
+            if (keyData == (Keys.Control | Keys.Tab)) { CycleTab(+1); return true; }
+            if (keyData == (Keys.Control | Keys.Shift | Keys.Tab)) { CycleTab(-1); return true; }
             if (_doc is not null && grid.Focused && !grid.IsCurrentCellInEditMode)
             {
                 switch (keyData)
@@ -531,7 +542,8 @@ namespace NanumCsvViewer
             string path = dlg.FileName;
             string fullPath = Path.GetFullPath(path);
             if (string.Equals(fullPath, Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(fullPath, Path.GetFullPath(_currentPath ?? ""), StringComparison.OrdinalIgnoreCase))
+                string.Equals(fullPath, Path.GetFullPath(_currentPath ?? ""), StringComparison.OrdinalIgnoreCase) ||
+                IsOpenInAnyTab(fullPath)) // 다른 탭에서 열려 있는 파일도 덮어쓰지 않는다
             {
                 MessageBox.Show(this,
                     LT("The original file is never overwritten. Choose a different file name.", "원본 파일은 덮어쓰지 않습니다. 다른 파일 이름을 고르세요."),

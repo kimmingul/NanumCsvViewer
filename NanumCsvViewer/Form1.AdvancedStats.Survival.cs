@@ -8,7 +8,7 @@ namespace NanumCsvViewer
 {
     public partial class Form1
     {
-        private readonly List<Form> _survivalPlots = new();
+        private List<Form> _survivalPlots = new();
 
         private async void AdvKaplanMeier()
         {
@@ -149,8 +149,9 @@ namespace NanumCsvViewer
             var plot = new PlotControl { Dock = DockStyle.Fill };
             form.Controls.Add(plot);
             form.Shown += (_, _) => plot.SetModel(model, _palette);
-            _survivalPlots.Add(form);
-            form.FormClosed += (_, _) => _survivalPlots.Remove(form);
+            var ownerList = _survivalPlots; // 이 창이 속한 탭의 목록
+            ownerList.Add(form);
+            form.FormClosed += (_, _) => ownerList.Remove(form);
             form.Show(this);
         }
 

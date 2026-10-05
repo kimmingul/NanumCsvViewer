@@ -4,6 +4,7 @@ using NanumCsvViewer.Agent.Tools;
 using NanumCsvViewer.Csv;
 using NanumCsvViewer.Csv.DataQuality;
 using NanumCsvViewer.Stats;
+using NanumCsvViewer.Workspace;
 
 namespace NanumCsvViewer
 {
@@ -13,7 +14,7 @@ namespace NanumCsvViewer
     // 인자 검증·데이터 정책·승인 카드·결과 JSON은 도구 쪽(WinForms 없음)에 있고, 여기에는 창 상태를 건드리는 일만 둔다.
     // 모든 호출은 UI 스레드. 기존 사용자 경로(필터·정렬·분석·편집·저장)와 같은 필드·헬퍼를 쓰되,
     // 사용자 상호작용 대신 예외(AgentToolException)로 실패를 알리고 호출자의 취소 토큰을 이어 준다.
-    public partial class Form1 : ICsvAgentHost
+    public partial class Form1 : ICsvAgentHost, IWorkspaceAgentHost
     {
         private const int AgentMaxRowsRead = 5000;
 
@@ -81,9 +82,9 @@ namespace NanumCsvViewer
                 if (_currentSheetIndex >= 0 && _currentSheetIndex < sheets.Count) sheet = sheets[_currentSheetIndex];
             }
             string sourcePath = _workbook?.SourcePath ?? _currentPath ?? "";
-            var protectedPaths = new List<string>();
-            if (!string.IsNullOrEmpty(_currentPath)) protectedPaths.Add(_currentPath);
-            if (!string.IsNullOrEmpty(_workbook?.SourcePath) && !protectedPaths.Contains(_workbook!.SourcePath)) protectedPaths.Add(_workbook.SourcePath);
+            var protectedPaths = new List<string>(OpenSourcePaths());
+            if (!string.IsNullOrEmpty(_currentPath) && !protectedPaths.Contains(_currentPath, StringComparer.OrdinalIgnoreCase)) protectedPaths.Add(_currentPath);
+            if (!string.IsNullOrEmpty(_workbook?.SourcePath) && !protectedPaths.Contains(_workbook!.SourcePath, StringComparer.OrdinalIgnoreCase)) protectedPaths.Add(_workbook.SourcePath);
 
             AgentCursor cursor = new(null, null);
             if (grid.CurrentCell is { RowIndex: >= 0, ColumnIndex: >= 0 } cell && cell.RowIndex < doc.DisplayRowCount)
@@ -111,7 +112,8 @@ namespace NanumCsvViewer
                 Edits: AgentEditStateNow(),
                 Cursor: cursor,
                 Directory: string.IsNullOrEmpty(sourcePath) ? null : Path.GetDirectoryName(sourcePath),
-                ProtectedPaths: protectedPaths);
+                ProtectedPaths: protectedPaths,
+                TabName: _t?.DisplayName);
         }
 
         // ------------------------------------------------------------------ 읽기
@@ -528,6 +530,7 @@ namespace NanumCsvViewer
         AgentEditResult ICsvAgentHost.ApplyEdits(IReadOnlyList<AgentCellEdit> edits, string description)
         {
             AgentRequireReady();
+            AgentRequireWritableTab();
             var doc = _doc!;
             if (grid.IsCurrentCellInEditMode)
                 throw new AgentToolException("The user is typing in a cell right now. Retry after they finish.");
@@ -588,7 +591,7 @@ namespace NanumCsvViewer
             if (grid.IsCurrentCellInEditMode) throw new AgentToolException("The user is typing in a cell right now. Retry after they finish.");
 
             string sourcePath = _workbook?.SourcePath ?? _currentPath ?? "data";
-            if (AgentSavePolicy.SameFile(fullPath, sourcePath) || AgentSavePolicy.SameFile(fullPath, _currentPath ?? ""))
+            if (OpenSourcePaths().Any(p => AgentSavePolicy.SameFile(fullPath, p)) || AgentSavePolicy.SameFile(fullPath, sourcePath) || AgentSavePolicy.SameFile(fullPath, _currentPath ?? ""))
                 throw new AgentToolException("Refused: that is the source file. Edits are never written over the original.");
 
             bool asXlsx = string.Equals(Path.GetExtension(fullPath), ".xlsx", StringComparison.OrdinalIgnoreCase);
@@ -627,8 +630,16 @@ namespace NanumCsvViewer
 
         private void AgentRequireNotTyping()
         {
+            AgentRequireWritableTab();
             if (grid.IsCurrentCellInEditMode)
                 throw new AgentToolException("The user is typing in a cell right now. Retry after they finish.");
+        }
+
+        /// <summary>읽기 전용 탭(뷰·질의 결과)이면 편집 거부.</summary>
+        private void AgentRequireWritableTab()
+        {
+            try { RequireEditableTab(); }
+            catch (InvalidOperationException ex) { throw new AgentToolException(ex.Message); }
         }
 
         async Task<AgentRowNumbers> ICsvAgentHost.GetViewRowNumbersAsync(int cap, CancellationToken cancellation)
@@ -768,6 +779,92 @@ namespace NanumCsvViewer
         {
             AgentAssertUi();
             return _agentController?.PostImage(fullPath, caption) ?? false;
+        }
+
+        // ------------------------------------------------------------------ 작업 공간 (ws.* 도구)
+        //
+        // 실제 일은 WorkspaceUI의 Form1 메서드(Workspace·AddSourcesAsync·OpenRelationTabAsync…)가 하고, 여기서는 도구 경계(IWorkspaceAgentHost)에 맞춰
+        // 모델용 탭 요약과 예외 변환만 한다.
+
+        DataWorkspace? IWorkspaceAgentHost.Workspace { get { AgentAssertUi(); return Workspace; } }
+
+        string? IWorkspaceAgentHost.WorkspaceUnavailableReason => WorkspaceUnavailableReason;
+
+        async Task IWorkspaceAgentHost.EnsureTabsRegisteredAsync(CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (Workspace is null) return;
+            foreach (var tab in Tabs.Where(t => t.Kind is TabKind.File or TabKind.Sheet).ToList())
+            {
+                if (tab.IsClosed) continue;
+                await RegisterTabAsync(tab, ct);
+            }
+        }
+
+        private AgentTabInfo AgentTabSummary(DocumentTab tab)
+        {
+            string? relation = tab.ViewName;
+            if (relation is null && tab.Kind is TabKind.File or TabKind.Sheet && Workspace is { } ws)
+            {
+                string full;
+                try { full = System.IO.Path.GetFullPath(tab.Path); } catch (Exception) { full = tab.Path; }
+                relation = ws.Sources.FirstOrDefault(s => string.Equals(s.Path, full, StringComparison.OrdinalIgnoreCase))?.Name;
+            }
+            return new AgentTabInfo(tab.DisplayName, tab.Kind.ToString().ToLowerInvariant(), tab.IsActive, tab.IsReadOnly, tab.HasUnsavedEdits, relation);
+        }
+
+        IReadOnlyList<AgentTabInfo> IWorkspaceAgentHost.GetTabs()
+        {
+            AgentAssertUi();
+            return Tabs.Select(AgentTabSummary).ToList();
+        }
+
+        IReadOnlyList<string> IWorkspaceAgentHost.OpenSourcePaths()
+        {
+            AgentAssertUi();
+            return OpenSourcePaths();
+        }
+
+        async Task<IReadOnlyList<WorkspaceSource>> IWorkspaceAgentHost.AddSourcesAsync(IReadOnlyList<string> paths, CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            return await AddSourcesAsync(paths, ct);
+        }
+
+        async Task<AgentTabInfo?> IWorkspaceAgentHost.OpenRelationAsync(IWorkspaceRelation relation, CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            var tab = await OpenRelationTabAsync(relation, ct);
+            return tab is null || tab.IsClosed ? null : AgentTabSummary(tab);
+        }
+
+        async Task<AgentTabInfo> IWorkspaceAgentHost.OpenQueryResultAsync(string sql, string title, CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            return AgentTabSummary(await OpenQueryResultTabAsync(sql, title, ct));
+        }
+
+        async Task<string> IWorkspaceAgentHost.SaveRelationAsAsync(IWorkspaceRelation relation, string path, CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            return await SaveRelationAsAsync(relation, path, ct);
+        }
+
+        async Task<AgentTabInfo?> IWorkspaceAgentHost.SwitchTabAsync(string name, CancellationToken ct)
+        {
+            AgentAssertUi();
+            if (_closing || IsDisposed) throw new AgentToolException("The window is closing.");
+            var tab = Tabs.FirstOrDefault(t => string.Equals(t.DisplayName, name, StringComparison.OrdinalIgnoreCase))
+                      ?? Tabs.FirstOrDefault(t => string.Equals(t.Title, name, StringComparison.OrdinalIgnoreCase))
+                      ?? Tabs.FirstOrDefault(t => t.ViewName is not null && string.Equals(t.ViewName, name, StringComparison.OrdinalIgnoreCase))
+                      ?? Tabs.FirstOrDefault(t => string.Equals(AgentTabSummary(t).RelationName, name, StringComparison.OrdinalIgnoreCase));
+            if (tab is null) return null;
+            await ActivateTabAsync(tab);
+            return tab.IsClosed ? null : AgentTabSummary(tab);
         }
     }
 }

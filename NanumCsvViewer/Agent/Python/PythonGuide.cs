@@ -12,9 +12,9 @@ namespace NanumCsvViewer.Agent.Python
         Unavailable,
     }
 
-    /// <summary>가이드의 "Local Python analysis" 절을 만드는 입력.</summary>
+    /// <summary>가이드의 "Local Python analysis" 절을 만드는 입력. <paramref name="Workspace"/>는 omp를 시작할 때의 열린 탭·작업 공간 파일(스냅숏).</summary>
     internal sealed record PythonGuideContext(
-        string? DataFile,
+        AgentWorkspaceContext Workspace,
         string OutputFolder,
         PythonInterpreter? Interpreter,
         IReadOnlyList<string> Packages,
@@ -27,6 +27,34 @@ namespace NanumCsvViewer.Agent.Python
     /// </summary>
     internal static class PythonGuide
     {
+        /// <summary>작업 공간 파일과 열린 탭(이름·경로·활성 표시)을 나열한다. 시작 시점의 스냅숏이라 낡을 수 있음을 알린다.</summary>
+        private static void AppendTables(StringBuilder sb, AgentWorkspaceContext w)
+        {
+            sb.AppendLine("- **Workspace file**: " + (string.IsNullOrWhiteSpace(w.WorkspaceFile) ? "(not saved yet)" : "`" + w.WorkspaceFile + "`"));
+            if (w.Tables.Count == 0)
+            {
+                sb.AppendLine("- **Open tables** (in the app): (none open)");
+            }
+            else
+            {
+                sb.AppendLine("- **Open tables** (in the app; a snapshot from when you were started: the user opens, closes and switches tabs without restarting you, " +
+                              "so ask `csv.info` for the active tab right now and use `ws.list_tables` when it exists). " +
+                              "Never modify or overwrite these files, and do not read them directly to get around the data policy:");
+                foreach (var t in w.Tables)
+                {
+                    string kind = t.Kind switch
+                    {
+                        AgentTableEntry.KindView => "view table (computed by the app; no file of its own)",
+                        AgentTableEntry.KindResult => "query result (temporary)",
+                        AgentTableEntry.KindSheet => "workbook sheet",
+                        _ => "file",
+                    };
+                    string where = t.IsDataFile ? " — `" + t.Path + "`" : "";
+                    sb.AppendLine($"  - `{t.Name}` ({kind}){where}{(t.Active ? " — **active tab**" : "")}");
+                }
+            }
+        }
+
         public static string Build(PythonGuideContext c)
         {
             var sb = new StringBuilder();
@@ -36,12 +64,14 @@ namespace NanumCsvViewer.Agent.Python
                           "It runs on the user's PC in the analysis folder below. Use it for what the app lacks (custom models, plots, tests, reshaping); " +
                           "use `csv.run_analysis` and `csv.column_stats` first when they already answer the question.");
             sb.AppendLine();
-            sb.AppendLine("- **Data file** (open in the app): " + (string.IsNullOrEmpty(c.DataFile) ? "(none open)" : "`" + c.DataFile + "`") +
-                          ". Never modify or overwrite it, and do not read it directly to get around the data policy.");
+            AppendTables(sb, c.Workspace);
             sb.AppendLine($"- **Analysis folder** (your working directory; Python runs here too): `{c.OutputFolder}`. " +
+                          "It stays the same while the user switches tabs or sheets and for the whole workspace. " +
                           "Write every script, table, figure and report here (relative paths are fine). Do not write anywhere else.");
-            sb.AppendLine("- **Get the data**: call `csv.export_view`. It writes the *current view* (filter, sort, hidden columns and pending edits applied) " +
-                          "as a CSV (+ schema) under the analysis folder and returns the path; then load it with pandas in `eval`.");
+            sb.AppendLine("- **Get the data**: call `csv.export_view` while the table's tab is active (`csv.info` tells which one is). It writes the *current view* " +
+                          "(filter, sort, hidden columns and pending edits applied) as `data\\<table name>.csv` (+ `.schema.json`) under the analysis folder and returns the path; " +
+                          "then load it with pandas in `eval`. Export each table you need under its own name; to combine tables, prefer the app's workspace/SQL tools " +
+                          "when they exist, otherwise join the exported files in pandas and say how.");
             if (c.Interpreter != null)
             {
                 string pk = c.Packages.Count > 0 ? string.Join(", ", c.Packages) : "none of pandas/numpy/matplotlib/scipy/statsmodels/scikit-learn";

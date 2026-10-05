@@ -174,7 +174,7 @@ namespace NanumCsvViewer.Agent
             int launch = ++_launchId;
             if (!string.IsNullOrEmpty(workingDirectory)) _baseDir = workingDirectory;
             _workDir = _options.AllowLocalPython
-                ? AgentWorkspace.OutputFolderFor(_dataFile)
+                ? AgentWorkspace.StableOutputFolderFor(_workspaceFile, _firstDataFile)
                 : Directory.Exists(_baseDir) ? _baseDir : Environment.CurrentDirectory;
             _launchedDesired = DesiredWorkDir();
             _evalApproval.Reset();

@@ -33,6 +33,18 @@ namespace NanumCsvViewer.Agent.Tools
         public const string SaveEditsAs = "csv.save_edits_as";
         public const string RegexCount = "csv.regex_count";
         public const string RegexReplace = "csv.regex_replace";
+        public const string WsListTables = "ws.list_tables";
+        public const string WsDescribe = "ws.describe";
+        public const string WsAddSource = "ws.add_source";
+        public const string WsQuery = "ws.query";
+        public const string WsCheckJoin = "ws.check_join";
+        public const string WsCreateView = "ws.create_view";
+        public const string WsAppend = "ws.append";
+        public const string WsCompare = "ws.compare";
+        public const string WsGroup = "ws.group";
+        public const string WsMaterialize = "ws.materialize";
+        public const string WsOpen = "ws.open";
+        public const string WsSwitch = "ws.switch";
 
         private const string NoArgs = """{"type":"object","properties":{},"additionalProperties":false}""";
 
@@ -285,6 +297,135 @@ namespace NanumCsvViewer.Agent.Tools
                 "path":{"type":"string","description":"Target path; relative paths resolve against the source file's folder."},
                 "overwrite":{"type":"boolean","description":"Allow replacing an existing file other than the source (default false)."}
                 },"required":["path"],"additionalProperties":false}
+                """),
+
+            // ---- 작업 공간(ws.*): 여러 파일·표·뷰. SQL은 DuckDB, 한 문장 SELECT만.
+
+            new HostToolDefinition(WsListTables,
+                "List the workspace: sources (CSV = table; Excel/SAS/SPSS/SQLite = schema with tables), views, open tabs (and which is active), columns with types, row counts, stale flags. Start here when several files are involved.",
+                """
+                {"type":"object","properties":{
+                "count_rows":{"type":"boolean","description":"Count rows of tables (skipped for very large files). Default true."}
+                },"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsDescribe,
+                "Describe one table or view: columns, types, row count, type-cast failures (values that did not convert), and per-column distinct/null counts with join-key candidates. Never returns raw values under SummaryOnly.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string","description":"Table or view name as shown by ws.list_tables (DB tables: schema.table)."},
+                "columns":{"type":"array","items":{"type":"string"},"maxItems":40,"description":"Columns for the distinct/null profile. Default: first 30."}
+                },"required":["name"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsAddSource,
+                "Add data files (.csv .tsv .txt .xlsx .xlsm .xls .sas7bdat .sav .db .sqlite .sqlite3) to the workspace so they can be queried and joined. Read-only; files are never modified. Relative paths resolve against the open file's folder.",
+                """
+                {"type":"object","properties":{
+                "paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":20}
+                },"required":["paths"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsQuery,
+                "Run ONE DuckDB SELECT over workspace tables/views (quote Korean/odd names with \"…\"; ids are VARCHAR — CAST to compare numerically; typed table <t> and raw VARCHAR table <t>__raw exist). Returns row count + column names/types + numeric aggregates; raw rows only if the data policy allows (may need approval). open_tab:true shows the full result to the user in a Result tab.",
+                """
+                {"type":"object","properties":{
+                "sql":{"type":"string"},
+                "max_rows":{"type":"integer","minimum":1,"description":"Rows to return when the policy allows (capped by policy). Default 20."},
+                "open_tab":{"type":"boolean","description":"Open the full result as a read-only Result tab for the user (default false)."},
+                "title":{"type":"string","description":"Result tab title."}
+                },"required":["sql"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsCheckJoin,
+                "Diagnose a join BEFORE creating it: matched/unmatched keys, null keys, duplicate keys, cardinality, expected result rows and growth factor. Numbers only.",
+                """
+                {"type":"object","properties":{
+                "left":{"type":"string"},"right":{"type":"string"},
+                "keys":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"left":{"type":"string"},"right":{"type":"string"}},"required":["left","right"],"additionalProperties":false}},
+                "kind":{"type":"string","enum":["inner","left","right","full"],"description":"Default inner."}
+                },"required":["left","right","keys"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsCreateView,
+                "Create (or with replace:true redefine) a named view from one SELECT. The user approves in 'ask' mode (auto in write/yolo). The view is a derived table; originals are untouched. open:true computes it and opens it as a read-only tab, after which csv.* tools act on it.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string","description":"Letters, digits, underscore (Korean letters ok)."},
+                "sql":{"type":"string"},
+                "include_unsaved_edits":{"type":"boolean","description":"Compute from the user's unsaved edits instead of the saved files (default false)."},
+                "open":{"type":"boolean","description":"Compute and open as a tab (default false)."},
+                "replace":{"type":"boolean","description":"Redefine an existing view of that name."}
+                },"required":["name","sql"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsAppend,
+                "Stack tables with the same columns (UNION ALL) into a new view; reports type conflicts and unmatched columns. Optional source column naming the table each row came from.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string"},
+                "tables":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":10},
+                "mode":{"type":"string","enum":["by_name","by_position"],"description":"Default by_name."},
+                "source_column":{"type":"string","description":"Add a column with this name holding the source table."},
+                "include_unsaved_edits":{"type":"boolean"},
+                "open":{"type":"boolean"},
+                "replace":{"type":"boolean"}
+                },"required":["name","tables"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsCompare,
+                "Compare two tables by key into a new view: added / removed / changed (per column old/new) / duplicate_key rows. Also returns the counts.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string"},
+                "left":{"type":"string","description":"Old / base table."},
+                "right":{"type":"string","description":"New table."},
+                "keys":{"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","properties":{"left":{"type":"string"},"right":{"type":"string"}},"required":["left","right"],"additionalProperties":false}},
+                "columns":{"type":"array","items":{"type":"string"},"maxItems":60,"description":"Same-named columns to compare. Default: all same-named non-key columns."},
+                "ignore_case":{"type":"boolean"},"trim_whitespace":{"type":"boolean"},
+                "include_unchanged":{"type":"boolean"},
+                "long":{"type":"boolean","description":"One row per changed cell instead of one per row."},
+                "open":{"type":"boolean"},
+                "replace":{"type":"boolean"}
+                },"required":["name","left","right","keys"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsGroup,
+                "Group a table and aggregate into a new view (count, sum, avg, min, max, count_distinct, median).",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string"},
+                "table":{"type":"string"},
+                "group_by":{"type":"array","items":{"type":"string"},"maxItems":10},
+                "aggregates":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"object","properties":{
+                  "function":{"type":"string","enum":["count","sum","avg","min","max","count_distinct","median"]},
+                  "column":{"type":"string","description":"Omit for count(*)."},
+                  "alias":{"type":"string"}},"required":["function"],"additionalProperties":false}},
+                "open":{"type":"boolean"},
+                "replace":{"type":"boolean"}
+                },"required":["name","table","aggregates"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsMaterialize,
+                "Save a table or view to a NEW .csv/.tsv/.txt/.xlsx file after the user approves. Never overwrites an open or registered source file.",
+                """
+                {"type":"object","properties":{
+                "name":{"type":"string"},
+                "path":{"type":"string","description":"Target path; relative paths resolve against the analysis output folder / source folder."},
+                "overwrite":{"type":"boolean"}
+                },"required":["name","path"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsOpen,
+                "Open a table (its file tab) or view (computed, read-only tab) and make it the active tab; csv.* tools then act on it.",
+                """
+                {"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}
+                """),
+
+            new HostToolDefinition(WsSwitch,
+                "Activate an already open tab by its name (see ws.list_tables tabs); csv.* tools then act on it.",
+                """
+                {"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}
                 """),
         };
     }

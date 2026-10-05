@@ -477,6 +477,8 @@ namespace NanumCsvViewer.Tests
                 "csv.insert_rows", "csv.delete_rows", "csv.add_column", "csv.move_column", "csv.delete_column",
                 "csv.format_add", "csv.format_list", "csv.format_remove", "csv.format_clear", "csv.format_undo",
                 "csv.export_view", "csv.show_markdown", "csv.show_image",
+                "ws.list_tables", "ws.describe", "ws.add_source", "ws.query", "ws.check_join", "ws.create_view", "ws.append", "ws.compare", "ws.group",
+                "ws.materialize", "ws.open", "ws.switch",
             };
             Assert.Equal(expected.OrderBy(x => x), defs.Select(d => d.Name).OrderBy(x => x));
 

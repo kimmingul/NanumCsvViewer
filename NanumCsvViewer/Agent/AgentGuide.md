@@ -145,6 +145,55 @@ Rules for Python work:
 - `csv.export_view` is a snapshot. After the user edits, filters or you edit again, export again to analyse the new
   state.
 
+## Several files: the workspace (`ws.*` tools)
+
+When the question involves more than one file (join, stack, compare, per-group totals), use the **workspace**: every
+open CSV is a table, every Excel/SAS/SPSS/SQLite file is a schema whose sheets/tables are tables, and **views** are
+named SELECT queries over them (DuckDB SQL). `csv.*` tools always act on the **active tab** only.
+
+Workflow:
+
+1. `ws.list_tables`: tables, views, columns with types, row counts, open tabs and which one is active. Use
+   `ws.add_source` to bring in more files (paths relative to the open file's folder are fine; data files only,
+   read-only). `ws.describe` shows one table: types, **cast failures** (values that did not convert to the detected
+   type), distinct/null counts and key candidates.
+2. Joining? Run `ws.check_join` **before** creating anything. It reports matched/unmatched keys, null/duplicate keys,
+   cardinality and the expected result size. If it warns (no match, many-to-many, row growth), tell the user and fix the
+   keys or deduplicate first. Never hide these numbers.
+3. `ws.create_view` (SQL), or `ws.append` (stack tables), `ws.compare` (added/removed/changed by key), `ws.group`
+   (grouped aggregates). Each creates a **view** (a derived table; originals are never changed). It asks for approval
+   unless the approval mode is write/yolo. `open:true` computes it and opens it as a read-only tab.
+4. `ws.open` / `ws.switch` make a table, view or tab active. Then analyse with the normal `csv.*` tools (filters,
+   `csv.column_stats`, `csv.run_analysis`, ...). Views are read-only: edits are refused there; do edits on the source
+   table's tab.
+5. `ws.materialize` saves a table/view to a **new** file (approval required; never over an open or registered source).
+
+SQL rules:
+
+- Only **one SELECT statement**. No CREATE/INSERT/COPY/DROP; use `ws.create_view` for derived tables.
+- **Quote identifiers with `"…"`**: always for Korean, spaced or digit-leading names (`SELECT "이름", "점수" FROM "설문_명단"`).
+  DB tables are `"schema"."table"` (`"설문"."명단"`). Names of views and tables are in `ws.list_tables` (`sql` field).
+- **Typed vs raw**: a table's columns are typed from what the app detected (integers, decimals, dates, booleans) and
+  values that do not convert become NULL (see the cast failures in `ws.describe`). `"<table>__raw"` has every column as
+  the original text. **Identifier / code columns are VARCHAR** (leading zeros are kept): to compare or sort them
+  numerically use `CAST("id" AS BIGINT)` or `TRY_CAST(...)`, and join id columns of different types with a cast on both
+  sides. Empty cells are NULL.
+- Dates: compare typed date columns directly; for text dates use `TRY_CAST("d" AS DATE)`.
+
+`ws.query` and the data policy:
+
+- **Summary only**: you get the row count, column names/types, non-null and distinct counts, and min/max/mean of
+  numeric columns, never rows. Use aggregates in SQL (`count`, `avg`, `GROUP BY`) to answer questions.
+- **Rows with approval**: rows (up to the cap) after the user approves; if the user declines you get aggregates only.
+- **Rows allowed**: rows up to the cap. Still select only what you need and add `LIMIT`.
+- `open_tab:true` shows the **whole** result to the user in a Result tab whatever the policy is (you still only see what
+  the policy allows); the result tab becomes active.
+- `ws.describe` omits failing example values under Summary only. Join/compare diagnostics are numbers only.
+
+Report honestly what the workspace tells you: row growth after a join, keys that do not match, cast failures,
+truncated results. A view reflects the **saved** files unless created with `include_unsaved_edits:true`; a view marked
+`stale` in `ws.list_tables` is recomputed when opened.
+
 ## Other tools
 
 You also have omp's general tools (`read`, `write`, `bash`, ...) in the working folder. Use them only when the

@@ -16,11 +16,11 @@ namespace NanumCsvViewer
         private long _lastIndexMs;
 
         // 수동 지정 컬럼 타입(이슈 #12). 추론·선언 힌트보다 우선. 문서/시트 전환(ResetView) 시 초기화.
-        private readonly Dictionary<int, ColumnValueType> _manualTypeOverrides = new();
+        private Dictionary<int, ColumnValueType> _manualTypeOverrides = new();
         private ContextMenuStrip? _typeMenu; // 헤더 우클릭 메뉴(컬럼마다 새로 구성)
 
         // 시각화(이슈 #19): 모델리스 차트 빌더 창들. 문서/시트 전환 시 일괄 닫음(뷰 스냅샷이 낡기 때문).
-        private readonly List<ChartForm> _chartForms = new();
+        private List<ChartForm> _chartForms = new();
         private ToolStripMenuItem? _vizMenu;
 
         // 그리드/인스펙터 복사 (그리드 향상)
@@ -39,11 +39,11 @@ namespace NanumCsvViewer
         private int _currentSheetIndex;
         private bool _reimporting;        // 라벨 모드 재임포트 진행 중(재진입 직렬화)
         private bool _syncingFieldLabels; // 체크 상태를 코드로 되돌릴 때 CheckedChanged 억제
-        private readonly HashSet<int> _hiddenColumns = new();
+        private HashSet<int> _hiddenColumns = new();
         private readonly List<string> _tempImportFiles = new();
 
         // 구조화 컬럼 필터(헤더 깔때기 → 범주/날짜 필터)
-        private readonly ColumnFilterState _columnFilters = new();
+        private ColumnFilterState _columnFilters = new();
         // 활성 조건 결합 방식: false = 모두 만족(AND), true = 하나라도 만족(OR).
         private bool _filterMatchAny;
 
@@ -302,6 +302,7 @@ namespace NanumCsvViewer
             _qualityPanel?.Relocalize(); // 1회 생성·캐시되는 패널은 언어 전환 시 수동 재현지화(이슈 #26)
             LocalizeEditButtons();
             LocalizeAgentUi();
+            LocalizeWorkspaceUi();
         }
 
         // 보기 메뉴 항목과 툴바 버튼을 함께 토글하고, 설정 저장 + 헤더 다시 그림.
@@ -351,10 +352,10 @@ namespace NanumCsvViewer
         // ---------------------------------------------------------------- 컬럼 타입 태그 (A)
 
         // 타입 추론·수동 타입 검증용 표본(최대 10k행) 수집.
-        private List<string[]> CollectTypeSampleRows()
+        private List<string[]> CollectTypeSampleRows() => _doc is null ? new List<string[]>() : CollectTypeSampleRows(_doc);
+
+        private static List<string[]> CollectTypeSampleRows(VirtualCsvDocument doc)
         {
-            var doc = _doc;
-            if (doc is null) return new List<string[]>();
             const int sampleCap = 10_000;
             int n = Math.Min(sampleCap, doc.DataRowsAvailable);
             var sample = new List<string[]>(n);
@@ -369,44 +370,61 @@ namespace NanumCsvViewer
         private void ComputeColumnTypeTags()
         {
             if (_doc is null) { _columnSummaries = Array.Empty<ColumnSummary>(); return; }
-            var sample = CollectTypeSampleRows();
+            _columnSummaries = ComputeColumnSummaries(_doc, _workbook, _currentSheetIndex, _manualTypeOverrides, SourceColumnOf);
+            ApplyColumnTooltips();
 
-            var report = ColumnStatisticsBuilder.Summarize(_doc.Header, sample);
-            _columnSummaries = report.Columns.ToArray();
+            // 타입 배지가 생겼으니 헤더를 다시 그린다.
+            grid.Invalidate();
+        }
+
+        /// <summary>
+        /// 문서의 컬럼 요약(추론 타입 포함). 화면 상태에 의존하지 않아 백그라운드 탭도 계산할 수 있다.
+        /// sourceOf = 표시 컬럼 → 파일 컬럼 번호(컬럼 이동·삭제·삽입이 없으면 항등).
+        /// </summary>
+        private static ColumnSummary[] ComputeColumnSummaries(VirtualCsvDocument doc, Import.WorkbookSession? wb, int sheetIndex,
+            IReadOnlyDictionary<int, ColumnValueType> manualOverrides, Func<int, int> sourceOf)
+        {
+            var sample = CollectTypeSampleRows(doc);
+            var summaries = ColumnStatisticsBuilder.Summarize(doc.Header, sample).Columns.ToArray();
 
             // SAS/SPSS가 파일에 명시한 선언 타입이 있으면 추론을 오버라이드(지정된 타입으로 매칭).
-            var hints = _workbook?.ColumnHints(_currentSheetIndex);
+            var hints = wb?.ColumnHints(sheetIndex);
             if (hints is not null)
             {
-                for (int c = 0; c < _columnSummaries.Length; c++)
+                for (int c = 0; c < summaries.Length; c++)
                 {
-                    int source = SourceColumnOf(c); // 컬럼을 옮기거나 삭제·삽입했어도 파일의 그 컬럼의 선언 타입을 쓴다
+                    int source = sourceOf(c); // 컬럼을 옮기거나 삭제·삽입했어도 파일의 그 컬럼의 선언 타입을 쓴다
                     if (source < 0 || source >= hints.Count) continue;
                     var hint = hints[source];
                     if (hint is null) continue;
-                    _columnSummaries[c] = _columnSummaries[c] with
+                    summaries[c] = summaries[c] with
                     {
                         InferredType = hint.Type,
                         CurrencySymbol = hint.CurrencySymbol,
                         PercentIsFraction = hint.PercentIsFraction,
                         // 범주/순서형 등 비숫자로 재지정되면 코드의 평균 등 무의미한 수치 통계를 제거.
-                        Numeric = hint.Type.IsNumeric() ? _columnSummaries[c].Numeric : null,
+                        Numeric = hint.Type.IsNumeric() ? summaries[c].Numeric : null,
                     };
                 }
             }
 
             // 사용자가 수동 지정한 타입(이슈 #12)은 추론·선언 힌트 모두보다 우선.
-            foreach (var kv in _manualTypeOverrides)
+            foreach (var kv in manualOverrides)
             {
                 int c = kv.Key;
-                if (c < 0 || c >= _columnSummaries.Length) continue;
-                _columnSummaries[c] = _columnSummaries[c] with
+                if (c < 0 || c >= summaries.Length) continue;
+                summaries[c] = summaries[c] with
                 {
                     InferredType = kv.Value,
-                    Numeric = kv.Value.IsNumeric() ? _columnSummaries[c].Numeric : null,
+                    Numeric = kv.Value.IsNumeric() ? summaries[c].Numeric : null,
                 };
             }
+            return summaries;
+        }
 
+        // 헤더 툴팁(타입·고유값·빈값). 탭을 바꿔 컬럼을 다시 만든 뒤에도 쓴다.
+        private void ApplyColumnTooltips()
+        {
             for (int c = 0; c < grid.Columns.Count && c < _columnSummaries.Length; c++)
             {
                 var s = _columnSummaries[c];
@@ -415,9 +433,6 @@ namespace NanumCsvViewer
                     $"Type: {s.InferredType.DisplayName()}{manual} · unique {s.UniqueCount:N0} · nulls {s.NullCount:N0}",
                     $"타입: {s.InferredType.DisplayName()}{manual} · 고유값 {s.UniqueCount:N0} · 빈값 {s.NullCount:N0}");
             }
-
-            // 타입 배지가 생겼으니 헤더를 다시 그린다.
-            grid.Invalidate();
         }
 
         // ---------------------------------------------------------------- 컬럼 타입 수동 변경 (이슈 #12)
@@ -591,7 +606,7 @@ namespace NanumCsvViewer
             return path;
         }
 
-        private static string TypeAbbrev(ColumnValueType type) => type switch
+        internal static string TypeAbbrev(ColumnValueType type) => type switch
         {
             ColumnValueType.Integer => "INT",
             ColumnValueType.Float => "FLT",
@@ -610,7 +625,7 @@ namespace NanumCsvViewer
             _ => "STR"
         };
 
-        private static Color TypeColor(ColumnValueType type) => type switch
+        internal static Color TypeColor(ColumnValueType type) => type switch
         {
             ColumnValueType.Integer => Color.FromArgb(46, 111, 176),     // 파랑
             ColumnValueType.Float => Color.FromArgb(27, 158, 119),       // 청록
@@ -1267,7 +1282,10 @@ namespace NanumCsvViewer
         }
 
         // 시트 전환: 현재 문서를 닫고 해당 시트의 임시 CSV를 연다.
-        private async void SwitchSheet(int index)
+        private async void SwitchSheet(int index) => await SwitchSheetAsync(index);
+
+        // 같은 일을 기다릴 수 있게 한 형태(작업 공간 탐색기가 "이 시트 열기"에 쓴다).
+        internal async Task SwitchSheetAsync(int index)
         {
             if (_workbook is null || _busy) return;
             if (index < 0 || index >= _workbook.SheetNames.Count) return;
@@ -2369,8 +2387,9 @@ namespace NanumCsvViewer
             ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx);
 
             var f = new ChartForm(ctx, kind, presetCols) { Owner = this };
-            _chartForms.Add(f);
-            f.FormClosed += (_, _) => _chartForms.Remove(f);
+            var ownerList = _chartForms; // 이 차트가 속한 탭의 목록(탭을 바꾼 뒤 닫혀도 그 목록에서 빠지게)
+            ownerList.Add(f);
+            f.FormClosed += (_, _) => ownerList.Remove(f);
             f.Show(this);
         }
 
@@ -2447,7 +2466,8 @@ namespace NanumCsvViewer
             {
                 if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
                 {
-                    await OpenFileAsync(files[0]);
+                    var existing = files.Where(File.Exists).ToArray();
+                    await OpenFilesAsync(existing.Length > 0 ? existing : files);
                 }
                 else if (e.Data.GetData(DataFormats.Text) is string text && text.Length > 0)
                 {
@@ -2464,7 +2484,8 @@ namespace NanumCsvViewer
                 if (Clipboard.ContainsFileDropList())
                 {
                     var files = Clipboard.GetFileDropList();
-                    if (files.Count > 0 && files[0] is string f) { await OpenFileAsync(f); return; }
+                    var paths = files.Cast<string?>().Where(p => p is not null && File.Exists(p)).Select(p => p!).ToArray();
+                    if (paths.Length > 0) { await OpenFilesAsync(paths); return; }
                 }
                 if (Clipboard.ContainsText())
                 {
@@ -2523,7 +2544,7 @@ namespace NanumCsvViewer
         private ToolStripMenuItem? _qualityMenu, _qualityPanelMenu;
         private QualityPanel? _qualityPanel;
         private QualityReport? _qualityReport;                       // 마지막 프로파일(스냅샷·보고서 기반)
-        private readonly List<QualityFinding> _qualityFindings = new(); // 표시 대상: 프로파일 + 키 + 규칙
+        private List<QualityFinding> _qualityFindings = new(); // 표시 대상: 프로파일 + 키 + 규칙
         private VirtualCsvDocument? _qualityFindingsDoc;             // 발견이 캡처한 문서(프로버넌스 가드)
         private List<QualityRule> _qualityRules = new();             // 세션 규칙(문서 전환에도 유지)
         private ConformanceProfile? _conformanceProfile;             // 마지막으로 불러온 적합성 프로파일

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using NanumCsvViewer.Agent;
+using NanumCsvViewer.Agent.Tools;
 
 namespace NanumCsvViewer
 {
@@ -50,6 +51,7 @@ namespace NanumCsvViewer
                 if (!_syncingAgentToggle) SetAgentPanelVisible(_agentButton.Checked);
             };
             toolStrip1.Items.Add(_agentButton);
+            BuildWorkspaceFileFeatures();   // File ▸ 작업 공간 열기·저장·최근 목록 (BuildFeatureMenus가 에이전트와 함께 한 번 호출한다)
             LocalizeAgentUi();
         }
 
@@ -138,7 +140,7 @@ namespace NanumCsvViewer
             _agentController.StatusChanged += _ => { };
             _agentController.ApprovalModeChanged += mode => SaveAgentApprovalMode(mode);
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
-            _agentController.SetDataFile(_currentPath);
+            _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
             _ = _agentController.StartAsync(AgentWorkingDirectory());
             PostAgentContext();
         }
@@ -151,17 +153,43 @@ namespace NanumCsvViewer
             return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         }
 
-        // LoadDocument·편집 변경 시: 채팅 입력창 위 파일 칩.
+        /// <summary>에이전트에 알릴 작업 공간 상태: 작업 공간 파일(저장·연 적이 있으면)과 열린 탭 전부(왼쪽→오른쪽)·활성 탭.</summary>
+        private AgentWorkspaceContext BuildAgentWorkspaceContext()
+        {
+            var entries = new List<AgentTableEntry>(_tabs.Count);
+            foreach (var tab in _tabs)
+            {
+                string kind = tab.Kind switch
+                {
+                    TabKind.Sheet => AgentTableEntry.KindSheet,
+                    TabKind.View => AgentTableEntry.KindView,
+                    TabKind.Result => AgentTableEntry.KindResult,
+                    _ => AgentTableEntry.KindFile,
+                };
+                bool hasFile = tab.Kind is TabKind.File or TabKind.Sheet;
+                entries.Add(new AgentTableEntry(tab.DisplayName, hasFile ? tab.Path : null, kind, ReferenceEquals(tab, _t)));
+            }
+            return new AgentWorkspaceContext(WorkspaceFilePath, entries);
+        }
+
+        /// <summary>작업 공간 단위의 고정 분석 폴더(만들지 않음). 로컬 Python이 꺼져 있거나 에이전트가 아직 없으면 null.</summary>
+        string? ICsvAgentHost.AnalysisFolder => _agentController?.AnalysisFolder;
+
+        // 작업 공간 상태(작업 공간 파일·열린 탭 목록)를 컨트롤러에 알리고 채팅 입력창 위 파일 칩(활성 탭 이름)을 갱신한다.
+        // LoadDocument(시트 전환 포함)·탭 전환·탭 열기/닫기·작업 공간 저장/열기·편집 변경 때 부른다. 컨트롤러는 분석 폴더를 작업 공간 파일(있으면)
+        // 또는 세션에서 처음 연 데이터 파일로 정하고, 탭·시트가 바뀌어도 omp를 다시 시작하지 않는다. csv.* 도구는 호스트가 활성 탭을 보므로 현재 탭에 작용한다.
         private void PostAgentContext()
         {
-            _agentController?.SetDataFile(_currentPath);
+            _agentController?.SetWorkspaceContext(BuildAgentWorkspaceContext());
             if (_agentPanel is null) return;
             int edits = _doc is null || _doc.Edits.IsEmpty ? 0 : 1;
+            string displayName = _t?.DisplayName ?? (_currentPath is null ? "" : Path.GetFileName(_currentPath));
+            string path = _t?.Path ?? _currentPath ?? "";
             _agentPanel.Post(JsonSerializer.Serialize(new
             {
                 t = "context",
-                file = _currentPath is null ? "" : Path.GetFileName(_currentPath),
-                path = _currentPath ?? "",
+                file = displayName,
+                path,
                 edits = HasUnsavedEdits ? Math.Max(edits, 1) : 0,
             }));
         }
@@ -234,11 +262,11 @@ namespace NanumCsvViewer
         {
             bool summaryOnly = !Enum.TryParse<AgentDataPolicy>(_settings.AgentDataPolicy, out var p) || p == AgentDataPolicy.SummaryOnly;
             string text = LT(
-                "Local Python analysis lets the AI agent export the current view to a file in the analysis folder (<file name>_분석결과, next to the data file) and run Python on it on this PC.\n\n" +
+                "Local Python analysis lets the AI agent export the current view to a file in the analysis folder (<workspace name>_분석결과 next to the workspace file, or <first file name>_분석결과 next to the first data file you opened; it stays the same when you switch tabs) and run Python on it on this PC.\n\n" +
                 "Everything a script prints is read by the AI model: the data policy only controls what the app itself sends." +
                 (summaryOnly ? " With 'Summary only' the agent is instructed to print aggregates only, but this cannot be fully enforced for code the agent writes." : "") +
                 "\n\nThe first Python run of each conversation asks for your approval. Turn it on?",
-                "로컬 Python 분석을 켜면 AI 에이전트가 현재 보기를 분석 폴더(데이터 파일 옆의 <파일 이름>_분석결과)에 파일로 내보내 이 PC에서 Python으로 분석할 수 있습니다.\n\n" +
+                "로컬 Python 분석을 켜면 AI 에이전트가 현재 보기를 분석 폴더(작업 공간 파일 옆의 <작업 공간 이름>_분석결과, 없으면 처음 연 데이터 파일 옆의 <파일 이름>_분석결과 — 탭을 바꿔도 그대로)에 파일로 내보내 이 PC에서 Python으로 분석할 수 있습니다.\n\n" +
                 "스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. 데이터 정책은 앱이 직접 보내는 내용만 제어합니다." +
                 (summaryOnly ? " '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다." : "") +
                 "\n\n대화마다 첫 Python 실행은 승인을 묻습니다. 켤까요?");
@@ -296,8 +324,8 @@ namespace NanumCsvViewer
             localPython.CheckOnClick = true;
             localPython.SetItemChecked(0, _settings.AgentAllowLocalPython);
             dlg.AddNote(LT(
-                "When on, the agent may export the current view to a file in the analysis folder (<file name>_분석결과, next to the data file) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
-                "켜면 에이전트가 현재 보기를 분석 폴더(데이터 파일 옆의 <파일 이름>_분석결과)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
+                "When on, the agent may export the current view to a file in the analysis folder (<workspace name>_분석결과 next to the workspace file, or <first file name>_분석결과 next to the first data file you opened; it stays the same when you switch tabs) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
+                "켜면 에이전트가 현재 보기를 분석 폴더(작업 공간 파일 옆의 <작업 공간 이름>_분석결과, 없으면 처음 연 데이터 파일 옆의 <파일 이름>_분석결과 — 탭을 바꿔도 그대로)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
             dlg.AddNote(LT(
                 "Approval mode: 'Always ask' asks for every write or run, in the app and in omp. 'Auto-approve edits' lets undoable data edits run without a card and lets omp write files, but still asks for Python/shell runs, saving to a new file and sharing raw rows. 'Allow everything' also skips those (raw-row sharing still follows the data sharing setting). Changing it restarts the agent on the same conversation.",
                 "승인 모드: '항상 묻기'는 앱과 omp 모두 쓰기·실행마다 묻습니다. '편집 자동 승인'은 되돌릴 수 있는 데이터 편집을 카드 없이 실행하고 omp의 파일 쓰기도 허용하지만 Python·셸 실행, 새 파일 저장, 원시 행 공유는 묻습니다. '모두 허용'은 그것들도 묻지 않습니다(원시 행 공유는 데이터 공유 설정을 따름). 바꾸면 같은 대화로 에이전트를 다시 시작합니다."));

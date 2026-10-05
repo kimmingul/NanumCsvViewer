@@ -33,6 +33,13 @@ namespace NanumCsvViewer.Agent
         private string? OpenFilePath(AgentDocumentInfo info)
             => string.IsNullOrEmpty(info.Directory) || string.IsNullOrEmpty(info.FileName) ? null : Path.Combine(info.Directory, info.FileName);
 
+
+        private static string EnsureFolder(string folder)
+        {
+            Directory.CreateDirectory(folder);
+            return folder;
+        }
+
         /// <summary>파일 이름으로 쓸 수 있게: 경로 구분자·예약 문자 제거, 공백 정리, 길이 제한. 비면 fallback.</summary>
         internal static string SafeBaseName(string? requested, string fallback)
         {
@@ -69,8 +76,10 @@ namespace NanumCsvViewer.Agent
                 throw new AgentToolException($"Refused: the current view has {info.ViewRows:N0} rows; exports are limited to {MaxExportRows:N0}. Narrow it with csv.set_filter first.");
 
             string openPath = OpenFilePath(info) ?? "";
-            string baseName = SafeBaseName(requestedName, Path.GetFileNameWithoutExtension(info.FileName) + "_view");
-            string outputFolder = AgentWorkspace.OutputFolderFor(string.IsNullOrEmpty(openPath) ? null : openPath);
+            string baseName = SafeBaseName(requestedName, !string.IsNullOrWhiteSpace(info.TabName) ? info.TabName! : Path.GetFileNameWithoutExtension(info.FileName) + "_view");
+            string outputFolder = _host.AnalysisFolder is { Length: > 0 } hostFolder
+                ? EnsureFolder(hostFolder)
+                : AgentWorkspace.OutputFolderFor(string.IsNullOrEmpty(openPath) ? null : openPath);
             string dataDir = Path.Combine(outputFolder, "data");
             Directory.CreateDirectory(dataDir);
             string csvPath = Path.Combine(dataDir, baseName + ".csv");
@@ -245,7 +254,9 @@ namespace NanumCsvViewer.Agent
         {
             if (requested.IndexOf('\0') >= 0) throw new AgentToolException("Invalid path.");
             string openPath = OpenFilePath(info) ?? "";
-            string outputFolder = AgentWorkspace.ComputeOutputFolder(string.IsNullOrEmpty(openPath) ? null : openPath);
+            string outputFolder = _host.AnalysisFolder is { Length: > 0 } hostFolder
+                ? hostFolder
+                : AgentWorkspace.ComputeOutputFolder(string.IsNullOrEmpty(openPath) ? null : openPath);
 
             string? full;
             try

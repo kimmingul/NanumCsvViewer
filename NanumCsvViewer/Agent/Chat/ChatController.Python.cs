@@ -17,7 +17,9 @@ namespace NanumCsvViewer.Agent
         internal const string OutputHost = "nanumcsv-out.local";
 
         private string _baseDir = "";
-        private string? _dataFile;
+        private string? _firstDataFile;
+        private string? _workspaceFile;
+        private AgentWorkspaceContext _workspaceContext = AgentWorkspaceContext.Empty;
         private string _outputFolder = "";
         private PythonInterpreter? _pyInterpreter;
         private LspStatus _lspStatus = LspStatus.Unavailable;
@@ -30,21 +32,37 @@ namespace NanumCsvViewer.Agent
         public string? OutputFolder => _options.AllowLocalPython && _outputFolder.Length > 0 ? _outputFolder : null;
 
         /// <summary>
-        /// 지금 열린 데이터 파일(없으면 null). 로컬 Python이 켜져 있으면 결과 폴더가 파일마다 달라지므로, 바뀌면 에이전트가 쉬는 대로
-        /// (작업 중이면 턴이 끝난 뒤) 새 결과 폴더를 작업 폴더로 같은 대화를 이어서 다시 시작한다. 꺼져 있으면 아무 일도 없다.
+        /// 지금 분석 폴더(만들지 않는다): 로컬 Python이 켜져 있으면 omp가 쓰는(또는 다음에 쓸) 작업 공간 고정 폴더, 꺼져 있으면 null.
+        /// csv.export_view 등이 데이터를 내보낼 곳이며, 탭·시트를 바꿔도 달라지지 않는다.
         /// </summary>
-        public void SetDataFile(string? path)
+        public string? AnalysisFolder
         {
-            string? next = string.IsNullOrWhiteSpace(path) ? null : path;
-            if (string.Equals(next, _dataFile, StringComparison.OrdinalIgnoreCase)) return;
-            _dataFile = next;
+            get
+            {
+                if (!_options.AllowLocalPython) return null;
+                string desired = DesiredWorkDir();
+                // 폴더를 만들 수 없어 대체 폴더로 시작했다면 omp가 실제로 쓰는 폴더를 알려 준다.
+                return _workDir.Length > 0 && string.Equals(desired, _launchedDesired, StringComparison.OrdinalIgnoreCase) ? _workDir : desired;
+            }
+        }
+
+        /// <summary>
+        /// 작업 공간 상태(작업 공간 파일·열린 탭)를 알린다. 분석 폴더는 작업 공간 파일(있으면), 없으면 이 세션에서 처음 연 데이터 파일로 정해지고
+        /// 그 뒤로 탭·시트 전환, 탭 열기·닫기로는 바뀌지 않으므로 omp를 다시 시작하지 않는다. 폴더가 달라지는 때(처음 데이터 파일이 열렸을 때,
+        /// 작업 공간 파일이 저장·열렸을 때)만 에이전트가 쉬는 대로(작업 중이면 턴이 끝난 뒤) 같은 대화로 다시 시작한다. 로컬 Python이 꺼져 있으면 재시작 없음.
+        /// </summary>
+        public void SetWorkspaceContext(AgentWorkspaceContext context)
+        {
+            _workspaceContext = context ?? AgentWorkspaceContext.Empty;
+            _firstDataFile ??= _workspaceContext.FirstDataFile;
+            _workspaceFile = string.IsNullOrWhiteSpace(_workspaceContext.WorkspaceFile) ? null : _workspaceContext.WorkspaceFile;
             RunPendingWorkspaceRestart();
         }
 
         /// <summary>omp가 지금 써야 할 작업 폴더(폴더를 만들지 않는다).</summary>
         private string DesiredWorkDir() =>
             _options.AllowLocalPython
-                ? AgentWorkspace.ComputeOutputFolder(_dataFile)
+                ? AgentWorkspace.StableOutputFolder(_workspaceFile, _firstDataFile)
                 : Directory.Exists(_baseDir) ? _baseDir : Environment.CurrentDirectory;
 
         /// <summary>마지막 시작 때 계산한 원하는 작업 폴더(폴더를 못 만들어 대체 폴더를 쓴 경우에도 같은 값이라 재시작을 되풀이하지 않는다).</summary>
@@ -119,7 +137,7 @@ namespace NanumCsvViewer.Agent
             {
                 PostPythonMissing(located);
             }
-            return PythonGuide.Build(new PythonGuideContext(_dataFile, _workDir, located.Interpreter, packages, _lspStatus, _options.DataPolicy));
+            return PythonGuide.Build(new PythonGuideContext(_workspaceContext, _workDir, located.Interpreter, packages, _lspStatus, _options.DataPolicy));
         }
 
         /// <summary>답변 마크다운의 상대 경로 그림을 풀 주소. 바뀔 때만 보낸다(페이지가 다시 열리면 OnPageReady가 다시 보낸다).</summary>

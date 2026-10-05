@@ -492,7 +492,7 @@ namespace NanumCsvViewer.Tests
     public class PythonGuideTests
     {
         private static PythonGuideContext Context(AgentDataPolicy policy, LspStatus lsp = LspStatus.Ready, bool interpreter = true) =>
-            new(@"C:\data\sales.csv", @"C:\data\sales_분석결과",
+            new(AgentWorkspaceContext.ForFile(@"C:\data\sales.csv"), @"C:\data\sales_분석결과",
                 interpreter ? new PythonInterpreter(@"C:\Python311\python.exe", new Version(3, 11, 2), "omp") : null,
                 new[] { "pandas", "numpy" }, lsp, policy);
 
@@ -508,6 +508,33 @@ namespace NanumCsvViewer.Tests
             Assert.Contains("Python 3.11.2", g);
             Assert.Contains("pandas, numpy", g);
             Assert.Contains("`lsp` tool", g);
+        }
+
+        [Fact]
+        public void Guide_lists_every_open_table_with_its_path_the_workspace_file_and_the_active_tab_and_warns_it_is_a_snapshot()
+        {
+            var ws = new AgentWorkspaceContext(@"C:\proj\survey.ncvws", new[]
+            {
+                new AgentTableEntry("sales.csv", @"C:\data\sales.csv", AgentTableEntry.KindFile, false),
+                new AgentTableEntry("book [Sheet2]", @"C:\data\book.xlsx", AgentTableEntry.KindSheet, true),
+                new AgentTableEntry("joined", null, AgentTableEntry.KindView, false),
+                new AgentTableEntry("Query 1", null, AgentTableEntry.KindResult, false),
+            });
+            string g = PythonGuide.Build(new PythonGuideContext(ws, @"C:\proj\survey_분석결과", null, Array.Empty<string>(), LspStatus.Unavailable, AgentDataPolicy.SummaryOnly));
+
+            Assert.Contains(@"`C:\proj\survey.ncvws`", g);
+            Assert.Contains(@"`sales.csv` (file) — `C:\data\sales.csv`", g);
+            Assert.Contains(@"`book [Sheet2]` (workbook sheet) — `C:\data\book.xlsx` — **active tab**", g);
+            Assert.Contains("`joined` (view table", g);
+            Assert.Contains("`Query 1` (query result", g);
+            Assert.DoesNotContain(@"`C:\data\sales.csv` — **active tab**", g);
+            Assert.Contains("snapshot", g);
+            Assert.Contains("stays the same while the user switches tabs", g);
+            Assert.Contains(@"data\<table name>.csv", g);
+
+            string empty = PythonGuide.Build(new PythonGuideContext(AgentWorkspaceContext.Empty, @"C:\x", null, Array.Empty<string>(), LspStatus.Unavailable, AgentDataPolicy.SummaryOnly));
+            Assert.Contains("(none open)", empty);
+            Assert.Contains("(not saved yet)", empty);
         }
 
         [Fact]
@@ -786,64 +813,130 @@ namespace NanumCsvViewer.Tests
             Assert.False(File.Exists(Path.Combine(tmp.Combine("a_분석결과"), ".omp", "lsp.json")));
         }
 
+        private static AgentTableEntry Tab(string name, string? path, string kind = AgentTableEntry.KindFile, bool active = false) => new(name, path, kind, active);
+
+        private static AgentWorkspaceContext Ctx(string? workspaceFile, params AgentTableEntry[] tabs) => new(workspaceFile, tabs);
+
+        private static async Task StartWithTwoTabsAsync(ControllerRig rig, TempFolder tmp)
+        {
+            rig.OnUi(() => rig.Controller.SetWorkspaceContext(Ctx(null,
+                Tab("a.csv", tmp.Combine("a.csv"), active: true), Tab("b.csv", tmp.Combine("b.csv")))));
+            await rig.StartAsync();
+            await rig.Proc.WaitForTypeAsync("get_available_thinking_levels");
+            await rig.WaitUntilAsync(() => rig.Page.Parsed("status").Last().Str("model").Length > 0);
+        }
+
         [Fact]
-        public async Task Opening_another_file_restarts_idle_omp_in_its_folder_on_the_same_conversation()
+        public async Task Switching_opening_and_closing_tabs_or_sheets_never_restarts_omp_and_keeps_the_folder_of_the_first_data_file()
         {
             using var tmp = new TempFolder();
-            var python = new FakePythonSetup { Ready = FakePythonSetup.ReadyTools };
-            using var rig = new ControllerRig(On(), python: python, dataFile: tmp.Combine("a.csv"));
+            using var rig = new ControllerRig(On(), python: new FakePythonSetup { Ready = FakePythonSetup.ReadyTools });
+            await StartWithTwoTabsAsync(rig, tmp);
+            string expected = tmp.Combine("a_분석결과");
+            Assert.Equal(expected, Cwd(rig.Proc));
+            // 시작할 때의 가이드는 열린 탭 전부와 활성 탭을 보여 준다.
+            string guide = Guide(rig.Proc);
+            Assert.Contains(tmp.Combine("a.csv"), guide);
+            Assert.Contains(tmp.Combine("b.csv"), guide);
+            Assert.Contains("**active tab**", guide);
+
+            string book = tmp.Combine("book.xlsx");
+            var steps = new[]
+            {
+                Ctx(null, Tab("a.csv", tmp.Combine("a.csv")), Tab("b.csv", tmp.Combine("b.csv"), active: true)),                          // 탭 전환
+                Ctx(null, Tab("a.csv", tmp.Combine("a.csv")), Tab("b.csv", tmp.Combine("b.csv")), Tab("book [S1]", book, AgentTableEntry.KindSheet, true)),  // 새 탭(워크북)
+                Ctx(null, Tab("a.csv", tmp.Combine("a.csv")), Tab("b.csv", tmp.Combine("b.csv")), Tab("book [S2]", book, AgentTableEntry.KindSheet, true)),  // 시트 전환
+                Ctx(null, Tab("b.csv", tmp.Combine("b.csv")), Tab("book [S2]", book, AgentTableEntry.KindSheet, true)),                   // 처음 탭 닫기
+                Ctx(null, Tab("v", null, AgentTableEntry.KindView, true)),                                                               // 뷰 탭만
+                Ctx(null),                                                                                                                // 모두 닫기
+                Ctx(null, Tab("c.csv", tmp.Combine("sub", "c.csv"), active: true)),                                                       // 다른 폴더의 새 파일
+            };
+            foreach (var step in steps)
+            {
+                rig.OnUi(() => rig.Controller.SetWorkspaceContext(step));
+                Assert.Equal(expected, rig.OnUi(() => rig.Controller.AnalysisFolder));
+            }
+            await Task.Delay(250);
+
+            Assert.Single(rig.Factory.Processes);
+            Assert.False(rig.Proc.Killed);
+            Assert.Equal(expected, rig.OnUi(() => rig.Controller.OutputFolder));
+            Assert.False(HasNotice(rig, "Switching the analysis folder"));
+        }
+
+        [Fact]
+        public async Task The_first_data_file_of_an_empty_session_restarts_once_into_its_folder_on_the_same_conversation()
+        {
+            using var tmp = new TempFolder();
+            using var rig = new ControllerRig(On(), python: new FakePythonSetup { Ready = FakePythonSetup.ReadyTools });
             await rig.StartAsync();
             await rig.Proc.WaitForTypeAsync("get_available_thinking_levels");
             await rig.WaitUntilAsync(() => rig.Page.Parsed("status").Last().Str("model").Length > 0);
             var first = rig.Proc;
+            Assert.Equal(AgentWorkspace.FallbackFolder(), Cwd(first));
 
-            rig.OnUi(() => rig.Controller.SetDataFile(tmp.Combine("b.csv")));
+            rig.OnUi(() => rig.Controller.SetWorkspaceContext(Ctx(null, Tab("a.csv", tmp.Combine("a.csv"), active: true))));
             await SettledAsync(rig, 2);
 
             Assert.True(first.Killed);
-            Assert.Equal(tmp.Combine("b_분석결과"), Cwd(rig.Proc));
-            Assert.Contains(tmp.Combine("b.csv"), Guide(rig.Proc));
+            Assert.Equal(tmp.Combine("a_분석결과"), Cwd(rig.Proc));
+            Assert.Contains(tmp.Combine("a.csv"), Guide(rig.Proc));
             // 다른 폴더의 세션은 RPC switch_session을 omp가 거절하므로(실제 omp로 확인) 명령줄 --resume으로 이어받는다.
             var args = rig.Proc.Launch.Arguments.ToList();
             Assert.Equal("C:\\sessions\\s1.jsonl", args[args.IndexOf("--resume") + 1]);
             Assert.DoesNotContain(rig.Proc.ReceivedSnapshot(), f => f.Str("type") == "switch_session");
             Assert.True(HasNotice(rig, "Switching the analysis folder"));
-            Assert.Equal(tmp.Combine("b_분석결과"), rig.OnUi(() => rig.Controller.OutputFolder));
+            Assert.Equal(tmp.Combine("a_분석결과"), rig.OnUi(() => rig.Controller.OutputFolder));
+
+            // 이후 다른 파일을 열어도 폴더는 처음 파일 기준으로 고정.
+            rig.OnUi(() => rig.Controller.SetWorkspaceContext(Ctx(null, Tab("b.csv", tmp.Combine("other", "b.csv"), active: true))));
+            await Task.Delay(250);
+            Assert.Equal(2, rig.Factory.Processes.Count);
         }
 
         [Fact]
-        public async Task A_file_change_while_the_agent_works_waits_for_the_turn_to_end()
+        public async Task Saving_a_workspace_file_moves_the_analysis_folder_beside_it_and_a_busy_agent_finishes_its_turn_first()
         {
             using var tmp = new TempFolder();
-            using var rig = new ControllerRig(On(), python: new FakePythonSetup { Ready = FakePythonSetup.ReadyTools }, dataFile: tmp.Combine("a.csv"));
-            await rig.StartAsync();
-            await rig.Proc.WaitForTypeAsync("get_available_thinking_levels");
+            using var rig = new ControllerRig(On(), python: new FakePythonSetup { Ready = FakePythonSetup.ReadyTools });
+            await StartWithTwoTabsAsync(rig, tmp);
             rig.Proc.Emit("{\"type\":\"agent_start\"}");
             await rig.WaitUntilAsync(() => rig.OnUi(() => rig.Controller.IsBusy));
 
-            rig.OnUi(() => rig.Controller.SetDataFile(tmp.Combine("b.csv")));
+            string ws = tmp.Combine("projects", "survey.ncvws");
+            rig.OnUi(() => rig.Controller.SetWorkspaceContext(Ctx(ws,
+                Tab("a.csv", tmp.Combine("a.csv"), active: true), Tab("b.csv", tmp.Combine("b.csv")))));
             await Task.Delay(200);
             Assert.Single(rig.Factory.Processes);               // 작업 중에는 다시 시작하지 않는다
             Assert.Equal(tmp.Combine("a_분석결과"), Cwd(rig.Proc));
 
             rig.Proc.Emit("{\"type\":\"agent_end\",\"isTerminal\":true}");
             await SettledAsync(rig, 2);
-            Assert.Equal(tmp.Combine("b_분석결과"), Cwd(rig.Factory.Processes[1]));
+            string folder = tmp.Combine("projects", "survey_분석결과");
+            Assert.Equal(folder, Cwd(rig.Factory.Processes[1]));
+            Assert.Contains(ws, Guide(rig.Factory.Processes[1]));
+            Assert.Equal(folder, rig.OnUi(() => rig.Controller.AnalysisFolder));
+
+            // 작업 공간 파일이 있으면 탭 전환·첫 탭 닫기에도 그대로.
+            rig.OnUi(() => rig.Controller.SetWorkspaceContext(Ctx(ws, Tab("b.csv", tmp.Combine("b.csv"), active: true))));
+            await Task.Delay(250);
+            Assert.Equal(2, rig.Factory.Processes.Count);
         }
 
         [Fact]
-        public async Task The_same_file_or_python_off_never_restarts()
+        public async Task The_same_context_or_python_off_never_restarts()
         {
             using var tmp = new TempFolder();
             using var on = new ControllerRig(On(), python: new FakePythonSetup { Ready = FakePythonSetup.ReadyTools }, dataFile: tmp.Combine("a.csv"));
             await on.StartAsync();
-            on.OnUi(() => on.Controller.SetDataFile(tmp.Combine("A.CSV")));      // 같은 파일(대소문자만 다름)
+            on.OnUi(() => on.Controller.SetWorkspaceContext(AgentWorkspaceContext.ForFile(tmp.Combine("A.CSV"))));      // 같은 파일(대소문자만 다름)
             using var off = new ControllerRig(new AgentHostOptions(Language: "en"), dataFile: tmp.Combine("a.csv"));
             await off.StartAsync();
-            off.OnUi(() => off.Controller.SetDataFile(tmp.Combine("b.csv")));
+            off.OnUi(() => off.Controller.SetWorkspaceContext(AgentWorkspaceContext.ForFile(tmp.Combine("b.csv"), tmp.Combine("w.ncvws"))));
             await Task.Delay(200);
             Assert.Single(on.Factory.Processes);
             Assert.Single(off.Factory.Processes);
+            Assert.Null(off.OnUi(() => off.Controller.AnalysisFolder));    // 꺼져 있으면 내보낼 폴더도 없다
         }
 
         [Fact]

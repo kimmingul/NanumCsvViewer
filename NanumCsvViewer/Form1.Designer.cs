@@ -78,6 +78,9 @@ namespace NanumCsvViewer
             encodingStatusButton = new ToolStripDropDownButton();
             signalLabel = new ToolStripStatusLabel();
             openFileDialog1 = new OpenFileDialog();
+            tabStrip = new TabStrip();
+            workspaceDockHost = new Panel();
+            workspaceSplitter = new Splitter();
             menuStrip1.SuspendLayout();
             toolStrip1.SuspendLayout();
             gridContextMenu.SuspendLayout();
@@ -594,6 +597,31 @@ namespace NanumCsvViewer
             // 
             openFileDialog1.Filter = "All Supported|*.csv;*.txt;*.xlsx;*.xlsm;*.xls;*.sas7bdat;*.sav;*.db;*.sqlite;*.sqlite3|CSV / Text (*.csv;*.txt)|*.csv;*.txt|Excel (*.xlsx;*.xls)|*.xlsx;*.xlsm;*.xls|SAS (*.sas7bdat)|*.sas7bdat|SPSS (*.sav)|*.sav|SQLite (*.db;*.sqlite)|*.db;*.sqlite;*.sqlite3|All Files (*.*)|*.*";
             openFileDialog1.RestoreDirectory = true;
+            openFileDialog1.Multiselect = true;
+            // 
+            // tabStrip — 열린 문서 탭 띠(툴바 아래, 칩 띠·본문 위). 문서가 없으면 숨김.
+            // 
+            tabStrip.Dock = DockStyle.Top;
+            tabStrip.Name = "tabStrip";
+            tabStrip.Height = 30;
+            tabStrip.Visible = false;
+            // 
+            // workspaceDockHost — 작업 공간 탐색기용 왼쪽 도킹 영역(Wave B가 채운다). 기본은 접힘.
+            // 
+            workspaceDockHost.Dock = DockStyle.Left;
+            workspaceDockHost.Name = "workspaceDockHost";
+            workspaceDockHost.Width = 260;
+            workspaceDockHost.Visible = false;
+            // 
+            // workspaceSplitter
+            // 
+            workspaceSplitter.Dock = DockStyle.Left;
+            workspaceSplitter.Name = "workspaceSplitter";
+            workspaceSplitter.Width = 4;
+            workspaceSplitter.MinSize = 120;
+            workspaceSplitter.MinExtra = 300;
+            workspaceSplitter.TabStop = false;
+            workspaceSplitter.Visible = false;
             // 
             // Form1
             // 
@@ -601,7 +629,10 @@ namespace NanumCsvViewer
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1008, 729);
             Controls.Add(outerSplit);
+            Controls.Add(workspaceSplitter);
+            Controls.Add(workspaceDockHost);
             Controls.Add(statusStrip1);
+            Controls.Add(tabStrip);
             Controls.Add(toolStrip1);
             Controls.Add(menuStrip1);
             MainMenuStrip = menuStrip1;
@@ -692,6 +723,9 @@ namespace NanumCsvViewer
         private ToolStripDropDownButton encodingStatusButton;
         private ToolStripStatusLabel signalLabel;
         private OpenFileDialog openFileDialog1;
+        private TabStrip tabStrip;
+        private Panel workspaceDockHost;
+        private Splitter workspaceSplitter;
         private ToolStripSeparator toolStripSeparator1;
     }
 }

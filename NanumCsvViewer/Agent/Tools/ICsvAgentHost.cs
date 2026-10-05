@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using NanumCsvViewer.Workspace;
 using NanumCsvViewer.Csv;
 using NanumCsvViewer.Csv.DataQuality;
 
@@ -61,7 +62,8 @@ namespace NanumCsvViewer.Agent.Tools
         AgentEditState Edits,
         AgentCursor Cursor,
         string? Directory,
-        IReadOnlyList<string> ProtectedPaths);
+        IReadOnlyList<string> ProtectedPaths,
+        string? TabName = null);
 
     /// <summary>필터·정렬 뒤의 뷰 크기. RegexTimedOut은 식 필터의 정규식이 셀당 시간 제한을 넘겨 "불일치"로 처리된 셀 수.</summary>
     public sealed record AgentViewChange(long ViewRows, long TotalRows, long RegexTimedOut = 0);
@@ -112,6 +114,9 @@ namespace NanumCsvViewer.Agent.Tools
 
     public interface ICsvAgentHost
     {
+        /// <summary>작업 공간 단위의 고정 분석 결과 폴더(만들지 않음). null이면 열린 파일 기준 폴더.</summary>
+        string? AnalysisFolder => null;
+
         /// <summary>열린 문서가 없으면 null.</summary>
         AgentDocumentInfo? GetInfo();
 
@@ -201,5 +206,42 @@ namespace NanumCsvViewer.Agent.Tools
 
         /// <summary>채팅 패널에 이미지 미리보기를 올린다. 실패(파일 없음·출력 폴더 밖·패널 없음)면 false.</summary>
         bool PostInlineImage(string fullPath, string? caption);
+    }
+
+    /// <summary>탭 하나의 모델용 요약. Kind는 file/sheet/view/result, RelationName은 작업 공간에서의 표·뷰 이름(없으면 null).</summary>
+    public sealed record AgentTabInfo(string Name, string Kind, bool IsActive, bool IsReadOnly, bool HasUnsavedEdits, string? RelationName);
+
+    /// <summary>
+    /// ws.* 도구가 쓰는 작업 공간 경계. Form1이 구현하고(ICsvAgentHost와 함께), 구현하지 않는 가짜 호스트에서는 ws.* 가 "사용할 수 없음"으로 답한다.
+    /// 모든 메서드는 UI 스레드. 실패는 AgentToolException(또는 예상 가능한 예외)으로.
+    /// </summary>
+    public interface IWorkspaceAgentHost
+    {
+        /// <summary>작업 공간(처음 쓸 때 만들어진다). 엔진을 쓸 수 없으면 null이고 이유는 <see cref="WorkspaceUnavailableReason"/>.</summary>
+        DataWorkspace? Workspace { get; }
+        string? WorkspaceUnavailableReason { get; }
+
+        /// <summary>열린 파일·워크북 탭을 모두 작업 공간 원본으로 등록한다(이미 등록된 것은 그대로). ws.* 도구가 시작할 때 부른다.</summary>
+        Task EnsureTabsRegisteredAsync(CancellationToken ct);
+
+        IReadOnlyList<AgentTabInfo> GetTabs();
+
+        /// <summary>열린 모든 탭이 읽는 파일의 전체 경로. 어떤 저장도 이 경로를 덮어쓰면 안 된다.</summary>
+        IReadOnlyList<string> OpenSourcePaths();
+
+        /// <summary>작업 공간에 원본을 추가(이미 열린 탭이면 그 탭의 인코딩·형 사용). 경로는 도구가 이미 검증했다.</summary>
+        Task<IReadOnlyList<WorkspaceSource>> AddSourcesAsync(IReadOnlyList<string> paths, CancellationToken ct);
+
+        /// <summary>표 → 그 파일 탭, 뷰 → 계산(오래됐거나 없으면) 후 읽기 전용 뷰 탭. 열리지 않으면 null.</summary>
+        Task<AgentTabInfo?> OpenRelationAsync(IWorkspaceRelation relation, CancellationToken ct);
+
+        /// <summary>SQL 결과를 임시 CSV로 써서 결과 탭(읽기 전용)으로 연다.</summary>
+        Task<AgentTabInfo> OpenQueryResultAsync(string sql, string title, CancellationToken ct);
+
+        /// <summary>표·뷰를 사용자 CSV/xlsx로 저장(열린 원본 덮어쓰기 거부). 쓴 전체 경로를 돌려준다.</summary>
+        Task<string> SaveRelationAsAsync(IWorkspaceRelation relation, string path, CancellationToken ct);
+
+        /// <summary>탭 이름·표시 이름·표/뷰 이름으로 탭을 활성화한다. 없으면 null.</summary>
+        Task<AgentTabInfo?> SwitchTabAsync(string name, CancellationToken ct);
     }
 }

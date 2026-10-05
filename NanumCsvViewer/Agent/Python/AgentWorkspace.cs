@@ -3,9 +3,11 @@ using System.Text;
 namespace NanumCsvViewer.Agent
 {
     /// <summary>
-    /// 로컬 Python 분석의 작업 공간 규칙. 열린 파일마다 결과 폴더 <c>&lt;파일 폴더&gt;\&lt;파일 이름(확장자 제외)&gt;_분석결과</c>를 쓰고,
-    /// 파일이 없으면 <c>문서\NanumCsvViewer\분석결과</c>를 쓴다. omp는 이 폴더를 작업 폴더(--cwd)로 시작하고,
-    /// 에이전트가 쓴 스크립트·표·그림·보고서가 여기에 쌓인다. 원본 파일은 건드리지 않는다.
+    /// 로컬 Python 분석의 작업 공간 규칙. 결과 폴더는 작업 공간에서 한 번 정해지고 탭·시트를 바꿔도 달라지지 않는다:
+    /// 작업 공간 파일(.ncvws)이 있으면 <c>&lt;작업 공간 폴더&gt;\&lt;작업 공간 이름&gt;_분석결과</c>, 없으면 이 세션에서 처음 연 데이터 파일의
+    /// <c>&lt;파일 폴더&gt;\&lt;파일 이름(확장자 제외)&gt;_분석결과</c>, 둘 다 없으면 <c>문서\NanumCsvViewer\분석결과</c>.
+    /// omp는 이 폴더를 작업 폴더(--cwd)로 시작하고, 에이전트가 쓴 스크립트·표·그림·보고서와 내보낸 데이터(<c>data\</c>)가 여기에 쌓인다.
+    /// 원본 파일은 건드리지 않는다.
     /// </summary>
     public static class AgentWorkspace
     {
@@ -16,23 +18,34 @@ namespace NanumCsvViewer.Agent
         public const string FallbackLeaf = "분석결과";
 
         /// <summary>결과 폴더의 전체 경로(만들지 않는다). 파일이 없거나 경로가 올바르지 않으면 문서 폴더 쪽 기본 폴더.</summary>
-        public static string ComputeOutputFolder(string? openFilePath)
+        public static string ComputeOutputFolder(string? openFilePath) => BesideFile(openFilePath) ?? FallbackFolder();
+
+        /// <summary>
+        /// 작업 공간 기준 결과 폴더의 전체 경로(만들지 않는다). 작업 공간 파일이 있으면 그 옆, 없으면 처음 연 데이터 파일 옆
+        /// (<see cref="ComputeOutputFolder(string?)"/>), 둘 다 없으면 문서 폴더 쪽 기본 폴더.
+        /// </summary>
+        public static string StableOutputFolder(string? workspaceFile, string? firstDataFile) =>
+            BesideFile(workspaceFile) ?? ComputeOutputFolder(firstDataFile);
+
+        /// <summary>file 옆의 <c>&lt;이름&gt;_분석결과</c>. 경로가 비었거나 올바르지 않으면 null.</summary>
+        private static string? BesideFile(string? file)
         {
-            string? full = TryFullPath(openFilePath);
-            if (full != null)
-            {
-                string? dir = Path.GetDirectoryName(full);
-                string name = Path.GetFileNameWithoutExtension(full);
-                if (!string.IsNullOrEmpty(dir) && name.Length > 0)
-                    return Path.Combine(dir, name + OutputSuffix);
-            }
-            return FallbackFolder();
+            string? full = TryFullPath(file);
+            if (full == null) return null;
+            string? dir = Path.GetDirectoryName(full);
+            string name = Path.GetFileNameWithoutExtension(full);
+            return !string.IsNullOrEmpty(dir) && name.Length > 0 ? Path.Combine(dir, name + OutputSuffix) : null;
         }
 
         /// <summary>결과 폴더를 필요할 때 만들고(이미 있으면 그대로) 전체 경로를 돌려준다. 만들 수 없으면(읽기 전용 위치 등) 기본 폴더로 되돌린다.</summary>
-        public static string OutputFolderFor(string? openFilePath)
+        public static string OutputFolderFor(string? openFilePath) => EnsureFolder(ComputeOutputFolder(openFilePath));
+
+        /// <summary><see cref="StableOutputFolder"/>를 만들고 돌려준다(만들 수 없으면 기본 폴더).</summary>
+        public static string StableOutputFolderFor(string? workspaceFile, string? firstDataFile) =>
+            EnsureFolder(StableOutputFolder(workspaceFile, firstDataFile));
+
+        private static string EnsureFolder(string folder)
         {
-            string folder = ComputeOutputFolder(openFilePath);
             try
             {
                 Directory.CreateDirectory(folder);

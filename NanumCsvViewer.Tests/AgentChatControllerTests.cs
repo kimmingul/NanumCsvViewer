@@ -26,7 +26,7 @@ namespace NanumCsvViewer.Tests
         public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> Cli { get; set; } =
             (_, _, _, _) => Task.FromResult<string?>(null);
 
-        public ControllerRig(AgentHostOptions? options = null, Action<FakeOmpProcess>? configure = null, IPythonSetup? python = null, string? dataFile = null)
+        public ControllerRig(AgentHostOptions? options = null, Action<FakeOmpProcess>? configure = null, IPythonSetup? python = null, string? dataFile = null, string? workspaceFile = null)
         {
             Factory.Configure = configure;
             var services = new ChatControllerServices
@@ -45,7 +45,7 @@ namespace NanumCsvViewer.Tests
             };
             Controller = new ChatController(Page, Tools, options ?? new AgentHostOptions(Language: "en", AppVersion: "1.2.3"), services);
             Controller.PageMessageUnhandled += e => { lock (Unhandled) Unhandled.Add(e); };
-            if (dataFile != null) Ui.Invoke(() => Controller.SetDataFile(dataFile));
+            if (dataFile != null || workspaceFile != null) Ui.Invoke(() => Controller.SetWorkspaceContext(AgentWorkspaceContext.ForFile(dataFile, workspaceFile)));
         }
 
         public FakeOmpProcess Proc => Factory.Last;

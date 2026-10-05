@@ -37,6 +37,29 @@ namespace NanumCsvViewer
         /// <summary>승인 모드를 사용자가 직접 골랐거나 기본 모드 안내를 이미 보였으면 true(안내는 한 번만).</summary>
         public bool AgentApprovalNoticeShown { get; set; } = false;
 
+        // ---- v3 작업 공간
+        /// <summary>최근에 열거나 저장한 작업 공간 파일(.ncvws) 전체 경로, 가장 최근이 앞.</summary>
+        public List<string> RecentWorkspaces { get; set; } = new();
+
+        /// <summary>최근 작업 공간 목록에 담는 최대 개수.</summary>
+        public const int MaxRecentWorkspaces = 10;
+
+        /// <summary>작업 공간 파일을 최근 목록의 맨 앞에 올린다(이미 있으면 옮김, 대소문자 무시). 저장은 호출한 쪽이 한다.</summary>
+        public void AddRecentWorkspace(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            string full;
+            try { full = Path.GetFullPath(path); } catch (ArgumentException) { return; }
+            RecentWorkspaces ??= new();
+            RecentWorkspaces.RemoveAll(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
+            RecentWorkspaces.Insert(0, full);
+            if (RecentWorkspaces.Count > MaxRecentWorkspaces) RecentWorkspaces.RemoveRange(MaxRecentWorkspaces, RecentWorkspaces.Count - MaxRecentWorkspaces);
+        }
+
+        /// <summary>최근 목록에서 뺀다(파일이 없어졌을 때).</summary>
+        public void RemoveRecentWorkspace(string path)
+            => RecentWorkspaces?.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NanumCsvViewer");
         private static string FilePath => Path.Combine(Dir, "settings.json");
