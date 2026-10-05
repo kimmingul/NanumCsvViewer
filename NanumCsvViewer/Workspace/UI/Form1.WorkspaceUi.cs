@@ -117,6 +117,7 @@ namespace NanumCsvViewer
         private void DisposeWorkspaceUi()
         {
             _wsOpCts?.Cancel();
+            _explorerClickCts?.Cancel();
             foreach (var f in _sqlEditors.ToArray()) { try { f.Close(); f.Dispose(); } catch { /* 닫는 중 */ } }
             _sqlEditors.Clear();
             _explorer?.Dispose();
@@ -128,6 +129,7 @@ namespace NanumCsvViewer
         {
             CleanupClosedGeneratedTabs();
             _explorer?.ScheduleRefresh();
+            _explorer?.SyncToActiveTab();   // 탭 → 트리: 활성 탭(과 워크북의 시트)에 맞는 노드를 클릭 동작 없이 고른다
             // 활성 탭이 원본이 바뀐 뷰라면 알려 준다(탭 오른쪽 클릭 ▸ 뷰 새로 고침, 또는 작업 공간 ▸ 뷰 탭 새로 고침).
             if (ActiveTab is { Kind: TabKind.View } vt && _workspace is { } engine && ViewOfTab(vt) is { } shown
                 && (engine.IsStale(shown) || shown.ResultPath is not null && !SamePath(vt.Path, shown.ResultPath)))
@@ -173,13 +175,14 @@ namespace NanumCsvViewer
             if (_explorer is not null || IsDisposed) return;
             _explorer = new WorkspaceExplorer(this, _palette) { Dock = DockStyle.Fill };
             workspaceDockHost.Controls.Add(_explorer);
+            _explorer.SyncToActiveTab();
         }
 
         internal void SetWorkspaceExplorerVisible(bool visible)
         {
             if (visible) EnsureExplorer();
             WorkspaceDockVisible = visible;
-            if (visible) _explorer?.RefreshTree();
+            if (visible) { _explorer?.RefreshTree(); _explorer?.SyncToActiveTab(); }
             UpdateWorkspaceCheckStates();
         }
 
@@ -387,6 +390,194 @@ namespace NanumCsvViewer
 
         private Task OpenActiveViewSourcesAsync()
             => ActiveTab is { Kind: TabKind.View } tab && ViewOfTab(tab) is { } view ? OpenSourceTabsCommandAsync(view) : Task.CompletedTask;
+
+        // ---------------------------------------------------------------- 탐색기 클릭 = 탭 고르기
+        // 탭 띠를 누른 것과 같다: 열린 탭이 있으면 즉시 그 탭(워크북은 그 시트까지), 안 열린 표·뷰는 열고, 컬럼은 격자에서 고른다.
+        // 새 클릭은 아직 끝나지 않은 앞 클릭을 대신한다(취소할 수 있는 뷰 계산은 취소하고, 취소할 수 없는 일의 결과는 활성화하지 않고 버린다).
+        // 같은 노드를 이미 처리 중이면(더블클릭) 새 일을 만들지 않고 합류한다.
+
+        private int _explorerClickSeq;
+        private CancellationTokenSource? _explorerClickCts;
+        private Task _explorerClickTask = Task.CompletedTask;   // 가장 나중 클릭
+        private Task _explorerClickTail = Task.CompletedTask;   // 아직 끝나지 않은 모든 클릭(대체된 클릭 포함 — 작업 공간 작업은 한 번에 하나라 새 열기는 이들이 끝난 뒤에)
+        private string? _explorerClickKey;
+        private int _explorerClickActiveSeq;   // 가장 나중 클릭의 번호(처리 중일 때만, 아니면 0)
+
+        /// <summary>탐색기 클릭이 새 일로 시작된 횟수(처리 중인 같은 노드에 합류한 클릭은 세지 않는다). 테스트·자동화용.</summary>
+        internal int ExplorerClickCount { get; private set; }
+
+        /// <summary>탐색기 클릭이 처리되는 중인가(탭 → 트리 동기화는 이 동안 선택을 옮기지 않는다).</summary>
+        internal bool ExplorerClickRunning => _explorerClickActiveSeq != 0;
+
+        /// <summary>워크북 탭이 지금 보는 시트 번호(활성 탭이면 화면의 시트).</summary>
+        internal int SheetIndexOfTab(DocumentTab tab) => CurrentSheetOf(tab);
+
+        /// <summary>
+        /// 탐색기 노드를 마우스 왼쪽 클릭했을 때의 동작. 컬럼 노드는 그 컬럼의 표·뷰를 <paramref name="owner"/>로 받는다.
+        /// 끝나면 완료되는 작업이며 예외를 던지지 않는다(실패는 안내).
+        /// </summary>
+        internal Task ExplorerClickAsync(WorkspaceExplorer.NodeInfo info, IWorkspaceRelation? owner = null)
+        {
+            if (IsDisposed || _closing) return Task.CompletedTask;
+            if (ExplorerClickRunning && _explorerClickKey == info.Key) return _explorerClickTask;
+            int seq = ++_explorerClickSeq;
+            ExplorerClickCount++;
+            _explorerClickActiveSeq = seq;
+            _explorerClickCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _explorerClickCts = cts;
+            var previous = _explorerClickTail;
+            _explorerClickKey = info.Key;
+            var task = RunExplorerClickAsync(info, owner, seq, cts, previous);
+            _explorerClickTask = task;
+            _explorerClickTail = Task.WhenAll(previous, task);
+            return task;
+        }
+
+        private async Task RunExplorerClickAsync(WorkspaceExplorer.NodeInfo info, IWorkspaceRelation? owner, int seq, CancellationTokenSource cts, Task previous)
+        {
+            bool Stale() => seq != _explorerClickSeq || cts.IsCancellationRequested || IsDisposed || _closing;
+            try
+            {
+                switch (info.Kind)
+                {
+                    case WorkspaceExplorer.NodeKind.Tab or WorkspaceExplorer.NodeKind.Result when info.Item is DocumentTab tab:
+                        await ActivateTabForClickAsync(tab, Stale);
+                        break;
+                    case WorkspaceExplorer.NodeKind.Table or WorkspaceExplorer.NodeKind.View when info.Item is IWorkspaceRelation rel:
+                        await EnsureRelationTabAsync(rel, Stale, previous, cts.Token);
+                        break;
+                    case WorkspaceExplorer.NodeKind.Source when info.Item is WorkspaceSource { Kind: WorkspaceSourceKind.Csv, Tables.Count: > 0 } src:
+                        await EnsureRelationTabAsync(src.Tables[0], Stale, previous, cts.Token);
+                        break;
+                    case WorkspaceExplorer.NodeKind.Column when info.Item is WorkspaceColumn column && owner is not null:
+                    {
+                        var tab = await EnsureRelationTabAsync(owner, Stale, previous, cts.Token);
+                        if (tab is not null && !Stale()) await SelectGridColumnAsync(tab, column, ColumnOrdinal(owner, column), owner.Columns.Count, Stale);
+                        break;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* 뒤 클릭이 대신했다 */ }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Debug.WriteLine($"[Workspace] explorer click {info.Key}: {ex.Message}");
+                if (!IsDisposed && !Stale()) { statusLabel.Text = LT("Failed", "실패"); ShowWorkspaceMessage(ErrorText(ex)); }
+            }
+            finally
+            {
+                if (ReferenceEquals(_explorerClickCts, cts)) _explorerClickCts = null;
+                if (_explorerClickActiveSeq == seq) _explorerClickActiveSeq = 0;
+            }
+        }
+
+        private static int ColumnOrdinal(IWorkspaceRelation rel, WorkspaceColumn column)
+        {
+            for (int i = 0; i < rel.Columns.Count; i++) if (ReferenceEquals(rel.Columns[i], column)) return i;
+            for (int i = 0; i < rel.Columns.Count; i++) if (rel.Columns[i].Name == column.Name) return i;
+            return -1;
+        }
+
+        // tab을 활성 탭으로 만든다. 현재 문서에서 필터·정렬이 도는 중이면 끝나길 기다리되, 그 사이 새 클릭이 왔으면 활성화하지 않는다. 활성이 됐으면 true.
+        private async Task<bool> ActivateTabForClickAsync(DocumentTab tab, Func<bool> stale)
+        {
+            if (tab.IsClosed || _closing || IsDisposed || !_tabs.Contains(tab)) return false;
+            if (ReferenceEquals(tab, _t)) return true;
+            if (ForegroundWorkRunning())
+            {
+                statusLabel.Text = LT("Waiting for the running operation to finish before switching tabs…", "실행 중인 작업이 끝나면 탭을 전환합니다…");
+                await WaitForForegroundIdleAsync();
+            }
+            if (stale() || tab.IsClosed || !_tabs.Contains(tab)) return false;
+            ActivateTab(tab);
+            return ReferenceEquals(tab, _t);
+        }
+
+        private static string OriginPathOf(WorkspaceTable t) => t.Source.Kind == WorkspaceSourceKind.Csv ? t.FilePath : t.Source.Path;
+
+        // 표·뷰의 탭을 활성화해 돌려준다: 열려 있으면 그 탭(워크북이면 그 시트로 전환), 아니면 열고(뷰는 계산) 같게 한다. 하지 못하면 null.
+        private async Task<DocumentTab?> EnsureRelationTabAsync(IWorkspaceRelation rel, Func<bool> stale, Task previous, CancellationToken clickCt)
+        {
+            DocumentTab? tab = rel switch
+            {
+                WorkspaceView v => FindViewTab(v),
+                WorkspaceTable t when OriginPathOf(t).Length > 0 => FindTab(OriginPathOf(t)),
+                _ => null,
+            };
+            if (tab is null)
+            {
+                if (rel is WorkspaceView { Error: { } err } broken)
+                {
+                    statusLabel.Text = LT($"View '{broken.Name}' cannot run: ", $"뷰 '{broken.Name}'을(를) 실행할 수 없습니다: ") + err;
+                    return null;
+                }
+                // 느린 길(파일 열기·뷰 계산): 앞 클릭의 일이 취소 신호를 받고 끝나길 기다린 뒤(작업 공간 작업은 한 번에 하나), 그동안 새 클릭이 왔으면 그만둔다.
+                try { await previous; } catch (Exception ex) when (ex is not OutOfMemoryException) { /* 앞 클릭은 자기 오류를 이미 안내했다 */ }
+                if (stale()) return null;
+                DocumentTab? opened = null;
+                await RunWorkspaceUiAsync(LT($"Opening {rel.DisplayName}…", $"{rel.DisplayName} 여는 중…"), async ct =>
+                {
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, clickCt);
+                    switch (rel)
+                    {
+                        case WorkspaceView v:
+                            opened = await OpenRelationTabAsync(v, linked.Token);
+                            break;
+                        case WorkspaceTable t:
+                            if (OriginPathOf(t).Length == 0)
+                                throw new InvalidOperationException(LT("This table has no original file to open.", "이 표는 열 수 있는 원본 파일이 없습니다."));
+                            opened = await OpenFileCoreAsync(OriginPathOf(t), activate: false);   // 활성화는 새 클릭이 없을 때만 아래에서
+                            break;
+                    }
+                });
+                tab = opened;
+                if (tab is null) return null;
+            }
+
+            if (!await ActivateTabForClickAsync(tab, stale)) return null;
+            if (rel is WorkspaceTable { Source.Kind: WorkspaceSourceKind.Database } dbTable && tab.Kind == TabKind.Sheet)
+            {
+                int index = IndexOfTable(dbTable);
+                if (index >= 0 && CurrentSheetOf(tab) != index)
+                {
+                    if (ForegroundWorkRunning()) await WaitForForegroundIdleAsync();   // 시트 전환은 다른 작업이 도는 중이면 조용히 거부된다
+                    if (stale() || !ReferenceEquals(_t, tab)) return null;
+                    await SwitchSheetAsync(index);
+                    if (CurrentSheetOf(tab) != index) return null;   // 저장 안 한 편집을 버리지 않기로 했거나 전환하지 못했다
+                }
+            }
+            return tab;
+        }
+
+        // 활성 탭의 격자에서 컬럼을 고른다: 현재 셀 = 맨 위에 보이는 행의 그 컬럼(가로로도 보이게 스크롤). 숨겨진 컬럼은 건드리지 않고 상태 줄로 알린다.
+        private async Task SelectGridColumnAsync(DocumentTab tab, WorkspaceColumn column, int ordinal, int relationColumnCount, Func<bool> stale)
+        {
+            // 방금 연 문서는 인덱싱이 행을 보여 줄 때까지(최대 5초) 기다린다.
+            var watch = Stopwatch.StartNew();
+            while (grid.RowCount == 0 && ReferenceEquals(_t, tab) && tab.IsIndexing && watch.ElapsedMilliseconds < 5000 && !stale()) await Task.Delay(30);
+            if (stale() || !ReferenceEquals(_t, tab)) return;
+
+            int c = -1;
+            for (int i = 0; i < grid.ColumnCount; i++)
+            {
+                if (!string.Equals(grid.Columns[i].HeaderText, column.Name, StringComparison.OrdinalIgnoreCase)) continue;
+                if (c < 0 || i == ordinal) c = i;
+            }
+            // 이름이 다르면(헤더 이름 바꾸기 편집·중복 이름 보정) 컬럼 수가 같을 때만 같은 번호의 컬럼으로 본다.
+            if (c < 0 && ordinal >= 0 && ordinal < grid.ColumnCount && grid.ColumnCount == relationColumnCount) c = ordinal;
+            if (c < 0) { statusLabel.Text = LT($"Column '{column.Name}' was not found in this tab.", $"이 탭에서 컬럼 '{column.Name}'을(를) 찾지 못했습니다."); return; }
+            if (!grid.Columns[c].Visible) { statusLabel.Text = LT($"Column '{column.Name}' is hidden in this tab — Data ▸ Columns… shows it.", $"컬럼 '{column.Name}'은(는) 이 탭에서 숨겨져 있습니다 — 데이터 ▸ 컬럼 표시…에서 켤 수 있습니다."); return; }
+            if (grid.RowCount == 0) { statusLabel.Text = LT("This tab has no rows to select a cell in.", "이 탭에는 셀을 고를 행이 없습니다."); return; }
+            try
+            {
+                if (grid.IsCurrentCellInEditMode) grid.EndEdit();
+                int row = Math.Clamp(grid.FirstDisplayedScrollingRowIndex, 0, grid.RowCount - 1);
+                grid.CurrentCell = grid[c, row];
+                if (!grid.Columns[c].Frozen && grid.GetColumnDisplayRectangle(c, false).Width < grid.Columns[c].Width)
+                    grid.FirstDisplayedScrollingColumnIndex = c;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentOutOfRangeException) { Debug.WriteLine($"[Workspace] select column: {ex.Message}"); }
+        }
 
         // ---------------------------------------------------------------- 탭 ↔ 관계
 

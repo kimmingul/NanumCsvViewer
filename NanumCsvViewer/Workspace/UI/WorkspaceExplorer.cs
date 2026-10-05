@@ -7,7 +7,8 @@ namespace NanumCsvViewer
     /// <summary>
     /// 작업 공간 탐색기(왼쪽 도킹): 열린 파일(아직 올리지 않은 것) · 원본(CSV 표 / DB → 표) · 뷰 · 질의 결과를 트리로 보여 준다.
     /// 컬럼은 타입 배지와 함께 펼쳐 보이고, 행 수는 펼칠 때 한 번 센다(느린 파일에서 UI가 멈추지 않도록 백그라운드). 뷰는 원본이 바뀌었으면 ⚠, 깨졌으면 오류 표시.
-    /// 더블클릭 = 탭 열기, 오른쪽 클릭 = 메뉴, 파일을 끌어다 놓으면 올린다. 명령은 모두 <see cref="Form1"/>이 실행한다.
+    /// 왼쪽 클릭 = 탭 고르기(탭 띠와 같다): 열려 있으면 그 탭, 안 열린 표·뷰는 열고, 시트는 그 시트로, 컬럼은 격자의 그 컬럼으로. 방향키는 선택만 옮기고 Enter가 연다.
+    /// 활성 탭이 바뀌면 일치하는 노드를 클릭 동작 없이 골라 준다. 오른쪽 클릭 = 메뉴, 파일을 끌어다 놓으면 올린다. 명령은 모두 <see cref="Form1"/>이 실행한다.
     /// </summary>
     internal sealed class WorkspaceExplorer : Panel
     {
@@ -49,8 +50,13 @@ namespace NanumCsvViewer
             };
             _tree.DrawNode += OnDrawNode;
             _tree.BeforeExpand += OnBeforeExpand;
-            _tree.NodeMouseDoubleClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenNode(e.Node); };
-            _tree.NodeMouseClick += (_, e) => { if (e.Button == MouseButtons.Right) { _tree.SelectedNode = e.Node; ShowMenu(e.Node, e.Location); } };
+            _tree.NodeMouseDoubleClick += (_, e) => { if (e.Button == MouseButtons.Left && e.Node is { } n && _tree.HitTest(e.Location).Location != TreeViewHitTestLocations.PlusMinus) OnNodeDoubleClick(n); };
+            _tree.NodeMouseClick += (_, e) =>
+            {
+                if (e.Node is not { } n) return;
+                if (e.Button == MouseButtons.Right) { _tree.SelectedNode = n; ShowMenu(n, e.Location); }
+                else if (e.Button == MouseButtons.Left && _tree.HitTest(e.Location).Location != TreeViewHitTestLocations.PlusMinus) _ = ClickNodeAsync(n);   // 펼침 단추는 펼치기만
+            };
             _tree.KeyDown += OnTreeKeyDown;
             _tree.AfterSelect += (_, e) => { if (e.Node?.Tag is NodeInfo { Item: WorkspaceTable t }) StartCount(t); };
             _tree.DragEnter += OnDragEnter;
@@ -276,6 +282,8 @@ namespace NanumCsvViewer
                 Restore(_tree.Nodes);
             }
             finally { _tree.EndUpdate(); }
+            // 다시 만들기 전 선택이 사라졌거나(열린 파일 노드가 원본 노드로 바뀜 등) 동기화 대상 노드가 아직 없었으면 활성 탭에 맞춘다.
+            if (_pendingSyncKey is not null || selected.Length > 0 && _tree.SelectedNode is null) SyncToActiveTab();
         }
 
         private TreeNode Group(string key, string title, int count)
@@ -528,6 +536,13 @@ namespace NanumCsvViewer
         /// <summary>테스트·자동화용: 노드를 찾아 선택한다(필요하면 부모를 펼친다).</summary>
         internal bool Select(Func<NodeInfo, bool> match)
         {
+            if (FindNode(match) is not { } found) return false;
+            _tree.SelectedNode = found;
+            return true;
+        }
+
+        private TreeNode? FindNode(Func<NodeInfo, bool> match)
+        {
             TreeNode? Find(TreeNodeCollection nodes)
             {
                 foreach (TreeNode n in nodes)
@@ -547,36 +562,111 @@ namespace NanumCsvViewer
                 }
             }
             ExpandAll(_tree.Nodes);
-            var found = Find(_tree.Nodes);
-            if (found is null) return false;
-            _tree.SelectedNode = found;
-            return true;
+            return Find(_tree.Nodes);
         }
 
         /// <summary>노드 오른쪽에 그려지는 설명 글자(행 수·⚠ 표시 등). 테스트·자동화용.</summary>
         internal string DetailText(NodeInfo info) => DetailOf(info, out _);
 
-        internal void OpenSelected() { if (_tree.SelectedNode is { } n) OpenNode(n); }
+        // ---------------------------------------------------------------- 클릭 = 탭 고르기 · 탭 → 트리 동기화
+        // 동작은 마우스 왼쪽 클릭(NodeMouseClick)과 Enter에서만 일어난다. 코드로 고른 선택(탭 → 트리 동기화·트리 다시 만들기)과 방향키는 AfterSelect만 일으키므로 아무것도 열지 않는다.
 
+        private string? _pendingSyncKey;   // 동기화하려 했지만 노드가 아직 없었던(트리가 다시 만들어지기 전) 대상
+
+        /// <summary>왼쪽 클릭 한 번이 하는 일(<see cref="Form1.ExplorerClickAsync"/>). 그룹·DB 원본 노드는 하지 않는다(펼치기·선택만).</summary>
+        private async Task ClickNodeAsync(TreeNode node)
+        {
+            if (node.Tag is not NodeInfo { Kind: not (NodeKind.Group or NodeKind.Hint or NodeKind.Source) } info) return;
+            var owner = info.Kind == NodeKind.Column ? (node.Parent?.Tag as NodeInfo)?.Item as IWorkspaceRelation : null;
+            try { await _host.ExplorerClickAsync(info, owner); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine($"[Explorer] click {info.Key}: {ex.Message}"); }
+            finally { if (!IsDisposed) SyncToActiveTab(); }   // 실패·취소로 탭이 안 바뀌었으면 선택을 실제 활성 탭에 맞춘다
+        }
+
+        // 더블클릭 = 클릭과 같다(이미 처리 중이면 합류하므로 두 번 열지 않는다). 그룹은 접고 펼친다.
+        private void OnNodeDoubleClick(TreeNode node)
+        {
+            if (node.Tag is NodeInfo { Kind: NodeKind.Group }) node.Toggle();
+            else _ = ClickNodeAsync(node);
+        }
+
+        // Enter: 클릭과 같고, DB 원본 노드는 통합 문서 파일을 연다.
         private void OpenNode(TreeNode node)
         {
             if (node.Tag is not NodeInfo info) return;
             switch (info.Kind)
             {
-                case NodeKind.Tab or NodeKind.Result when info.Item is DocumentTab tab:
-                    _host.ActivateTab(tab);
-                    break;
-                case NodeKind.Table or NodeKind.View when info.Item is IWorkspaceRelation rel:
-                    _ = _host.OpenRelationCommandAsync(rel);
-                    break;
                 case NodeKind.Source when info.Item is WorkspaceSource src:
                     _ = _host.OpenSourceCommandAsync(src);
                     break;
-                case NodeKind.Group or NodeKind.Column:
+                case NodeKind.Group:
                     node.Toggle();
+                    break;
+                default:
+                    _ = ClickNodeAsync(node);
                     break;
             }
         }
+
+        // 활성 탭이 가리키는 노드의 키. 아직 올리지 않은 파일·결과 탭은 자기 탭 노드, 올린 파일은 그 표(워크북은 지금 보는 시트), 뷰 탭은 그 뷰. 모르면 null.
+        private string? KeyForTab(DocumentTab tab)
+        {
+            switch (tab.Kind)
+            {
+                case TabKind.View:
+                    return _host.ViewOfTab(tab) is { } v ? "view:" + v.Id : null;
+                case TabKind.Result:
+                    return "res:" + tab.Id;
+                default:
+                    if (Form1.FindSourceByPath(_cap.Sources, tab.Path) is not { } src) return "tab:" + tab.Id;
+                    if (src.Tables.Count == 0) return null;
+                    int i = src.Kind == WorkspaceSourceKind.Csv ? 0 : _host.SheetIndexOfTab(tab);
+                    return "tbl:" + src.Tables[i >= 0 && i < src.Tables.Count ? i : 0].SqlReference;
+            }
+        }
+
+        private TreeNode? FindNodeByKey(string key)
+        {
+            TreeNode? Find(TreeNodeCollection nodes)
+            {
+                foreach (TreeNode n in nodes)
+                {
+                    if (n.Tag is not NodeInfo i) continue;
+                    if (i.Key == key) return n;
+                    if (i.Kind is NodeKind.Group or NodeKind.Source && Find(n.Nodes) is { } hit) return hit;
+                }
+                return null;
+            }
+            return Find(_tree.Nodes);
+        }
+
+        /// <summary>
+        /// 활성 탭(과 워크북의 현재 시트)에 해당하는 노드를 고른다 — 클릭 동작 없이, 부모를 펼쳐 보이게. 이미 그 노드(또는 그 표·뷰의 컬럼)가 선택돼 있으면 그대로 둔다.
+        /// 사용자의 클릭이 처리되는 동안에는 하지 않고(끝나면 스스로 다시 맞춘다), 노드가 아직 없으면(트리 갱신 전) 갱신 직후에 다시 한다.
+        /// </summary>
+        internal void SyncToActiveTab()
+        {
+            if (IsDisposed || _host.ExplorerClickRunning) return;
+            _pendingSyncKey = null;
+            if (_host.ActiveTab is not { } tab || KeyForTab(tab) is not { } key) return;
+            if (FindNodeByKey(key) is not { } target) { _pendingSyncKey = key; return; }
+            var sel = _tree.SelectedNode;
+            if (sel is not null && (sel == target || sel.Parent == target && sel.Tag is NodeInfo { Kind: NodeKind.Column })) return;
+            for (var p = target.Parent; p is not null; p = p.Parent) p.Expand();
+            _tree.SelectedNode = target;
+            target.EnsureVisible();
+        }
+
+        /// <summary>테스트·자동화용: 노드를 찾아 마우스 왼쪽 클릭처럼 처리한다(선택하고 클릭 동작). 끝나면 완료되는 작업.</summary>
+        internal Task ClickAsync(Func<NodeInfo, bool> match)
+        {
+            if (FindNode(match) is not { } node) return Task.CompletedTask;
+            _tree.SelectedNode = node;
+            return ClickNodeAsync(node);
+        }
+
+        /// <summary>테스트·자동화용: 트리 컨트롤의 창 핸들(키 메시지를 보낼 때).</summary>
+        internal IntPtr TreeHandle => _tree.Handle;
 
         private void OnTreeKeyDown(object? sender, KeyEventArgs e)
         {

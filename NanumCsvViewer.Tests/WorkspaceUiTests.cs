@@ -612,5 +612,327 @@ namespace NanumCsvViewer.Tests
                 Assert.Contains(form.Explorer!.Controls.OfType<System.Windows.Forms.Label>(), l => l.Name == "workspaceBanner" && l.Text.Contains("native library missing"));
             });
         }
+
+        // ---------------------------------------------------------------- 탐색기 클릭 = 탭 고르기 · 탭 → 트리 동기화
+
+        private const int WmKeyDown = 0x100, WmKeyUp = 0x101, VkDown = 0x28, VkUp = 0x26;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        private string MakeDb(string name)
+        {
+            string db = Path.Combine(_dir, name);
+            _paths.Add(db);
+            var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = db, Pooling = false };
+            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(csb.ConnectionString);
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE alpha (id INTEGER, name TEXT); INSERT INTO alpha VALUES (1,'a'),(2,'b'),(3,'c');" +
+                              "CREATE TABLE beta (k INTEGER); INSERT INTO beta VALUES (10),(20);";
+            cmd.ExecuteNonQuery();
+            return db;
+        }
+
+        private static bool IsTable(WorkspaceExplorer.NodeInfo i, string name) => i.Kind == WorkspaceExplorer.NodeKind.Table && i.Item is WorkspaceTable t && t.Name == name;
+        private static bool IsColumn(WorkspaceExplorer.NodeInfo i, string name) => i.Kind == WorkspaceExplorer.NodeKind.Column && i.Item is WorkspaceColumn c && c.Name == name;
+        private static string Selected(WorkspaceExplorer ex) => ex.SelectedInfo?.Key ?? "";
+        private static System.Windows.Forms.DataGridView GridOf(Form1 f) => Get<System.Windows.Forms.DataGridView>(f, "grid");
+        private static string Status(Form1 f) => Get<System.Windows.Forms.ToolStripStatusLabel>(f, "statusLabel").Text;
+
+        private static WorkspaceExplorer ShowExplorer(Form1 form)
+        {
+            form.SetWorkspaceExplorerVisible(true);
+            var ex = form.Explorer!;
+            ex.RefreshTree();
+            return ex;
+        }
+
+        [Fact]
+        public void One_click_on_a_node_with_an_open_tab_activates_it_like_the_tab_strip_and_the_active_ones_node_does_nothing()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            string b = MakeCsv("b.csv", CsvB);
+            string c = MakeCsv("c.csv", "x\n1\n");
+            OnForm(form =>
+            {
+                var tabA = Open(form, a);
+                var tabB = Open(form, b);
+                var tabC = Open(form, c);                                   // 올리지 않은 파일: "열린 파일" 그룹의 탭 노드
+                Await(form.AddSourcesAsync(new[] { a, b }, NoCancel));
+                var result = Await(form.OpenQueryResultTabAsync("SELECT 1 AS x", "Query 1", NoCancel));
+                WaitIdle(form, result);
+                var view = form.Workspace!.CreateView("v1", "SELECT * FROM b");
+                var viewTab = Await(form.OpenRelationTabAsync(view, NoCancel))!;
+                var ex = ShowExplorer(form);
+
+                Pump(ex.ClickAsync(i => IsTable(i, "a")));
+                Assert.Same(tabA, form.ActiveTab);                          // 표 노드 → 파일 탭
+                Pump(ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.Tab && ReferenceEquals(i.Item, tabC)));
+                Assert.Same(tabC, form.ActiveTab);                          // 올리지 않은 파일의 탭 노드
+                Pump(ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.Result && ReferenceEquals(i.Item, result)));
+                Assert.Same(result, form.ActiveTab);                        // 질의 결과 노드
+                Pump(ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.View && ReferenceEquals(i.Item, view)));
+                Assert.Same(viewTab, form.ActiveTab);                       // 뷰 노드 → 뷰 탭(다시 계산하지 않는다)
+                Assert.Equal(5, form.Tabs.Count);
+
+                int changes = 0, clicks = form.ExplorerClickCount;
+                form.TabsChanged += () => changes++;
+                Pump(ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.View && ReferenceEquals(i.Item, view)));
+                Assert.Equal(0, changes);                                   // 이미 활성인 탭의 노드는 아무것도 바꾸지 않는다
+                Assert.Same(viewTab, form.ActiveTab);
+                Assert.Equal(clicks + 1, form.ExplorerClickCount);
+                Assert.False(form.WorkspaceOperationRunning);
+            });
+        }
+
+        [Fact]
+        public void One_click_on_a_table_that_is_not_open_yet_opens_its_tab()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            OnForm(form =>
+            {
+                Await(form.AddSourcesAsync(new[] { a }, NoCancel));
+                var ex = ShowExplorer(form);
+                Assert.Empty(form.Tabs);
+
+                Pump(ex.ClickAsync(i => IsTable(i, "a")));
+                var tab = Assert.Single(form.Tabs);
+                Assert.Same(tab, form.ActiveTab);
+                Assert.Equal(Path.GetFullPath(a), tab.Path);
+                Assert.False(form.WorkspaceOperationRunning);               // 열기가 끝나면 진행 표시도 걷힌다
+                Assert.Equal("tbl:" + Table(form, "a").SqlReference, Selected(ex));
+            });
+        }
+
+        [Fact]
+        public void One_click_on_a_workbook_sheet_activates_the_workbook_tab_and_switches_to_that_sheet_and_reopens_a_closed_workbook()
+        {
+            string db = MakeDb("book.db");
+            OnForm(form =>
+            {
+                var tab = Open(form, db);
+                var src = Await(form.RegisterTabAsync(tab, NoCancel))!;
+                var other = Open(form, MakeCsv("other.csv", CsvB));         // 워크북 탭을 비활성으로
+                var ex = ShowExplorer(form);
+                Assert.Same(other, form.ActiveTab);
+
+                Pump(ex.ClickAsync(i => IsTable(i, "beta")));
+                Assert.Same(tab, form.ActiveTab);
+                Assert.Equal("beta", tab.SheetName);
+                Pump(ex.ClickAsync(i => IsTable(i, "alpha")));
+                Assert.Equal("alpha", tab.SheetName);
+                Assert.Single(form.Tabs, t => t.Kind == TabKind.Sheet);     // 새 탭을 만들지 않는다
+                Assert.Equal("tbl:" + src.Tables[0].SqlReference, Selected(ex));
+
+                int clicks = form.Tabs.Count;
+                Pump(ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.Source));
+                Assert.Equal(clicks, form.Tabs.Count);                      // DB 원본 노드는 열지 않는다(펼치기·선택만)
+
+                // 탭을 닫은 통합 문서: 표를 누르면 다시 열고 그 시트로.
+                Assert.True(form.CloseTab(tab, askUnsaved: false));
+                PumpUntil(() => tab.DisposeCompletion.IsCompleted, "tab resources released");
+                Pump(ex.ClickAsync(i => IsTable(i, "beta")));
+                var reopened = Assert.Single(form.Tabs, t => t.Kind == TabKind.Sheet);
+                Assert.NotSame(tab, reopened);
+                Assert.Same(reopened, form.ActiveTab);
+                WaitIdle(form, reopened);
+                Assert.Equal("beta", reopened.SheetName);
+            });
+        }
+
+        [Fact]
+        public void One_click_on_a_column_activates_its_tab_and_selects_that_column_in_the_first_displayed_row_without_touching_hidden_columns()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            string b = MakeCsv("b.csv", CsvB);
+            OnForm(form =>
+            {
+                var tabA = Open(form, a);
+                var tabB = Open(form, b);
+                Await(form.AddSourcesAsync(new[] { a, b }, NoCancel));
+                var ex = ShowExplorer(form);
+                Assert.Same(tabB, form.ActiveTab);
+                var grid = GridOf(form);
+
+                Pump(ex.ClickAsync(i => IsColumn(i, "score")));
+                Assert.Same(tabA, form.ActiveTab);
+                Assert.Equal(2, grid.CurrentCell.ColumnIndex);
+                Assert.Equal(0, grid.CurrentCell.RowIndex);
+                Assert.Equal(grid.FirstDisplayedScrollingRowIndex, grid.CurrentCell.RowIndex);
+                Assert.StartsWith("col:" + Table(form, "a").SqlReference + ":", Selected(ex));   // 컬럼 노드가 선택된 채 남는다(되돌려 놓지 않는다)
+
+                // 숨긴 컬럼: 탭은 활성화하되 숨김을 풀지도, 선택을 옮기지도 않고 상태 줄로 알린다.
+                Pump(ex.ClickAsync(i => IsColumn(i, "city")));
+                Assert.Same(tabB, form.ActiveTab);
+                Assert.Equal(1, GridOf(form).CurrentCell.ColumnIndex);
+                Pump(ex.ClickAsync(i => IsColumn(i, "id") && ReferenceEquals(i.Item, Table(form, "a").Columns[0])));
+                Assert.Same(tabA, form.ActiveTab);
+                grid.Columns[1].Visible = false;
+                Get<HashSet<int>>(form, "_hiddenColumns").Add(1);
+                var before = grid.CurrentCell;
+                Pump(ex.ClickAsync(i => IsColumn(i, "name")));
+                Assert.Same(tabA, form.ActiveTab);
+                Assert.False(grid.Columns[1].Visible);
+                Assert.Same(before, grid.CurrentCell);
+                Assert.Contains("name", Status(form));
+                Assert.NotEqual("", Status(form));                          // 안내 문구(언어 설정에 따라 영어·한국어)
+
+                // 아직 열지 않은 표의 컬럼: 열고 나서 고른다.
+                Assert.True(form.CloseTab(tabB, askUnsaved: false));
+                PumpUntil(() => tabB.DisposeCompletion.IsCompleted, "tab resources released");
+                Pump(ex.ClickAsync(i => IsColumn(i, "city")));
+                Assert.Equal(Path.GetFullPath(b), form.ActiveTab!.Path);
+                Assert.Equal(1, GridOf(form).CurrentCell.ColumnIndex);
+            });
+        }
+
+        [Fact]
+        public void Arrow_keys_and_programmatic_selection_only_move_the_selection_and_never_open_anything()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            string b = MakeCsv("b.csv", CsvB);
+            OnForm(form =>
+            {
+                Await(form.AddSourcesAsync(new[] { a, b }, NoCancel));
+                var ex = ShowExplorer(form);
+                Assert.True(ex.Select(i => IsTable(i, "a")));
+                string first = Selected(ex);
+
+                var handle = ex.TreeHandle;
+                SendMessage(handle, WmKeyDown, (IntPtr)VkDown, IntPtr.Zero);
+                SendMessage(handle, WmKeyUp, (IntPtr)VkDown, IntPtr.Zero);
+                Assert.NotEqual(first, Selected(ex));                       // 키가 트리에 닿아 선택이 옮겨 갔다
+                SendMessage(handle, WmKeyDown, (IntPtr)VkDown, IntPtr.Zero);
+                SendMessage(handle, WmKeyDown, (IntPtr)VkUp, IntPtr.Zero);
+                Pump(Task.Delay(50));
+
+                Assert.Empty(form.Tabs);
+                Assert.Equal(0, form.ExplorerClickCount);
+                Assert.False(form.WorkspaceOperationRunning);
+
+                // Enter는 연다.
+                Assert.True(ex.Select(i => IsTable(i, "b")));
+                SendMessage(handle, WmKeyDown, (IntPtr)0x0D, IntPtr.Zero);
+                PumpUntil(() => form.Tabs.Count == 1 && !form.ExplorerClickRunning, "Enter opens the table");
+                Assert.Equal(Path.GetFullPath(b), form.ActiveTab!.Path);
+            });
+        }
+
+        [Fact]
+        public void Switching_tabs_or_sheets_selects_the_matching_node_without_clicking_it()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            string b = MakeCsv("b.csv", CsvB);
+            string c = MakeCsv("c.csv", "x\n1\n");
+            string db = MakeDb("book.db");
+            OnForm(form =>
+            {
+                var tabA = Open(form, a);
+                var tabB = Open(form, b);
+                var tabC = Open(form, c);
+                var tabDb = Open(form, db);
+                Await(form.AddSourcesAsync(new[] { a, b, db }, NoCancel));
+                var result = Await(form.OpenQueryResultTabAsync("SELECT 1 AS x", "Query 1", NoCancel));
+                WaitIdle(form, result);
+                var ex = ShowExplorer(form);
+                int clicks = form.ExplorerClickCount;
+                string Key(string table) => "tbl:" + Table(form, table).SqlReference;
+
+                form.ActivateTab(tabA);
+                Assert.Equal(Key("a"), Selected(ex));
+                form.ActivateTab(tabB);
+                Assert.Equal(Key("b"), Selected(ex));
+                form.ActivateTab(tabC);
+                Assert.Equal("tab:" + tabC.Id, Selected(ex));               // 올리지 않은 파일은 자기 탭 노드
+                form.ActivateTab(result);
+                Assert.Equal("res:" + result.Id, Selected(ex));
+                form.ActivateTab(tabDb);
+                Assert.Equal(Key("alpha"), Selected(ex));
+                Pump(form.SwitchSheetAsync(1));                             // 시트 전환(탭은 그대로)도 따라간다
+                Assert.Equal(Key("beta"), Selected(ex));
+                Pump(form.SwitchSheetAsync(0));
+                Assert.Equal(Key("alpha"), Selected(ex));
+
+                // 탭 → 트리는 클릭이 아니다: 아무 클릭 동작도, 열린 탭 변화도 없다.
+                Assert.Equal(clicks, form.ExplorerClickCount);
+                Assert.Equal(5, form.Tabs.Count);
+
+                // 사용자가 다른 노드를 눌러 탭이 바뀌어도 되돌아 흔들리지 않는다(되먹임 없음).
+                int changes = 0;
+                form.TabsChanged += () => changes++;
+                Pump(ex.ClickAsync(i => IsTable(i, "b")));
+                Assert.Same(tabB, form.ActiveTab);
+                Assert.Equal(Key("b"), Selected(ex));
+                Assert.Equal(1, changes);
+                Assert.Equal(clicks + 1, form.ExplorerClickCount);
+
+                // 탭이 닫히고 트리가 다시 만들어진 뒤에도 선택은 활성 탭의 노드다.
+                Assert.True(form.CloseTab(tabC, askUnsaved: false));
+                form.ActivateTab(tabA);
+                ex.RefreshTree();
+                Assert.Equal(Key("a"), Selected(ex));
+            });
+        }
+
+        [Fact]
+        public void A_newer_click_supersedes_one_still_in_progress_and_the_stale_result_never_activates()
+        {
+            string b = MakeCsv("b.csv", CsvB);
+            string db = MakeDb("book.db");
+            OnForm(form =>
+            {
+                Await(form.AddSourcesAsync(new[] { db, b }, NoCancel));
+                var ex = ShowExplorer(form);
+                Assert.Empty(form.Tabs);
+
+                // 워크북 가져오기는 취소할 수 없다: 뒤 클릭이 오면 그 결과(탭은 열리더라도)는 활성화하지 않는다.
+                var first = ex.ClickAsync(i => IsTable(i, "alpha"));
+                Assert.False(first.IsCompleted);
+                var second = ex.ClickAsync(i => IsTable(i, "b"));
+                Pump(Task.WhenAll(first, second));
+                Assert.Equal(Path.GetFullPath(b), form.ActiveTab!.Path);
+                Assert.Equal(2, form.ExplorerClickCount);
+                Assert.False(form.WorkspaceOperationRunning);
+                Assert.DoesNotContain(form.Tabs, t => t.IsActive && t.Kind == TabKind.Sheet);
+
+                // 취소할 수 있는 뷰 계산은 취소된다(뷰 탭이 생기지 않는다).
+                var view = form.Workspace!.CreateView("heavy", "SELECT sum(sqrt(i * j)) AS s FROM range(200000) x(i), range(200000) y(j)");
+                ex.RefreshTree();
+                var slow = ex.ClickAsync(i => i.Kind == WorkspaceExplorer.NodeKind.View && ReferenceEquals(i.Item, view));
+                Assert.False(slow.IsCompleted);
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                var other = ex.ClickAsync(i => IsTable(i, "alpha"));
+                Pump(Task.WhenAll(slow, other));
+                Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), "the heavy view was not cancelled");
+                Assert.Null(form.FindViewTab(view));
+                Assert.Equal(TabKind.Sheet, form.ActiveTab!.Kind);          // 뒤 클릭(시트)의 탭이 남는다
+                Assert.False(form.WorkspaceOperationRunning);
+            });
+        }
+
+        [Fact]
+        public void Double_click_is_the_same_as_one_click_and_never_opens_a_table_twice()
+        {
+            string db = MakeDb("book.db");
+            OnForm(form =>
+            {
+                Await(form.AddSourcesAsync(new[] { db }, NoCancel));
+                var ex = ShowExplorer(form);
+
+                var first = ex.ClickAsync(i => IsTable(i, "beta"));
+                var second = ex.ClickAsync(i => IsTable(i, "beta"));        // 더블클릭의 둘째 알림
+                Pump(Task.WhenAll(first, second));
+                var tab = Assert.Single(form.Tabs);
+                Assert.Same(tab, form.ActiveTab);
+                WaitIdle(form, tab);
+                Assert.Equal("beta", tab.SheetName);
+                Assert.Equal(1, form.ExplorerClickCount);                  // 둘째는 첫째에 합류했다
+
+                Pump(ex.ClickAsync(i => IsTable(i, "beta")));               // 끝난 뒤의 클릭은 활성 탭이라 아무 일도 없다
+                Assert.Single(form.Tabs);
+                Assert.False(form.WorkspaceOperationRunning);
+            });
+        }
     }
 }
