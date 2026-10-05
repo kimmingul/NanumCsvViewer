@@ -14,7 +14,10 @@ namespace NanumCsvViewer
         private readonly List<WorkspaceFileView> _wfCarriedViews = new();
         private bool _wfBusy;
         private bool _wfCloseDecided;
-        private ToolStripMenuItem? _wfOpenMenu, _wfSaveMenu, _wfSaveAsMenu, _wfRecentMenu;
+        private ToolStripMenuItem? _wfOpenMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, _wfRecentMenu;
+
+        /// <summary>저장 확인(예/아니오/취소) 대화 상자를 대신하는 이음매(테스트용). null이면 실제 MessageBox.</summary>
+        internal Func<string, DialogResult>? WorkspaceSavePrompt;
 
         /// <summary>지금 작업 공간 파일(.ncvws)의 전체 경로. 저장하거나 연 적이 없으면 null(제목 없는 작업 공간).</summary>
         internal string? WorkspaceFilePath => _wfFilePath;
@@ -28,6 +31,7 @@ namespace NanumCsvViewer
             _wfOpenMenu = MakeCmd("file.openWorkspace", async (_, _) => await OpenWorkspaceDialogAsync());
             _wfSaveMenu = MakeCmd("file.saveWorkspace", (_, _) => SaveWorkspace(saveAs: false)); // 작업 공간 파일이 없으면 다른 이름으로 저장 대화상자
             _wfSaveAsMenu = MakeItem("Save Workspace As…", "작업 공간을 다른 이름으로 저장…", (_, _) => SaveWorkspace(saveAs: true));
+            _wfCloseMenu = MakeCmd("file.closeWorkspace", (_, _) => CloseWorkspace());
             _wfRecentMenu = MakeItem("Recent Workspaces", "최근 작업 공간", (_, _) => { });
             _wfRecentMenu.DropDownItems.Add(new ToolStripMenuItem { Enabled = false });
             _wfRecentMenu.DropDownOpening += (_, _) => FillRecentWorkspaceMenu();
@@ -83,7 +87,7 @@ namespace NanumCsvViewer
                 ? LT("This workspace has views or notes that exist only in this session. Save it as a workspace file?",
                      "이 작업 공간에는 이번 실행에만 있는 뷰나 메모가 있습니다. 작업 공간 파일로 저장할까요?")
                 : LT($"Save changes to the workspace '{Path.GetFileName(_wfFilePath)}'?", $"작업 공간 '{Path.GetFileName(_wfFilePath)}'의 변경 사항을 저장할까요?");
-            var answer = MessageBox.Show(this, text, LT("Workspace", "작업 공간"), MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            var answer = WorkspaceSavePrompt?.Invoke(text) ?? MessageBox.Show(this, text, LT("Workspace", "작업 공간"), MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (answer == DialogResult.Cancel) return false;
             return answer != DialogResult.Yes || SaveWorkspace(saveAs: false);
         }
@@ -93,6 +97,48 @@ namespace NanumCsvViewer
             if (_wfFilePath is not null)
                 return WorkspaceFile.Signature(CaptureWorkspaceModel(_wfFilePath)) != _wfSavedSignature;
             return ExistingWorkspace is { } ws && ws.Views.Count > 0 || !string.IsNullOrWhiteSpace(_wfAgent.Notes);
+        }
+
+        /// <summary>파일 ▸ 작업 공간 닫기를 쓸 수 있는가: 작업 공간 파일이 열려 있거나 작업 공간에 원본·뷰가 있다.</summary>
+        internal bool CanCloseWorkspace() =>
+            !_wfBusy && (_wfFilePath is not null || ExistingWorkspace is { } ws && (ws.Sources.Count > 0 || ws.Views.Count > 0));
+
+        private void UpdateCloseWorkspaceMenu()
+        {
+            if (_wfCloseMenu is not null) _wfCloseMenu.Enabled = CanCloseWorkspace();
+        }
+
+        /// <summary>
+        /// 작업 공간을 닫는다: 저장 확인(취소하면 아무것도 바꾸지 않음) → 파일이 있으면 패널 배치만 조용히 반영(앱 종료와 같게) → 모든 탭 닫기(저장 안 한 편집은 묻는다) →
+        /// 원본·뷰 지우기 → 작업 공간 파일·제목·에이전트 상태 비우기 → 앱 시작 레이아웃 적용 → 최근 목록 갱신. 닫았으면 true.
+        /// </summary>
+        internal bool CloseWorkspace()
+        {
+            if (_wfBusy || _closing || IsDisposed || !CanCloseWorkspace()) return false;
+            bool hadChanges = WorkspaceNeedsSave();
+            if (!ConfirmWorkspaceSaved()) return false;
+            if (!hadChanges) SaveWorkspaceLayoutOnClose();
+            string? closed = _wfFilePath;
+            if (!CloseAllTabs(askUnsaved: true)) return false;
+
+            var problems = new List<string>();
+            _wfFilePath = null;
+            _wfAgent = new WorkspaceFileAgent();   // 닫은 작업 공간의 제한·메모·대화 연결을 버린다
+            _wfCarriedViews.Clear();
+            _wfSavedSignature = "";
+            _wfAppliedLayout = null;
+            ClearWorkspaceState(problems);
+            Text = ProgramName;
+            if (LayoutReady) ApplyLayout(StartupLayout());
+            SwitchAgentToOpenedWorkspace();   // 파일 없는 작업 공간으로: 대화는 아직 시작 전이면 그대로 미루고, 떠 있으면 새 대화로
+            if (closed is not null) RememberRecentWorkspace(closed);
+            statusLabel.Text = closed is null
+                ? LT("Workspace closed.", "작업 공간을 닫았습니다.")
+                : LT("Workspace closed: ", "작업 공간을 닫았습니다: ") + closed;
+            if (problems.Count > 0) statusLabel.Text += LT($" ({problems.Count} item(s) could not be removed)", $" (지우지 못한 항목 {problems.Count}개)");
+            PostAgentContext();
+            UpdateCloseWorkspaceMenu();
+            return true;
         }
 
         // ---- 저장 ----------------------------------------------------------------------------------------

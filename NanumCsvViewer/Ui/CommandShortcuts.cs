@@ -18,7 +18,7 @@ namespace NanumCsvViewer
             public string Name => (Loc.CurrentLanguage == "ko" ? Ko : En).TrimEnd('…');
 
             /// <summary>화면에 보이는 키 문자열. 예: "Ctrl+Shift+F".</summary>
-            public string KeyText => Display(Keys);
+            public string KeyText => Keys == Keys.None ? "" : Display(Keys);
         }
 
         private const Keys C = Keys.Control, S = Keys.Shift, A = Keys.Alt;
@@ -29,6 +29,7 @@ namespace NanumCsvViewer
             new("file.closeTab",      "Close Tab",             "탭 닫기",               C | Keys.W),
             new("file.openWorkspace", "Open Workspace…",       "작업 공간 열기…",       C | S | Keys.O),
             new("file.saveWorkspace", "Save Workspace",        "작업 공간 저장",        C | Keys.S),
+            new("file.closeWorkspace", "Close Workspace",      "작업 공간 닫기",        Keys.None),   // 키 없음: 보편적인 키가 비어 있지 않다
             new("file.quit",          "Quit",                  "종료",                  C | Keys.Q),
 
             new("edit.undo",          "Undo",                  "되돌리기",              C | Keys.Z, DisplayOnly: true),
@@ -91,14 +92,14 @@ namespace NanumCsvViewer
         }
 
         /// <summary>이름 + 단축키 툴팁. 예: "Open… (Ctrl+O)" — 키가 없으면 이름만.</summary>
-        public static string Tip(string text, string id) => text.TrimEnd('…') + " (" + Get(id).KeyText + ")";
+        public static string Tip(string text, string id) => Get(id).Keys == Keys.None ? text.TrimEnd('…') : text.TrimEnd('…') + " (" + Get(id).KeyText + ")";
 
         /// <summary>모든 키(주키+보조키)를 (키, 명령 Id)로 펼친다 — 충돌 검사용.</summary>
         public static IEnumerable<(Keys Keys, string Id)> AllBindings()
         {
             foreach (var e in All)
             {
-                yield return (e.Keys, e.Id);
+                if (e.Keys != Keys.None) yield return (e.Keys, e.Id);
                 if (e.Alternates is { } alt) foreach (var k in alt) yield return (k, e.Id);
             }
         }

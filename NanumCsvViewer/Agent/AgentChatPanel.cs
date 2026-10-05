@@ -198,6 +198,9 @@ namespace NanumCsvViewer.Agent
                 core.NavigationStarting += OnNavigationStarting;
                 core.NewWindowRequested += OnNewWindowRequested;
                 core.WebMessageReceived += OnWebMessageReceived;
+                // WinForms 래퍼는 컨트롤러를 공개하지 않는다. 없으면(래퍼 버전이 바뀌면) 단축키 전달만 빠지고 나머지는 그대로 동작한다.
+                if (typeof(WebView2).GetField("_coreWebView2Controller", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(web) is CoreWebView2Controller controller)
+                    controller.AcceleratorKeyPressed += OnAcceleratorKeyPressed;
                 core.ProcessFailed += OnProcessFailed;
                 core.Navigate(PageUrl);
             }
@@ -241,6 +244,37 @@ namespace NanumCsvViewer.Agent
             _fallback = panel;
             Controls.Add(panel);
             panel.BringToFront();
+        }
+
+        /// <summary>
+        /// 채팅 입력창에 포커스가 있으면 WebView2가 키를 먼저 받아 메뉴 단축키(Ctrl+, · F4 · Ctrl+Shift+W …)가 폼에 닿지 않는다.
+        /// 앱 단축키로 볼 수 있는 키만 폼에 넘기고(폼이 처리하면 WebView2에는 주지 않는다), 입력창의 편집 키는 그대로 둔다.
+        /// </summary>
+        internal static bool ForwardsToApp(Keys key)
+        {
+            var code = key & Keys.KeyCode;
+            var mods = key & Keys.Modifiers;
+            if (code >= Keys.F1 && code <= Keys.F12) return true;
+            if ((mods & (Keys.Control | Keys.Alt)) == 0) return false;
+            if (code is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.None) return false;
+            bool plain = code is (>= Keys.A and <= Keys.Z) or (>= Keys.D0 and <= Keys.D9) or Keys.Tab or (>= Keys.Oem1 and <= Keys.Oem102);
+            if (!plain) return false;   // Enter · 방향키 · Backspace · Delete · Home/End … 는 입력창이 쓴다
+            if ((mods & Keys.Control) != 0 && code is Keys.A or Keys.C or Keys.V or Keys.X or Keys.Z or Keys.Y) return false;   // 입력창의 선택·복사·붙여넣기·되돌리기
+            return true;
+        }
+
+        private void OnAcceleratorKeyPressed(object? sender, CoreWebView2AcceleratorKeyPressedEventArgs e)
+        {
+            if (e.KeyEventKind is not (CoreWebView2KeyEventKind.KeyDown or CoreWebView2KeyEventKind.SystemKeyDown)) return;
+            if (!ForwardsToApp((Keys)e.VirtualKey | ModifierKeys) || FindForm() is not { } form) return;
+            var msg = new Message
+            {
+                HWnd = form.Handle,
+                Msg = e.KeyEventKind == CoreWebView2KeyEventKind.SystemKeyDown ? 0x0104 : 0x0100,   // WM_SYSKEYDOWN : WM_KEYDOWN
+                WParam = (IntPtr)e.VirtualKey,
+                LParam = IntPtr.Zero,
+            };
+            if (form.PreProcessMessage(ref msg)) e.Handled = true;
         }
 
         // ── WebView2 이벤트 ────────────────────────────────────────────────────────

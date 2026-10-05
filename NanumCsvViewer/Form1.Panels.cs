@@ -149,12 +149,14 @@ namespace NanumCsvViewer
             _placingSplitters++;
             try
             {
+                // AI 패널을 먼저 정한다: 본문(outerSplit)의 폭이 AI 패널을 켜고 끄는 데 따라 바뀌므로, 그 뒤에 행 상세 폭을 잡아야 어긋나지 않는다.
+                SetAgentPanelVisible(l.Agent, focus: false);
                 SetWorkspaceExplorerVisible(l.Explorer);
                 SetCellBarVisible(l.CellBar);
                 SetDetailPanelVisible(l.Detail);
                 SetFacetsVisible(l.Facets);
                 if (l.Findings || _qualityPanel is not null) SetFindingsVisible(l.Findings);
-                SetAgentPanelVisible(l.Agent, focus: false);
+                if (l.Detail) PlaceDetailSplitter();   // 패싯·검사 결과를 정한 뒤 최종 폭 기준으로 한 번 더
             }
             finally { _placingSplitters--; }
         }

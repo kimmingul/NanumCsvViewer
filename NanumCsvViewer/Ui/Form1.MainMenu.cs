@@ -42,7 +42,7 @@ namespace NanumCsvViewer
             item.Name = id;
             item.Tag = id;
             item.ShortcutKeyDisplayString = e.KeyText;
-            if (!e.DisplayOnly) item.ShortcutKeys = e.Keys;
+            if (!e.DisplayOnly && e.Keys != Keys.None) item.ShortcutKeys = e.Keys;
             return item;
         }
 
@@ -78,9 +78,10 @@ namespace NanumCsvViewer
             Fill(_fileMenu,
                 _openMenu, _clipboardOpenMenu, Sep(),
                 _closeTabMenu, _closeOthersMenu, _closeAllTabsMenu, Sep(),
-                _wfOpenMenu, _wfRecentMenu, _wfSaveMenu, _wfSaveAsMenu, Sep(),
+                _wfOpenMenu, _wfRecentMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, Sep(),
                 _exportMenu, Sep(),
                 _quitMenu);
+            _fileMenu.DropDownOpening += (_, _) => UpdateCloseWorkspaceMenu();
 
             // ---- 편집
             _copyMenu = MakeCmd("edit.copy", (_, _) => CopySelectedCells());

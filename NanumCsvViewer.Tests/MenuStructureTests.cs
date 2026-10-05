@@ -688,6 +688,21 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public void Autofit_keeps_the_whole_header_name_next_to_the_type_badge_and_the_filter_funnel_when_the_values_are_short()
+        {
+            OnForm(form =>
+            {
+                Open(form, MakeCsv("h.csv", "amount,x\n1,2\n3,4\n"));
+                var grid = GridOf(form);
+                grid.Columns[0].Width = 400;
+                Invoke(form, "AutoFitColumn", 0);
+                var font = grid.ColumnHeadersDefaultCellStyle.Font ?? grid.Font;
+                int name = TextRenderer.MeasureText("amount", font).Width;
+                Assert.True(grid.Columns[0].Width >= name + 70, $"width {grid.Columns[0].Width} cuts the header (name {name}px)");   // 이름 + 여백·배지·깔때기·정렬 화살표(예전 계산은 이름+64에서 'amou…'로 잘렸다)
+            });
+        }
+
+        [Fact]
         public void Quick_analysis_opens_the_analysis_dialog_preselected_on_the_header_column()
         {
             OnForm(form =>

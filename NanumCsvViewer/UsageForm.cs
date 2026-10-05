@@ -56,7 +56,7 @@ namespace NanumCsvViewer
         private static string ShortcutList()
         {
             var sb = new System.Text.StringBuilder();
-            foreach (var e in CommandShortcuts.All)
+            foreach (var e in CommandShortcuts.All.Where(x => x.Keys != Keys.None))
             {
                 string keys = e.KeyText;
                 if (e.Alternates is { Length: > 0 } alt) keys += " / " + string.Join(" / ", alt.Select(CommandShortcuts.Display));

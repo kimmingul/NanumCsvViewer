@@ -309,8 +309,14 @@ namespace NanumCsvViewer
             {
                 var font = grid.DefaultCellStyle.Font ?? grid.Font;
                 const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
-                // 헤더에는 타입 배지와 필터 깔때기가 얹히므로 여유를 더 준다.
-                int width = TextRenderer.MeasureText(grid.Columns[col].HeaderText, font, Size.Empty, flags).Width + 64;
+                // 헤더(OnGridCellPainting과 같은 배치): 왼쪽 여백 + 이름 + 타입 배지 + 필터 깔때기 + 정렬 화살표 여유.
+                var headerFont = grid.ColumnHeadersDefaultCellStyle.Font ?? grid.Font;
+                int width = 6 + TextRenderer.MeasureText(grid.Columns[col].HeaderText, headerFont).Width + 2 + 18 + 16 + 4;
+                if (_showTypeBadges && col < _columnSummaries.Length)
+                {
+                    using var g = grid.CreateGraphics();
+                    width += 6 + MeasureBadgeWidth(g, _columnSummaries[col].InferredType);
+                }
                 int first = 0;
                 try { if (grid.RowCount > 0 && grid.FirstDisplayedScrollingRowIndex >= 0) first = grid.FirstDisplayedScrollingRowIndex; } catch { /* 레이아웃 전 */ }
                 int last = Math.Min(grid.RowCount, first + 300);
