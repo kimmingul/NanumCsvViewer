@@ -67,7 +67,7 @@ namespace NanumCsvViewer
             splitContainer1 = new SplitContainer();
             cellValueTextBox = new TextBox();
             cellAddressBox = new TextBox();
-            grid = new DataGridView();
+            grid = new BufferedDataGridView();
             detailRichText = new RichTextBox();
             detailHeaderLabel = new Label();
             toolStripSeparatorD = new ToolStripSeparator();
@@ -715,7 +715,7 @@ namespace NanumCsvViewer
         private ToolStripButton themeToggleButton;
         private ToolStripSeparator toolStripSeparatorD;
         private ToolStripMenuItem detailPanelMenuItem;
-        private DataGridView grid;
+        private BufferedDataGridView grid;
         private StatusStrip statusStrip1;
         private ToolStripStatusLabel statusLabel;
         private ToolStripStatusLabel progressLabel;
