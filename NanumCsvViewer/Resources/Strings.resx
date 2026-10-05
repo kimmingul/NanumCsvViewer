@@ -149,6 +149,12 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Workspace agent settings can only tighten: the effective value is the stricter of the app setting and the workspace value (approval: always ask > edits auto > allow all; data: summary only > rows with approval > rows allowed; local Python: off > on). To loosen, change the app default (Tools ▸ Settings… ▸ AI Agent, choose "App default"). The chat shows a "🔒 Workspace" chip when the workspace limits something.
 • In the Workspace Explorer, views made by the AI agent show ✦ instead of ◈; the tooltip tells who created the view, when, and the request that led to it. Views from older (v1) files have no such info.
 
+[Analysis skills &amp; Python environment]
+• With local Python on (Settings ▸ AI Agent), the agent can use 20 bundled analysis skills (clinical 7, statistics 9, machine learning 3, app 1; about 550 tokens; nothing is loaded while Python is off). Turn all, a category, or single skills off under "Analysis skills"; changing it restarts the agent on the same conversation. The skills are third-party (K-Dense, MIT) instructions.
+• The app's validated tools and menu analyses come first; Python is for analyses the app lacks or when you ask for it. Python results carry the "Python analysis (outside the app's validated tools)" label and a reproducibility header. Even with Summary only, Python output can reach the model — this is guidance, not a hard guarantee.
+• Settings ▸ AI ▸ Python environment installs an app-managed venv (pinned versions, prebuilt wheels only; 64-bit Intel/AMD Python 3.10–3.13) by group. The agent asks for packages with py.ensure_packages and you approve.
+• Tools ▸ Export Python Analysis Bundle…: exports scripts, report, figures and requirements.lock to a folder/zip (data excluded by default).
+
 [Context menus]
 • Right-click a cell: Copy, Filter ▸ (this value / exclude / ≥ / ≤), sort this column, hide column, conditional formatting, Ask AI ▸ (summarize the column / analyze rows with this value — opens the AI panel and sends the question), plus the edit commands (disabled until Sheet Edit is on; "Turn On Sheet Edit" is at the top).
 • Right-click a column header: sort, filter, hide, freeze columns up to here, auto-fit width, change type, Quick Analysis ▸ (descriptive / frequency / distribution for that column), and rename/insert/delete column in Sheet Edit mode.

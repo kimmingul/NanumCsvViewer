@@ -1,0 +1,14 @@
+# title-en: Core data analysis
+# title-ko: 핵심 데이터 분석
+# desc-en: pandas, numpy, scipy, statsmodels, matplotlib, seaborn, pyarrow, openpyxl - tables, tests, regression, plots, Excel/Parquet files.
+# size-mb: 435
+# desc-ko: pandas·numpy·scipy·statsmodels·matplotlib·seaborn·pyarrow·openpyxl - 표 다루기, 검정, 회귀, 그림, Excel·Parquet 파일.
+# Every pin has a win_amd64 wheel for CPython 3.10-3.13 (checked with pip --dry-run --only-binary=:all:); no wheel for win_arm64.
+pandas==2.3.3
+numpy==2.2.6
+scipy==1.15.3
+statsmodels==0.14.5
+matplotlib==3.10.8
+seaborn==0.13.2
+pyarrow==22.0.0
+openpyxl==3.1.5

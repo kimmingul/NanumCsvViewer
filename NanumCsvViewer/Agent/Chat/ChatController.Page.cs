@@ -68,7 +68,7 @@ namespace NanumCsvViewer.Agent
                     Dialogs.SetClipboard(msg.Str("text"));
                     break;
                 case "openUrl":
-                    Dialogs.OpenUrl(msg.Str("url"));
+                    if (!TryHandleAppUrl(msg.Str("url"))) Dialogs.OpenUrl(msg.Str("url"));
                     break;
                 default:
                     PageMessageUnhandled?.Invoke(msg);

@@ -140,7 +140,8 @@ namespace NanumCsvViewer
 
             // ---- 도구
             _settingsMenu = MakeCmd("tools.settings", (_, _) => ShowSettings());
-            Fill(_toolsMenu, _settingsMenu, Sep(), _perfMenu, _indexCacheMenu);
+            _pythonBundleMenu = MakeCmd("tools.exportPythonBundle", (_, _) => ExportPythonBundle());
+            Fill(_toolsMenu, _settingsMenu, Sep(), _pythonBundleMenu, Sep(), _perfMenu, _indexCacheMenu);
 
             // ---- 도움말
             _usageMenu = MakeCmd("help.usage", OnUsageClick);

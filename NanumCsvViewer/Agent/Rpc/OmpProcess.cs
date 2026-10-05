@@ -130,22 +130,44 @@ namespace NanumCsvViewer.Agent.Rpc
         /// always-ask는 쓰기·실행을, write는 실행(bash·Python)만, yolo는 아무것도 묻지 않는다. 묻는 경우 omp가 extension_ui_request를 보내고
         /// 앱은 그것을 채팅 승인 카드로 보여 준다. 사용자가 ExtraArgs에 --approval-mode를 주면 실행 인자가 이 설정보다 우선한다.
         /// </summary>
-        public static string HostConfigJson(AgentApprovalMode mode) =>
-            "{\"tools\":{\"xdevInlineDevices\":[\"csv.*\"],\"approvalMode\":\"" + AgentApprovalPolicy.ToOmp(mode) + "\"}}";
+        public static string HostConfigJson(AgentApprovalMode mode, string? pythonInterpreter = null) =>
+            "{\"tools\":{\"xdevInlineDevices\":[\"csv.*\"],\"approvalMode\":\"" + AgentApprovalPolicy.ToOmp(mode) + "\"}" +
+            (string.IsNullOrEmpty(pythonInterpreter) ? "" : ",\"python\":{\"interpreter\":" + System.Text.Json.JsonSerializer.Serialize(pythonInterpreter) + "}") + "}";
 
         public static string StderrLogPath(string tag) => Path.Combine(TempDirectory, $"omp.stderr-p{tag}.log");
         public static string HostConfigPath(string tag) => Path.Combine(TempDirectory, $"omp-host-p{tag}.yml");
         public static string GuidePath(string tag) => Path.Combine(TempDirectory, $"agent-guide-p{tag}.md");
+        /// <summary>분석 스킬 폴더를 omp skills.customDirectories에 거는 덧씌우기(--config). 프로세스마다 따로라 앱 인스턴스끼리 부딪히지 않는다.</summary>
+        public static string SkillsOverlayPath(string tag) => Path.Combine(TempDirectory, $"omp-skills-p{tag}.yml");
 
-        /// <summary>--mode rpc-ui --cwd &lt;dir&gt; --config &lt;yml&gt; [--append-system-prompt &lt;guide&gt;] [--resume &lt;session&gt;] [extra...]</summary>
-        public static List<string> BuildArguments(string workingDirectory, string? hostConfigPath, string? guidePath, string? extraArgs, string? resumeSessionPath = null)
+        /// <summary>--mode rpc-ui --cwd &lt;dir&gt; --config &lt;host.yml&gt; [--config &lt;skills overlay&gt;] [--append-system-prompt &lt;guide&gt;] [--resume &lt;session&gt;] [extra...]</summary>
+        public static List<string> BuildArguments(string workingDirectory, string? hostConfigPath, string? guidePath, string? extraArgs, string? resumeSessionPath = null,
+            string? skillsOverlayPath = null)
         {
             var args = new List<string> { "--mode", "rpc-ui", "--cwd", workingDirectory };
             if (!string.IsNullOrEmpty(hostConfigPath)) { args.Add("--config"); args.Add(hostConfigPath); }
+            if (!string.IsNullOrEmpty(skillsOverlayPath)) { args.Add("--config"); args.Add(skillsOverlayPath); }
             if (!string.IsNullOrEmpty(guidePath)) { args.Add("--append-system-prompt"); args.Add(guidePath); }
             if (!string.IsNullOrEmpty(resumeSessionPath)) { args.Add("--resume"); args.Add(resumeSessionPath); }
             args.AddRange(SplitArguments(extraArgs));
             return args;
+        }
+
+        /// <summary>
+        /// 스킬 덧씌우기 파일을 쓴다(실을 스킬이 없으면 이전 파일을 지우고 null). <paramref name="userDirectories"/>는 사용자가 omp에 이미 지정한
+        /// skills.customDirectories(덧씌우기가 배열을 대체하므로 그대로 유지한다).
+        /// </summary>
+        public static string? WriteSkillsOverlay(string tag, SkillLaunch? skills, IEnumerable<string>? userDirectories = null)
+        {
+            string path = SkillsOverlayPath(tag);
+            if (skills is null)
+            {
+                try { File.Delete(path); } catch { }
+                return null;
+            }
+            Directory.CreateDirectory(TempDirectory);
+            File.WriteAllText(path, SkillPack.OverlayJson(skills.Directory, userDirectories), new UTF8Encoding(false));
+            return path;
         }
 
         /// <summary>공백으로 나누되 큰따옴표 안은 한 인자로 본다(따옴표는 제거).</summary>
@@ -182,12 +204,12 @@ namespace NanumCsvViewer.Agent.Rpc
 
         /// <summary>임시 폴더에 host.yml과 가이드를 쓰고 경로를 돌려준다(가이드 없으면 null).</summary>
         public static (string HostConfig, string? Guide) WriteSupportFiles(string tag, string? guideText, string language, string? extraSection = null,
-            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default)
+            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default, string? pythonInterpreter = null)
         {
             Directory.CreateDirectory(TempDirectory);
             PruneStaleFiles();
             string host = HostConfigPath(tag);
-            File.WriteAllText(host, HostConfigJson(approvalMode), new UTF8Encoding(false));
+            File.WriteAllText(host, HostConfigJson(approvalMode, pythonInterpreter), new UTF8Encoding(false));
             string? guide = null;
             if (!string.IsNullOrEmpty(guideText))
             {
@@ -210,7 +232,7 @@ namespace NanumCsvViewer.Agent.Rpc
             try
             {
                 var cutoff = DateTime.UtcNow - TimeSpan.FromDays(7);
-                foreach (string pattern in new[] { "omp-host-p*.yml", "agent-guide-p*.md", "omp.stderr-p*.log" })
+                foreach (string pattern in new[] { "omp-host-p*.yml", "omp-skills-p*.yml", "agent-guide-p*.md", "omp.stderr-p*.log" })
                     foreach (string file in Directory.EnumerateFiles(TempDirectory, pattern))
                     {
                         try { if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file); } catch { }

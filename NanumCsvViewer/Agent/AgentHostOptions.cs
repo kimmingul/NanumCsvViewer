@@ -17,6 +17,11 @@ namespace NanumCsvViewer.Agent
     /// <param name="ApprovalNoticePending">true면 다음 연결 때 기본 모드(yolo) 안내를 채팅에 한 번 보이고 ApprovalNoticeShown을 올린다.</param>
     /// <param name="Limits">작업 공간 파일(.ncvws)의 설정이 앱 설정보다 엄격해서 실제로 조여진 항목(<see cref="WorkspaceAgentPolicy.Apply"/>가 채운다).
     /// ApprovalMode·DataPolicy·AllowLocalPython은 이미 합쳐진(더 엄격한) 값이다.</param>
+    /// <param name="SkillsEnabled">분석 스킬 묶음 전체 켜기/끄기. AllowLocalPython이 꺼져 있으면 어느 쪽이든 아무것도 싣지 않는다(토큰 비용 0).</param>
+    /// <param name="SkillCategoriesOff">끈 스킬 분류(쉼표 목록: clinical, stats, ml).</param>
+    /// <param name="SkillsOff">끈 개별 스킬 이름(쉼표 목록).</param>
+    /// <param name="UseManagedPython">앱이 관리하는 Python 분석 환경(%LOCALAPPDATA%\NanumCsvViewer\python-analysis)이 있으면 에이전트의 Python을 그것으로 한다(기본 켬). 없으면 사용자 Python.</param>
+    /// <param name="PythonEnvNoticePending">true면 관리 환경 없이 로컬 Python을 처음 켠 연결에서 설정 안내를 채팅에 한 번 보이고 PythonEnvNoticeShown을 올린다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
@@ -27,8 +32,16 @@ namespace NanumCsvViewer.Agent
         bool AllowLocalPython = false,
         AgentApprovalMode ApprovalMode = AgentApprovalPolicy.Default,
         bool ApprovalNoticePending = false,
-        WorkspaceLimits Limits = default)
+        WorkspaceLimits Limits = default,
+        bool SkillsEnabled = true,
+        string SkillCategoriesOff = "",
+        string SkillsOff = "",
+        bool UseManagedPython = true,
+        bool PythonEnvNoticePending = false)
     {
+        /// <summary>분석 스킬 구성(설정). 로컬 Python이 켜져 있을 때만 실제로 실린다(<see cref="SkillSelection"/>).</summary>
+        internal SkillSelection Skills => SkillSelection.Create(SkillsEnabled, (SkillCategoriesOff ?? "").Split(','), (SkillsOff ?? "").Split(','));
+
         public bool IsKorean => !string.Equals(Language, "en", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>추가 인자(--approval-mode·--yolo·--auto-approve)가 승인 모드를 고정하면 그 모드와 원인 인자, 아니면 null.</summary>

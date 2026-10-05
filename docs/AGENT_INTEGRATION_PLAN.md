@@ -144,3 +144,36 @@ NanumCsvViewer.exe
 - **시작 때 AI 패널 표시 + omp 지연 시작**: 시작 패널 기본은 AI 켜짐·행 상세 꺼짐·패싯 꺼짐(설정 ▸ 패널과 배치, 또는 "마지막 상태 기억"). 패널이 켜져 있어도 omp 프로세스는 시작하지 않고 채팅에 "준비됨 — omp는 첫 메시지를 보낼 때 시작합니다"를 보여 준다(상태 JSON의 `ready` 플래그로 omp 연결 전에도 입력 가능). **첫 메시지를 보내면** 그 메시지를 대기열에 넣고 omp를 시작해 연결되면 전송한다. 시작 전 설정 변경·작업 공간 전환·`/new`는 지연 시작만 다시 걸어 두고, 시작에 실패하면 메시지는 버려지고 채팅에 안내가 뜬다.
 - **AI 설정은 설정 ▸ AI 에이전트 쪽으로 이동**: 옛 "AI 에이전트 설정…" 대화상자 대신 도구 ▸ 설정…(`Ctrl+,`)의 AI 에이전트 쪽에 같은 내용(적용 대상 선택, 더 엄격한 쪽 우선, omp 경로·추가 인자·행 상한, 승인 모드 잠금)이 있다. 채팅 창의 ⚙는 이 쪽을 바로 연다. 값이 바뀐 경우에만 적용해, 다른 쪽만 고친 확인이 AI 확인창을 띄우지 않는다.
 - **AI에게 묻기 우클릭 메뉴**: 셀 우클릭 ▸ AI에게 묻기 ▸ "이 컬럼 요약" · "이 값을 가진 행 분석". 선택하면 AI 패널을 열고 미리 쓴 질문(컬럼 이름·셀 값 포함)을 채팅으로 보낸다. 처음 보내는 질문이면 위의 지연 시작 경로를 탄다. 데이터 정책·승인 모드는 그대로 적용된다.
+
+## 13. 분석 스킬 팩과 관리형 Python 환경
+
+목적: 임상 연구·일반 통계·기계학습 Python 분석에서 앱의 검증된 도구를 먼저 쓰게 하고, 앱에 없는 분석에만 검증되지 않은 제3자 스킬과 고정된 Python 환경을 쓰게 한다.
+
+### 13.1 분석 스킬 팩
+
+- **구성**: `Agent/Skills/**`를 exe에 내장한다(`NanumCsvViewer.csproj`가 `Agent\Skills\**`를 임베드). K-Dense-AI/scientific-agent-skills v2.72.0(커밋 526ebce, MIT)에서 19개를 원본 그대로 복사했고, 앱 전용 `nanum-python-analysis`가 추가된다. 분류는 clinical 7, stats 9, ml 3, app 1. `manifest.json`이 분류·이유·Python 의존성·주의·토큰 추정(omp 시스템 프롬프트의 이름+첫 문장 줄 길이/4, 합계 553)과 검토 후 제외한 26개(네트워크·GPU·업로드·환자 개별 판단 등)를 기록한다. 포함한 스크립트는 네트워크/subprocess/자격증명 패턴 검사(`SkillPackTests`)를 통과한다. 고지문은 `THIRD_PARTY_NOTICES.md`·MIT 전문·`ChatAssets/NOTICE.txt` 4절에 있다.
+- **로딩 조건**: 로컬 Python이 켜져 있고 마스터 스위치가 켜져 있을 때만. 꺼져 있으면 아무것도 풀지 않고 오버레이도 쓰지 않으며 비용은 0 토큰. `nanum-python-analysis`는 팩의 일부로 단독 로드되지 않고, 팩이 켜져 있으면 분류를 모두 꺼도 로드된다.
+- **압축 해제**: omp 시작 전에 켜진 스킬만 `%LOCALAPPDATA%\NanumCsvViewer\skills\<내용해시>\sel-<선택해시>\`에 푼다(임시 폴더 + 원자적 이동, 재실행은 아무 일도 안 함, 다른 해시 폴더 삭제, 선택 폴더는 최근 4개만 유지). 각 선택 폴더에 MIT 전문·고지문·manifest가 함께 들어간다.
+- **omp `--config` 오버레이**: `{"skills":{"customDirectories":[<사용자 디렉터리>, <우리 디렉터리>]}}`를 `%TEMP%\NanumCsvViewer\omp-skills-p<tag>.yml`(프로세스별)에 쓰고, omp를 `--config host.yml --config skills.yml` 순서로 시작한다(host.yml이 항상 첫 번째라 기존 `--config` 조회 코드는 영향이 없다). 사용자의 기존 `skills.customDirectories`는 `omp config get skills.customDirectories --json`으로 읽어 우리 것 앞에 유지한다. 사용자의 전역 `~/.omp` 설정은 건드리지 않는다.
+- **includeSkills/ignoredSkills를 쓰지 않은 이유**: 실제 omp 18.4.4에서 확인한 결과 오버레이의 배열은 사용자 값을 병합하지 않고 **대체**한다. `ignoredSkills`를 쓰면 사용자가 기본으로 무시하던 스킬(debugging, ide-file-operations, project-management)이 되살아나고, `includeSkills`를 쓰면 사용자 자신의 스킬이 사라진다. 그래서 켜진 스킬만 풀어 두는 방식으로 토글을 구현했다.
+- **재시작**: 원하는 스킬 키(마스터·분류·스킬별·로컬 Python 켜짐/꺼짐)가 실행 중인 것과 다르면 같은 대화로 에이전트를 다시 시작한다("분석 스킬 설정을 적용하는 중…"). 같은 선택이면 재시작하지 않는다.
+- **라우팅**: `AgentGuide.md`의 '앱 도구 먼저, Python은 그 다음'(항상 프롬프트에 있음). ① 에이전트가 부를 수 있는 도구(`csv.column_stats`·`csv.quality_scan`·`csv.run_analysis`(describe|glm|ancova|glzm|logistic)·`ws.*`) ② 앱에 있지만 사용자가 메뉴에서 실행해야 하는 분석은 안내만 하고 Python으로 다시 만들지 않음 ③ 앱에 없거나 사용자가 명시한 분석만 Python+스킬. 어느 길을 썼는지 답에 밝힌다. `PythonGuide`는 스킬이 실리면 `skill://nanum-python-analysis`를 먼저 읽고 보고서 머리말에 쓴 스킬 이름을 적게 한다.
+- **앱 전용 스킬**: 내보낸 데이터 배치, 출력 데이터 정책, 재현성 머리말(`assets/analysis_template.py`의 `repro_header()`), 정직한 보고, 보고서·그림 위치, 'Python 분석 (앱 검증 범위 밖)' 표기, 연구 전용 경계, `pip install`·네트워크 금지.
+- **설정 UI**: 설정 ▸ AI 에이전트 ▸ '분석 스킬'(마스터, 분류별 개수 7/9/3, 스킬 목록·설명·토큰, 총 토큰 추정, 제3자 안내, Python 꺼짐 안내, '요약만'+Python 경고 — 하드 보장이 아니라 안내).
+
+### 13.2 관리형 Python 분석 환경
+
+- **환경**: `%LOCALAPPDATA%\NanumCsvViewer\python-analysis`의 독립 venv(system-site-packages 없음, 시스템 Python 불변). 요구사항은 내장 `Agent/Python/requirements/{core,stats,clinical,ml}.txt` 4묶음(`name==ver[; python_version<…]`).
+- **설치 규칙**: pip는 항상 `--only-binary=:all: --require-virtualenv`(소스 빌드 없음). win-amd64의 CPython 3.10~3.13만 지원하고 ARM64·32비트는 거절한다. scikit-survival은 `python_version < "3.13"`(의존 패키지 ecos에 Windows 3.13 wheel 없음), aeon은 3.10에서 1.3·3.11 이상에서 1.6. 설치 뒤 import를 확인하고 `requirements.lock`(pip freeze)과 묶음 지문 `env.json`을 기록한다.
+- **에이전트 연결**: host.yml의 `python.interpreter`를 이 venv로 지정(omp 18.4.4에서 설정 존재와 실제 `eval`이 venv python을 쓰는 것을 확인). 가이드에 인터프리터·설치된 묶음·"스스로 pip 금지, `py.ensure_packages` 사용"을 적는다.
+- **`py.ensure_packages`**: 에이전트가 묶음 이름(`core`·`stats`·`clinical`·`ml`)으로 요청하면 앱이 사용자 승인(FileSave 종류 — 승인 모드를 따름)을 받은 뒤 관리형 환경에만 설치하고 진행을 채팅 알림으로 올린다. 환경이 없으면 만들고, 에이전트가 다시 시작될 때 `eval`이 그 환경으로 바뀐다.
+- **재현 패키지 내보내기**: 도구 ▸ Python 분석 재현 패키지 내보내기… — 스크립트·보고서·그림·`requirements.lock`·README를 폴더/zip으로. 데이터는 기본 제외.
+
+### 13.3 한계와 위험
+
+- 스킬은 제3자 지시문이다. 일부 원문이 `uv pip install`·네트워크 단계를 말하는데 앱 스킬·가이드가 금지할 뿐 기술적 차단은 아니다.
+- `csv.run_analysis`는 describe|glm|ancova|glzm|logistic만 실행한다. 나머지 앱 분석은 사용자가 시작해야 한다.
+- 스킬 선택은 앱 전체 설정이며 작업 공간 파일의 '더 엄격한 쪽 우선' 대상이 아니다. omp는 스킬 설명의 첫 문장(약 100자)만 프롬프트에 싣는다.
+- '요약만' 정책에서도 Python 출력은 모델에 갈 수 있다. 출력 정책은 지시이며 하드 보장이 아니다.
+- 앱 정보 창에는 라이선스 목록이 없다(고지는 `NOTICE.txt`와 풀린 스킬 폴더에 있음).
+- 검증: `SkillPackTests` 39개, 전체 1837 통과. 실제 omp 18.4.4 + 합성 자료로 스킬 발견과 Bland-Altman(라벨·머리말·산출물) 확인.

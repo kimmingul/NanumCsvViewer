@@ -433,6 +433,9 @@ namespace NanumCsvViewer
         private readonly NumericUpDown _maxRows;
         private readonly TextBox _omp, _extra;
         private readonly CheckBox _python;
+        private readonly PythonEnvSection _pyEnv;
+        private readonly SkillsSection _skills;
+        internal SkillsSection Skills => _skills;
         private readonly Label _locked;
         private bool _loading;
         private (AgentApprovalMode Mode, AgentDataPolicy Policy, bool Python) _baseline;
@@ -475,6 +478,14 @@ namespace NanumCsvViewer
             Note(() => LT(
                 "When on, the agent may export the current view to a file in the analysis folder (<workspace name>_분석결과 next to the workspace file, or <first file name>_분석결과 next to the first data file you opened; it stays the same when you switch tabs) and run Python on it (omp's eval tool, needs Python 3.10+). Everything a script prints is read by the AI model; with 'Summary only' the agent is told to print aggregates only, but that cannot be fully enforced for code it writes. The first Python run of each conversation asks for your approval.",
                 "켜면 에이전트가 현재 보기를 분석 폴더(작업 공간 파일 옆의 <작업 공간 이름>_분석결과, 없으면 처음 연 데이터 파일 옆의 <파일 이름>_분석결과 — 탭을 바꿔도 그대로)에 파일로 내보내 Python(omp eval 도구, Python 3.10 이상 필요)으로 분석할 수 있습니다. 스크립트가 출력하는 모든 내용은 AI 모델이 읽습니다. '요약만'이면 집계만 출력하라고 지시하지만, 에이전트가 쓰는 코드에는 완전히 강제할 수 없습니다. 대화마다 첫 Python 실행은 승인을 묻습니다."));
+            _pyEnv = new PythonEnvSection(host, p);
+            AddWide(_pyEnv);
+            Relabel(() => _pyEnv.Relocalize());
+            _skills = new SkillsSection(P, PageWidth);
+            AddWide(_skills);
+            Relabel(() => _skills.Relocalize());
+            _python.CheckedChanged += (_, _) => SyncSkillsContext();
+            _policy.SelectedIndexChanged += (_, _) => SyncSkillsContext();
             Note(() => LT(
                 "Approval mode: 'Always ask' asks for every write or run, in the app and in omp. 'Auto-approve edits' lets undoable data edits run without a card and lets omp write files, but still asks for Python/shell runs, saving to a new file and sharing raw rows. 'Allow everything' also skips those (raw-row sharing still follows the data sharing setting). Changing it restarts the agent on the same conversation.",
                 "승인 모드: '항상 묻기'는 앱과 omp 모두 쓰기·실행마다 묻습니다. '편집 자동 승인'은 되돌릴 수 있는 데이터 편집을 카드 없이 실행하고 omp의 파일 쓰기도 허용하지만 Python·셸 실행, 새 파일 저장, 원시 행 공유는 묻습니다. '모두 허용'은 그것들도 묻지 않습니다(원시 행 공유는 데이터 공유 설정을 따름). 바꾸면 같은 대화로 에이전트를 다시 시작합니다."));
@@ -507,9 +518,16 @@ namespace NanumCsvViewer
                 ShowBaseline(Host.ScopeBaseline(WorkspaceScope));
                 if (forced is { } f) _approval.SelectedIndex = (int)f.Mode;
                 Relocalize();   // 고정 안내 글자
+                _pyEnv.Reload();
+                _skills.Load(S);
+                SyncSkillsContext();
             }
             finally { _loading = false; }
         }
+
+        /// <summary>분석 스킬 구역에 로컬 Python 체크와 데이터 공유 선택을 알린다('요약만' 경고·Python 꺼짐 안내).</summary>
+        private void SyncSkillsContext() =>
+            _skills.SetContext(_python.Checked, (AgentDataPolicy)Math.Clamp(_policy.SelectedIndex, 0, 2));
 
         /// <summary>칸의 값이 불러온 값과 다른가. 건드리지 않은 쪽은 적용하지 않는다(확인 대화 상자·재시작이 괜히 뜨지 않도록).</summary>
         internal bool IsDirty =>
@@ -522,7 +540,15 @@ namespace NanumCsvViewer
 
         public override bool Commit()
         {
-            if (!IsDirty) return true;
+            // 스킬 선택은 설정 개체에 먼저 쓰고, 다른 값이 바뀌었으면 ApplyAgentSettings가 함께 저장·반영한다(다시 시작이 한 번만 일어나도록).
+            bool skillsDirty = _skills.IsDirty;
+            if (skillsDirty) _skills.WriteTo(S);
+            _pyEnv.Commit();
+            if (!IsDirty)
+            {
+                if (skillsDirty) Host.ApplyAgentSkillSettings();
+                return true;
+            }
             Host.ApplyAgentSettings(new Form1.AgentSettingsInput(
                 WorkspaceScope,
                 (AgentApprovalMode)Math.Clamp(_approval.SelectedIndex, 0, 2),
@@ -544,6 +570,8 @@ namespace NanumCsvViewer
             _extra.Text = "";
             if (_approval.Enabled) _approval.SelectedIndex = (int)AgentApprovalPolicy.Parse(d.AgentApprovalMode);
             _python.Checked = d.AgentAllowLocalPython;
+            _pyEnv.ResetDefaults();
+            _skills.ResetDefaults();
         }
     }
 

@@ -136,6 +136,7 @@ namespace NanumCsvViewer
             // 채팅 승인 선택: 작업 공간 파일이 열려 있으면 "이 작업 공간 / 앱 기본값"을 묻고 알맞은 곳에 저장한다.
             _agentController.ApprovalModeApplier = ApplyApprovalFromChat;
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
+            _agentController.PythonEnvNoticeShown += () => { _settings.AgentPythonEnvNoticeShown = true; _settings.Save(); };
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
             // omp는 첫 메시지를 보낼 때 시작한다(패널이 시작할 때부터 떠 있어도 프로세스를 만들지 않는다). 작업 공간 파일이 열려 있으면 그 작업 공간의
             // 대화를 이어 가고(없거나 사라졌으면 새 대화 + 알림), 파일이 없으면 새 대화. 작업 폴더는 시작하는 순간의 열린 파일 기준.
@@ -332,6 +333,16 @@ namespace NanumCsvViewer
             _agentController.Options = AgentOptions();
             if (oldPath != _settings.AgentOmpPath || oldArgs != _settings.AgentExtraArgs)
                 _ = _agentController.RestartAsync();
+        }
+
+        /// <summary>
+        /// 설정 대화 상자의 분석 스킬 구역 적용: 설정에 이미 쓴 스킬 선택을 저장하고 에이전트 옵션에 반영한다. 로컬 Python이 켜져 있고 선택이 바뀌었으면
+        /// 컨트롤러가 쉬는 대로 같은 대화로 다시 시작한다(실행 중인 omp는 시작 때만 스킬을 읽는다).
+        /// </summary>
+        internal void ApplyAgentSkillSettings()
+        {
+            _settings.Save();
+            if (_agentController is not null) _agentController.Options = AgentOptions();
         }
 
         // 테마 변경(ApplyTheme)에서 호출.

@@ -565,6 +565,8 @@ namespace NanumCsvViewer.Tests
                 var tools = new CsvHostTools(host, () => Policy(AgentDataPolicy.RowsAllowed));
                 HostToolResult RunUi(string tool, string args)
                 {
+                    // 앞선 DoEvents 대기가 동기화 컨텍스트를 기본값으로 되돌릴 수 있다. 도구의 await 연속이 UI 스레드로 돌아오도록 다시 설치한다.
+                    SynchronizationContext.SetSynchronizationContext(new System.Windows.Forms.WindowsFormsSynchronizationContext());
                     var task = tools.ExecuteAsync(new HostToolCall("h", "c", tool, JsonDocument.Parse(args).RootElement.Clone()), new Approvals(true), CancellationToken.None);
                     Pump(task);
                     return task.Result;

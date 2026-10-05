@@ -31,6 +31,8 @@ namespace NanumCsvViewer.Agent
         public string? SessionRoot { get; init; }
         /// <summary>로컬 Python 분석 준비(인터프리터 찾기·도구 환경). 테스트는 가짜로 교체한다.</summary>
         internal IPythonSetup LocalPython { get; init; } = new PythonSetup();
+        /// <summary>분석 스킬을 풀 루트(null이면 %LOCALAPPDATA%\NanumCsvViewer\skills). 테스트는 임시 폴더로 바꾼다.</summary>
+        public string? SkillRoot { get; init; }
     }
 
     /// <summary>
@@ -100,6 +102,7 @@ namespace NanumCsvViewer.Agent
             _stream = new ChatStream(_page.Post, _clock, () => Korean);
             _activity = new ChatActivity(_clock, () => Korean);
             _page.Received += OnPageMessage;
+            if (_tools is IToolNotices notices) notices.Notice += OnToolNotice;
         }
 
         /// <summary>omp가 떠 있고 호스트 도구까지 등록된 상태(프롬프트를 보낼 수 있음).</summary>
@@ -166,6 +169,7 @@ namespace NanumCsvViewer.Agent
             TearDown(force: true);
             _disposed = true;
             _page.Received -= OnPageMessage;
+            if (_tools is IToolNotices unsub) unsub.Notice -= OnToolNotice;
             StopTimer();
             SupportFiles.Cleanup(_supportTag);
             if (_ownsLog) (_log as IDisposable)?.Dispose();
@@ -214,17 +218,19 @@ namespace NanumCsvViewer.Agent
                     _ompVersion = version;
                 }
 
+                await PrepareSkillsAsync(exe, launch, cancellation);
+                if (launch != _launchId || _disposed) return;
                 string? pythonSection = await PreparePythonAsync(exe, launch, cancellation);
                 if (launch != _launchId || _disposed) return;
                 _launchedApproval = _options.ApprovalMode;
                 // 작업 공간 메모는 (다시) 시작할 때마다 가이드에 실린다 — 이어받은 대화에서도 같다.
                 string? notesSection = WorkspaceNotesGuide.Build(_workspaceContext.Notes, Korean);
                 string? guideExtra = string.Join("\n\n", new[] { pythonSection, notesSection }.Where(x => !string.IsNullOrWhiteSpace(x)));
-                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, guideExtra.Length == 0 ? null : guideExtra, _launchedApproval);
+                var (hostConfig, guide) = SupportFiles.Write(_supportTag, _svc.ReadGuide(), _options.Language, guideExtra.Length == 0 ? null : guideExtra, _launchedApproval, _managedPython);
                 // 작업 폴더가 바뀐 재시작은 omp가 RPC switch_session을 거절한다(다른 cwd의 세션). 명령줄 --resume은 폴더가 달라도 이어 간다.
                 string? cliResume = resumeViaCli && !string.IsNullOrEmpty(resumeSession) ? resumeSession : null;
                 if (cliResume != null) resumeSession = null;
-                var args = OmpLaunch.BuildArguments(_workDir, hostConfig, guide, _options.ExtraArgs, cliResume);
+                var args = OmpLaunch.BuildArguments(_workDir, hostConfig, guide, _options.ExtraArgs, cliResume, _skillsOverlay);
                 var info = new OmpLaunchInfo(exe, args, _workDir, OmpLaunch.StderrLogPath(_supportTag));
 
                 var client = new OmpRpcClient(_svc.ProcessFactory, _svc.Ui, _log);
@@ -528,12 +534,12 @@ namespace NanumCsvViewer.Agent
     internal static class SupportFiles
     {
         public static (string HostConfig, string? Guide) Write(string tag, string? guide, string language, string? extraSection = null,
-            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default) =>
-            OmpLaunch.WriteSupportFiles(tag, guide, language, extraSection, approvalMode);
+            AgentApprovalMode approvalMode = AgentApprovalPolicy.Default, string? pythonInterpreter = null) =>
+            OmpLaunch.WriteSupportFiles(tag, guide, language, extraSection, approvalMode, pythonInterpreter);
 
         public static void Cleanup(string tag)
         {
-            foreach (string path in new[] { OmpLaunch.HostConfigPath(tag), OmpLaunch.GuidePath(tag) })
+            foreach (string path in new[] { OmpLaunch.HostConfigPath(tag), OmpLaunch.SkillsOverlayPath(tag), OmpLaunch.GuidePath(tag) })
             {
                 try { File.Delete(path); } catch { }
             }

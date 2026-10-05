@@ -124,6 +124,7 @@ namespace NanumCsvViewer.Agent
                 ToolDefinitions.ExportView => await ExportViewAsync(args, ct),
                 ToolDefinitions.ShowMarkdown => ShowMarkdown(args),
                 ToolDefinitions.ShowImage => ShowImage(args),
+                ToolDefinitions.PyEnsurePackages => await EnsurePackagesAsync(args, approvals, ct),
                 _ when call.ToolName.StartsWith("ws.", StringComparison.Ordinal) && ToolDefinitions.All.Any(d => d.Name == call.ToolName)
                     => await WorkspaceToolAsync(call.ToolName, args, approvals, ct),
                 _ => HostToolResult.Error($"Unknown tool '{call.ToolName}'. Available: {string.Join(", ", ToolDefinitions.All.Select(d => d.Name))}."),

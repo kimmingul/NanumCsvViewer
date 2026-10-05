@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "name": "K-Dense-AI/scientific-agent-skills",
+    "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
+    "tag": "v2.72.0",
+    "commit": "526ebce143bc326f44471554e33d66a19c840360",
+    "license": "MIT",
+    "licenseFile": "LICENSE-K-Dense-scientific-agent-skills.txt",
+    "copyright": "Copyright (c) 2025 K-Dense Inc.",
+    "catalog": "docs/skills.md",
+    "note": "Skill directories are copied unmodified from the upstream skills/ folder at the pinned commit; nanum-python-analysis is written for this app."
+  },
+  "tokenEstimate": {
+    "method": "characters of the skill's line in the omp system prompt / 4 (name + description only; the body is read on demand)",
+    "measuredWith": "omp 18.4.4"
+  },
+  "categories": [
+    {
+      "id": "app",
+      "en": "App rules",
+      "ko": "앱 규칙"
+    },
+    {
+      "id": "clinical",
+      "en": "Clinical research",
+      "ko": "임상 연구"
+    },
+    {
+      "id": "stats",
+      "en": "General statistics",
+      "ko": "일반 통계"
+    },
+    {
+      "id": "ml",
+      "en": "Machine learning",
+      "ko": "기계학습"
+    }
+  ],
+  "skills": [
+    {
+      "name": "nanum-python-analysis",
+      "category": "app",
+      "source": "app",
+      "summary": {
+        "en": "House rules for Python analysis of the app's exported data: data policy, reproducibility header, honest reporting, labels.",
+        "ko": "앱이 내보낸 데이터를 Python으로 분석할 때의 규칙: 데이터 정책, 재현성 머리말, 정직한 보고, 표기."
+      },
+      "pythonDeps": [
+        "pandas",
+        "numpy"
+      ],
+      "tokens": 26,
+      "reason": "Written for this app; always loaded together with the pack."
+    },
+    {
+      "name": "pkpd-modeling",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "PK/PD: non-compartmental analysis (AUC, Cmax, half-life), compartmental and exposure-response models, bioequivalence.",
+        "ko": "약동·약력학: 비구획 분석(AUC, Cmax, 반감기), 구획·노출-반응 모형, 생물학적 동등성."
+      },
+      "pythonDeps": [
+        "numpy",
+        "scipy"
+      ],
+      "tokens": 31,
+      "reason": "Covers NCA and PK/PD, which the app does not have; scripts need only numpy/scipy and make no network calls."
+    },
+    {
+      "name": "clinical-reports",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Draft structures and local checks for case, trial, safety and aggregate research reports (synthetic or de-identified inputs only).",
+        "ko": "증례·임상시험·안전성·집계 연구 보고서 초안 구조와 로컬 검사(합성·비식별 자료만)."
+      },
+      "pythonDeps": [],
+      "tokens": 29,
+      "reason": "Stdlib-only local scripts; the skill itself requires qualified review and de-identified input.",
+      "caveat": "SKILL.md mentions optional network access to read public guidance; the app rules (no network) override that."
+    },
+    {
+      "name": "clinical-decision-support",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Research-only evaluation, evidence-profile, cohort, survival and biomarker/model documentation (not patient care).",
+        "ko": "연구용 평가·근거 프로파일·코호트·생존·바이오마커/모형 문서화(환자 진료 아님)."
+      },
+      "pythonDeps": [],
+      "tokens": 36,
+      "reason": "Aggregate clinical decision-support research; explicitly excludes patient care and live operation; stdlib-only scripts, no network.",
+      "caveat": "Reference URLs only appear in static JSON templates (not fetched)."
+    },
+    {
+      "name": "experimental-design",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Study design before data collection: randomization, blocking, factorial/crossover designs, DOE matrices.",
+        "ko": "자료 수집 전 연구 설계: 무작위 배정, 블록화, 요인·교차 설계, 실험계획 행렬."
+      },
+      "pythonDeps": [
+        "numpy",
+        "pandas",
+        "pydoe"
+      ],
+      "tokens": 29,
+      "reason": "Experimental design and randomization for trials and lab studies; local numpy/pandas/pydoe only."
+    },
+    {
+      "name": "statistical-power",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Sample size and power: closed-form and simulation-based (logistic, mixed, cluster, survival), minimum detectable effect.",
+        "ko": "표본 수와 검정력: 닫힌 형태·모의실험 기반(로지스틱, 혼합, 군집, 생존), 최소 검출 효과."
+      },
+      "pythonDeps": [
+        "numpy",
+        "pandas",
+        "scipy",
+        "statsmodels",
+        "matplotlib"
+      ],
+      "tokens": 22,
+      "reason": "Power and sample size justification for protocols; statsmodels-based, no network."
+    },
+    {
+      "name": "scikit-survival",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Right-censored and competing-risk survival models with leakage-safe preprocessing and censoring-aware metrics.",
+        "ko": "우측 중도절단·경쟁위험 생존 모형, 누수 방지 전처리, 중도절단을 반영한 평가 지표."
+      },
+      "pythonDeps": [
+        "scikit-survival",
+        "scikit-learn",
+        "pandas",
+        "numpy"
+      ],
+      "tokens": 27,
+      "reason": "Goes beyond the app's Kaplan-Meier/Cox: random survival forests, boosting, competing risks. CLIs are local and network-free.",
+      "caveat": "SKILL.md assumes uv; the app rule (no installing by the agent) overrides it."
+    },
+    {
+      "name": "analytical-method-validation",
+      "category": "clinical",
+      "source": "upstream",
+      "summary": {
+        "en": "Validation of analytical/bioanalytical procedures: linearity, accuracy, precision, LOD/LOQ, acceptance criteria (ICH Q2, M10).",
+        "ko": "분석법 검증(ICH Q2, M10): 직선성, 정확도, 정밀도, 검출·정량 한계, 허용 기준."
+      },
+      "pythonDeps": [],
+      "tokens": 32,
+      "reason": "Method validation tables for bioanalysis and lab work; scripts are stdlib-only and compute distributions from first principles.",
+      "caveat": "URLs only in a static standards catalogue (not fetched)."
+    },
+    {
+      "name": "exploratory-data-analysis",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Bounded local exploratory profiles of CSV data: missingness and leakage audits, outliers, transformation sensitivity, EDA report scaffolds.",
+        "ko": "CSV 자료의 로컬 탐색 프로파일: 결측·누수 점검, 이상치, 변환 민감도, EDA 보고서 틀."
+      },
+      "pythonDeps": [
+        "numpy",
+        "pandas"
+      ],
+      "tokens": 29,
+      "reason": "Local, network-free EDA CLIs and report scaffolds; complements csv.column_stats and quality_scan.",
+      "caveat": "Optional h5py/Pillow/Biopython format helpers are not needed for CSV."
+    },
+    {
+      "name": "statistical-analysis",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Guided test selection, assumption checks, effect sizes, power, Bayesian alternatives and APA-style reporting.",
+        "ko": "검정 선택, 가정 점검, 효과 크기, 검정력, 베이지안 대안, APA 보고 형식."
+      },
+      "pythonDeps": [
+        "numpy",
+        "pandas",
+        "scipy",
+        "statsmodels",
+        "matplotlib"
+      ],
+      "tokens": 31,
+      "reason": "Fills in what the app's tests lack (assumption diagnostics, effect sizes with CIs, multiple-comparison handling)."
+    },
+    {
+      "name": "statsmodels",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "OLS, GLM, discrete and mixed models, ARIMA/SARIMAX with coefficient inference and diagnostics.",
+        "ko": "OLS·GLM·이산형·혼합 모형, ARIMA/SARIMAX와 계수 추론·진단."
+      },
+      "pythonDeps": [
+        "statsmodels",
+        "scipy",
+        "pandas",
+        "matplotlib"
+      ],
+      "tokens": 29,
+      "reason": "Low-level model API for models beyond csv.run_analysis (time series, count models, robust variants)."
+    },
+    {
+      "name": "aeon",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Time-series machine learning: classification, regression, clustering, forecasting, anomaly detection.",
+        "ko": "시계열 기계학습: 분류, 회귀, 군집, 예측, 이상 탐지."
+      },
+      "pythonDeps": [
+        "aeon",
+        "scikit-learn",
+        "numba"
+      ],
+      "tokens": 25,
+      "reason": "Time-series analysis the app does not have; CPU only.",
+      "caveat": "Optional deep-learning (TensorFlow) and remote dataset download paths exist; do not use them (no network)."
+    },
+    {
+      "name": "scientific-visualization",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Truthful, accessible, publication-ready scientific figures (Matplotlib/Seaborn): multi-panel layouts, uncertainty display, journal export.",
+        "ko": "정확하고 접근성 있는 출판용 그림(Matplotlib/Seaborn): 다중 패널, 불확실성 표시, 학술지 내보내기."
+      },
+      "pythonDeps": [
+        "matplotlib",
+        "pillow",
+        "pypdf"
+      ],
+      "tokens": 31,
+      "reason": "Publication figures; CLIs are network-free (Kaleido/Plotly export not needed).",
+      "caveat": "Plotly static export needs Chrome; not supported in the managed environment."
+    },
+    {
+      "name": "matplotlib",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Matplotlib reference for fine-grained plots, plot types and PNG/PDF/SVG export.",
+        "ko": "Matplotlib 세부 조정, 그래프 종류, PNG/PDF/SVG 내보내기 참고."
+      },
+      "pythonDeps": [
+        "matplotlib",
+        "numpy",
+        "scipy"
+      ],
+      "tokens": 18,
+      "reason": "Core plotting reference for report figures."
+    },
+    {
+      "name": "seaborn",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Seaborn statistical plots: distributions, relationships, categorical comparisons, regression displays, heatmaps.",
+        "ko": "Seaborn 통계 그래프: 분포, 관계, 범주 비교, 회귀, 히트맵."
+      },
+      "pythonDeps": [
+        "seaborn",
+        "pandas",
+        "matplotlib"
+      ],
+      "tokens": 25,
+      "reason": "Fast statistical plots from the exported CSV.",
+      "caveat": "sns.load_dataset downloads sample data from GitHub; the app rule forbids it, use the exported CSV."
+    },
+    {
+      "name": "polars",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Polars lazy and streaming DataFrames for large tabular files.",
+        "ko": "대용량 표 자료를 위한 Polars 지연·스트리밍 데이터프레임."
+      },
+      "pythonDeps": [
+        "polars",
+        "pyarrow"
+      ],
+      "tokens": 22,
+      "reason": "Large-file processing beyond memory limits; local only.",
+      "caveat": "Optional cloud/database/GPU extras are not used."
+    },
+    {
+      "name": "dask",
+      "category": "stats",
+      "source": "upstream",
+      "summary": {
+        "en": "Dask DataFrames/Arrays for out-of-core and parallel workloads.",
+        "ko": "메모리를 넘는 자료·병렬 처리를 위한 Dask 데이터프레임·배열."
+      },
+      "pythonDeps": [
+        "dask",
+        "pandas",
+        "pyarrow"
+      ],
+      "tokens": 27,
+      "reason": "Large-data analysis on one PC (local scheduler).",
+      "caveat": "Cloud paths and remote clusters are out of scope; use only the local scheduler."
+    },
+    {
+      "name": "scikit-learn",
+      "category": "ml",
+      "source": "upstream",
+      "summary": {
+        "en": "Supervised/unsupervised learning, preprocessing, pipelines, cross-validation, tuning and evaluation (including gradient boosting).",
+        "ko": "지도·비지도 학습, 전처리, 파이프라인, 교차검증, 튜닝, 평가(그래디언트 부스팅 포함)."
+      },
+      "pythonDeps": [
+        "scikit-learn",
+        "pandas",
+        "matplotlib",
+        "numpy"
+      ],
+      "tokens": 18,
+      "reason": "Pipelines, calibration, nested CV and metrics beyond the app's ML tools; CPU only."
+    },
+    {
+      "name": "shap",
+      "category": "ml",
+      "source": "upstream",
+      "summary": {
+        "en": "SHAP explanations: explainer selection, feature attributions, local and global plots.",
+        "ko": "SHAP 설명: 설명기 선택, 특성 기여도, 지역·전역 그래프."
+      },
+      "pythonDeps": [
+        "shap",
+        "scikit-learn",
+        "matplotlib",
+        "pandas"
+      ],
+      "tokens": 29,
+      "reason": "Model interpretability, not offered by the app; CPU explainers only.",
+      "caveat": "Do not load untrusted explainer files (pickle)."
+    },
+    {
+      "name": "umap-learn",
+      "category": "ml",
+      "source": "upstream",
+      "summary": {
+        "en": "UMAP nonlinear dimension reduction and embeddings for exploration and clustering.",
+        "ko": "UMAP 비선형 차원 축소와 임베딩(탐색·군집)."
+      },
+      "pythonDeps": [
+        "umap-learn",
+        "numba"
+      ],
+      "tokens": 37,
+      "reason": "Nonlinear embedding that complements the app's PCA/LDA; CPU only.",
+      "caveat": "Skip the Parametric UMAP (TensorFlow) variant."
+    }
+  ],
+  "rejected": [
+    {
+      "name": "pymc",
+      "reason": "Needs a C/C++ compiler toolchain on Windows for usable sampling speed and pulls a very large dependency set; statistical-analysis covers Bayesian alternatives."
+    },
+    {
+      "name": "pyhealth",
+      "reason": "Needs PyTorch, downloads public/restricted EHR datasets and medical-code resources over the network."
+    },
+    {
+      "name": "treatment-plans",
+      "reason": "Produces patient-specific treatment-plan documentation; outside the app's research-only clinical boundary."
+    },
+    {
+      "name": "scientific-critical-thinking",
+      "reason": "References an OpenRouter-backed schematic generator that uploads prompts to a third-party API."
+    },
+    {
+      "name": "timesfm-forecasting",
+      "reason": "Downloads Hugging Face checkpoints and needs PyTorch (GPU recommended)."
+    },
+    {
+      "name": "pytorch-lightning",
+      "reason": "Deep-learning/GPU oriented."
+    },
+    {
+      "name": "transformers",
+      "reason": "Model-hub downloads and GPU oriented."
+    },
+    {
+      "name": "vaex",
+      "reason": "Supports Python 3.9-3.12 only; polars and dask already cover large data."
+    },
+    {
+      "name": "neurokit2",
+      "reason": "Physiological-signal niche; depends on requests and optional network resources."
+    },
+    {
+      "name": "get-available-resources",
+      "reason": "Probes host hardware and GPUs; no analysis value for the app."
+    },
+    {
+      "name": "database-lookup",
+      "reason": "Queries external databases over the network."
+    },
+    {
+      "name": "paper-lookup",
+      "reason": "Queries external literature services over the network."
+    },
+    {
+      "name": "research-lookup",
+      "reason": "Queries external services over the network."
+    },
+    {
+      "name": "citation-management",
+      "reason": "Network-dependent bibliographic lookups."
+    },
+    {
+      "name": "literature-review",
+      "reason": "Network-dependent literature search."
+    },
+    {
+      "name": "generate-image",
+      "reason": "Sends prompts to an external image-generation API."
+    },
+    {
+      "name": "hypothesis-generation",
+      "reason": "Planning text only; no analysis capability beyond the included statistics skills."
+    },
+    {
+      "name": "uncertainty-and-units",
+      "reason": "Physical-units and metrology focus; low relevance for clinical statistics."
+    },
+    {
+      "name": "scientific-writing",
+      "reason": "Writing aid; relies on web lookups for references."
+    },
+    {
+      "name": "peer-review",
+      "reason": "Review-writing aid, not an analysis tool."
+    },
+    {
+      "name": "pydeseq2",
+      "reason": "Bulk RNA-seq specific; outside the clinical/statistics/ML scope."
+    },
+    {
+      "name": "scanpy",
+      "reason": "Single-cell genomics specific; outside the scope."
+    },
+    {
+      "name": "benchling-integration",
+      "reason": "Cloud integration that uploads data."
+    },
+    {
+      "name": "dnanexus-integration",
+      "reason": "Cloud integration that uploads data."
+    },
+    {
+      "name": "modal",
+      "reason": "Cloud/GPU execution service."
+    },
+    {
+      "name": "optimize-for-gpu",
+      "reason": "GPU only."
+    }
+  ]
+}

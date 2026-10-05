@@ -54,3 +54,31 @@ SOFTWARE.
 3. Microsoft Edge WebView2 SDK (Microsoft.Web.WebView2 NuGet package, WebView2Loader.dll)
    Copyright (C) Microsoft Corporation. All rights reserved. BSD-3-Clause license,
    https://www.nuget.org/packages/Microsoft.Web.WebView2
+
+4. Analysis skill pack (Agent/Skills, extracted to %LOCALAPPDATA%\NanumCsvViewer\skills)
+   Skills copied unmodified from K-Dense-AI/scientific-agent-skills, tag v2.72.0 (commit 526ebce143bc326f44471554e33d66a19c840360),
+   https://github.com/K-Dense-AI/scientific-agent-skills, licensed under the MIT License. The skills are third-party guidance;
+   each skill's own metadata names the license of the library it describes. The skill nanum-python-analysis is part of this app.
+   Full list: Agent/Skills/manifest.json and THIRD_PARTY_NOTICES.md.
+
+MIT License
+
+Copyright (c) 2025 K-Dense Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

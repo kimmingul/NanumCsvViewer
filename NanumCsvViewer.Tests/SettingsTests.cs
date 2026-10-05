@@ -8,6 +8,8 @@ using NanumCsvViewer.Csv;
 namespace NanumCsvViewer.Tests
 {
     /// <summary>설정 값(기본값·저장·보정), 창 위치 보정, 테마 '시스템', 언어 '자동', 설정 대화 상자의 쪽들.</summary>
+    // 실제 Form1을 만들고 언어·테마 같은 앱 전역 상태를 바꾸므로 다른 Form1 테스트와 직렬화한다.
+    [Collection("SavedViewStore")]
     public class SettingsTests
     {
         private static AppSettings RoundTrip(AppSettings s) =>

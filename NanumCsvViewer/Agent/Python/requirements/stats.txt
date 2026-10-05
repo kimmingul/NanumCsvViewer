@@ -1,0 +1,12 @@
+# title-en: Statistics extras
+# title-ko: 통계 확장
+# desc-en: pingouin (effect sizes, ICC, repeated measures), scikit-posthocs (post-hoc tests), polars and dask (large tables), aeon (time-series learning).
+# size-mb: 372
+# desc-ko: pingouin(효과 크기·ICC·반복 측정), scikit-posthocs(사후 검정), polars·dask(큰 표), aeon(시계열 학습).
+# Wheels exist for win_amd64 on CPython 3.10-3.13. aeon 1.6 needs Python 3.11+, so 3.10 gets aeon 1.3.
+pingouin==0.5.5
+scikit-posthocs==0.11.4
+polars==1.44.2
+dask==2026.8.0
+aeon==1.3.0; python_version < "3.11"
+aeon==1.6.0; python_version >= "3.11"

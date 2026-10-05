@@ -59,6 +59,7 @@ namespace NanumCsvViewer
             new("quality.profile",    "Run Quality Profile",   "품질 프로파일 실행",    C | S | Keys.Q),
             new("ws.newQuery",        "New Query…",            "새 질의…",              C | A | Keys.Q),
             new("tools.settings",     "Settings…",             "설정…",                 C | Keys.Oemcomma),
+            new("tools.exportPythonBundle", "Export Python Analysis Bundle…", "Python 분석 재현 패키지 내보내기…", Keys.None),
             new("help.usage",         "How to Use",            "사용법",                Keys.F1),
         };
 

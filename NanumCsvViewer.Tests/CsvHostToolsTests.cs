@@ -481,6 +481,7 @@ namespace NanumCsvViewer.Tests
                 "csv.export_view", "csv.show_markdown", "csv.show_image",
                 "ws.list_tables", "ws.describe", "ws.add_source", "ws.query", "ws.check_join", "ws.create_view", "ws.append", "ws.compare", "ws.group",
                 "ws.materialize", "ws.open", "ws.switch", "ws.notes", "ws.set_notes",
+                "py.ensure_packages",
             };
             Assert.Equal(expected.OrderBy(x => x), defs.Select(d => d.Name).OrderBy(x => x));
 

@@ -1,0 +1,8 @@
+# title-en: Clinical research
+# title-ko: 임상 연구
+# desc-en: lifelines (Kaplan-Meier, Cox, parametric survival), scikit-survival (survival machine learning; Python 3.10-3.12 only: its ecos dependency has no Windows wheel for 3.13), pydoe (experimental-design matrices).
+# size-mb: 52
+# desc-ko: lifelines(Kaplan-Meier·Cox·모수 생존 모형), scikit-survival(생존 기계학습; Python 3.10~3.12만: 의존 패키지 ecos에 Windows 3.13 wheel이 없음), pydoe(실험 설계 행렬).
+lifelines==0.30.0
+scikit-survival==0.25.0; python_version < "3.13"
+pydoe==1.5.0

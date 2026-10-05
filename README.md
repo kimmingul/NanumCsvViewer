@@ -5,6 +5,18 @@
 
 > .NET 10 · Windows Forms · 단일 실행 파일(.exe) 배포 지원
 
+### Unreleased — 분석 스킬 팩·관리형 Python 분석 환경
+
+- **분석 스킬 팩 20개** — 임상 연구 7(PK/PD·NCA, 임상 보고서, 연구용 의사결정 지원 문서화, 실험 설계, 검정력, scikit-survival, 분석법 검증) · 일반 통계 9(탐색적 분석, 통계 분석, statsmodels, aeon 시계열, 과학 시각화, matplotlib, seaborn, polars, dask) · 기계학습 3(scikit-learn, SHAP, UMAP) · 앱 전용 1(`nanum-python-analysis`). 19개는 [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) v2.72.0(MIT)을 원본 그대로 가져온 것이고, 앱 전용 1개는 이 앱이 작성했습니다. 네트워크·GPU·업로드·환자 개별 판단이 필요한 26개는 검토 후 제외했습니다.
+- **로드 조건·토큰 비용** — **로컬 Python이 켜져 있고 마스터 스위치가 켜져 있을 때만** 실립니다(Python이 꺼져 있으면 0 토큰). 설정 ▸ AI 에이전트 ▸ '분석 스킬'에서 전체·분류별·스킬별로 끌 수 있고, 스킬마다 토큰 추정과 총합(전체 켬 약 550 토큰)이 보입니다. 선택을 바꾸면 같은 대화로 에이전트가 다시 시작합니다. 앱 전용 스킬은 팩이 켜져 있는 한 항상 함께 로드됩니다.
+- **앱 도구 먼저** — 앱의 검증된 도구(`csv.column_stats`·`csv.quality_scan`·`csv.run_analysis`·`ws.*`)와 사용자가 메뉴에서 실행하는 분석(t검정·ANOVA·카이제곱·상관·정규성·반복측정·혼합모형·비모수·KM/Cox·ML·PCA/LDA)이 먼저입니다. Python 스킬은 앱에 없는 분석(PK/NCA, Bland-Altman, 검정력, 경쟁위험, 시계열, SHAP, 출판용 그림, 대용량 처리 등)이나 사용자가 Python을 명시했을 때만 쓰고, 어느 길을 썼는지 답에 밝힙니다.
+- **표기·재현성** — Python 결과에는 **'Python 분석 (앱 검증 범위 밖)'** 표기와 재현성 머리말(원본 파일·사용/제외 행 수·필터·패키지 버전·시드·시각·사용한 스킬), 가정·수렴·다중 검정에 대한 정직한 보고가 붙습니다. 연구·집계 분석용이며 환자 개별 진단·치료용이 아닙니다.
+- **관리형 Python 환경** — 설정 ▸ AI ▸ Python 환경에서 `%LOCALAPPDATA%\NanumCsvViewer\python-analysis`에 독립 venv(시스템 Python 변경 없음, system-site-packages 없음)를 만들고 묶음별로 설치·업데이트·제거합니다. 묶음은 core(pandas·numpy·scipy·statsmodels·matplotlib·seaborn·pyarrow·openpyxl) · stats(pingouin·scikit-posthocs·polars·dask·aeon) · clinical(lifelines·scikit-survival·pydoe) · ml(scikit-learn·xgboost·lightgbm·shap·imbalanced-learn·umap-learn)이며 모두 `==` 버전 고정, `--only-binary=:all:`(미리 빌드된 wheel만, 소스 빌드 없음)로 설치합니다. 설치 뒤 import를 확인하고 `requirements.lock`을 기록합니다. **64비트 Intel/AMD Windows의 Python 3.10~3.13**만 지원하며 ARM64·32비트는 거절합니다. scikit-survival은 Python 3.13에서 의존 패키지에 wheel이 없어 **3.13 미만에서만** 설치됩니다(aeon은 3.10에서 1.3, 3.11 이상에서 1.6). 환경이 있으면 에이전트의 Python이 이 환경이 됩니다.
+- **`py.ensure_packages` (승인 필요)** — 에이전트는 스스로 `pip install` 하지 않고, 필요한 묶음을 이 도구로 요청합니다. 앱이 사용자 승인(승인 모드를 따름)을 받은 뒤 관리형 환경에만 설치합니다.
+- **도구 ▸ Python 분석 재현 패키지 내보내기…** — 분석 스크립트·보고서·그림·`requirements.lock`·README를 폴더 또는 zip으로 묶습니다. **데이터는 기본으로 제외**됩니다.
+- **'요약만' + Python 경고** — '요약만' 데이터 정책에서도 Python 스크립트는 파일을 읽어 출력할 수 있으므로 설정에 경고가 표시됩니다. 출력 정책은 스킬·가이드의 지시(안내)일 뿐 하드 보장이 아닙니다.
+- 제3자 고지는 아래 '제한 사항' 뒤 '라이선스'를 참고하세요.
+
 ### v3.2.0 — 메뉴·도구 모음·팝업 메뉴 재구성, 통합 설정, 패널 시작 상태
 
 - **10개 메뉴** — 파일 · 편집 · 보기 · 데이터 · 작업 공간 · 통계 · 시각화 · 품질 · 도구 · 도움말. 옛 위치 → 새 위치:
@@ -154,6 +166,7 @@
 ## ✨ 주요 기능
 
 - **대용량 즉시 열람** — 파일 전체를 메모리에 적재하지 않고, 바이트 오프셋 인덱스 + `DataGridView` 가상 모드로 보이는 행만 그때그때 읽습니다. 1 GB 파일도 첫 페이지가 1초 안에 뜹니다.
+- **분석 스킬 팩·관리형 Python 환경** — 로컬 Python을 켜면 에이전트가 번들 분석 스킬 20개(임상 7·통계 9·기계학습 3·앱 1)를 쓰고, 앱이 만든 독립 venv에 고정 버전 패키지를 설치합니다. 도구 ▸ Python 분석 재현 패키지 내보내기…로 스크립트·보고서를 묶어 냅니다.
 - **백그라운드 인덱싱 + 진행 표시** — 첫 페이지를 보여주면서 나머지를 백그라운드로 인덱싱하고, 하단 상태바에 **진행바 + %** 를 표시합니다. 완료되면 "준비 완료"와 함께 필터/정렬이 활성화됩니다. 인덱서는 **벡터화 바이트 스캔(`SearchValues`)** 과 **읽기·스캔 겹치기(더블 버퍼링)** 로 동작해, 일반 NVMe에서 인덱싱 처리량이 **~2 GB/s**에 이릅니다.
 - **한글 인코딩 자동 감지 + 수동 전환** — BOM 확인 → strict UTF-8 검증 → 실패 시 CP949(EUC-KR) 폴백. 상태바 우측의 인코딩 표시(신호등 왼쪽)를 클릭하거나 View ▸ 인코딩 메뉴로 즉시 바꿔 다시 디코딩할 수 있습니다(재인덱싱 불필요).
 - **적응형 메모리** — RAM 예산(기본 1.5 GB) 이내면 원본 바이트를 메모리에 보관해 필터/정렬이 빠르고, 초과하면 자동으로 디스크 스캔 모드로 전환해 메모리를 일정하게 유지합니다.
@@ -395,7 +408,10 @@ dotnet test
 - 창 위치는 컴퓨터마다 달라 `.ncvws`에 저장하지 않습니다(패널 배치만 저장).
 - **UTF-16/UTF-32**는 대용량 모드에서 지원하지 않습니다(BOM 감지 시 안내).
 - 매우 느린 HDD에서 디스크 모드(>약 1.5 GB)일 때 스크롤에 미세한 지연이 있을 수 있습니다.
+- **분석 스킬·Python 분석(Unreleased)**: 스킬은 제3자(K-Dense) 안내문이라 에이전트가 따르는 것은 지시일 뿐 강제가 아닙니다(일부 스킬 원문의 `uv pip install`·네트워크 안내는 앱 가이드가 금지하지만 기술적으로 막지는 않습니다). 에이전트가 `csv.run_analysis`로 직접 실행하는 것은 기술통계·GLM·ANCOVA·GLzM·로지스틱뿐이고, 나머지 앱 분석은 사용자가 메뉴에서 실행해야 합니다. 스킬 선택은 앱 전체 설정이며 작업 공간 파일에는 저장되지 않습니다. 관리형 환경은 Windows 64비트 Intel/AMD(win_amd64)·Python 3.10~3.13만 지원하고(ARM64·32비트 거절), scikit-survival은 Python 3.13에서 설치되지 않습니다. '요약만' 정책 + 로컬 Python 조합은 Python 출력이 모델로 갈 수 있어 설정에 경고가 나오는데, 이는 안내일 뿐 하드 보장이 아닙니다. Python 분석 결과는 앱 검증 범위 밖입니다.
 
 ## 📝 라이선스
 
 개인 프로젝트입니다. 별도 라이선스 명시 전까지 모든 권리는 작성자에게 있습니다.
+
+제3자 고지: 번들 분석 스킬은 [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) v2.72.0(MIT)에서 가져왔습니다. 고지문과 MIT 전문은 소스의 `NanumCsvViewer/Agent/Skills/THIRD_PARTY_NOTICES.md`·`LICENSE-K-Dense-scientific-agent-skills.txt`, 앱에 내장된 `ChatAssets/NOTICE.txt` 4절, 그리고 스킬을 푼 폴더(`%LOCALAPPDATA%\NanumCsvViewer\skills\…\sel-…\`)에 들어 있습니다. 앱 정보 창에는 라이선스 목록이 없습니다.

@@ -318,6 +318,8 @@ namespace NanumCsvViewer.Tests
                 HostToolResult Run(string tool, string args)
                 {
                     var call = new HostToolCall("host_1", "call_1", tool, JsonDocument.Parse(args).RootElement.Clone());
+                    // 앞선 DoEvents 대기가 동기화 컨텍스트를 기본값으로 되돌릴 수 있어 UI 컨텍스트를 다시 설치한다.
+                    SynchronizationContext.SetSynchronizationContext(new System.Windows.Forms.WindowsFormsSynchronizationContext());
                     var task = tools.ExecuteAsync(call, new AlwaysApprove(), CancellationToken.None);
                     Pump(task);
                     return task.Result;

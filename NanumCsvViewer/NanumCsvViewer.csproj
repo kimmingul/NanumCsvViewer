@@ -47,6 +47,10 @@
     <EmbeddedResource Include="Agent\ChatAssets\**\*" LogicalName="ChatAssets/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
     <!-- omp append-system-prompt용 에이전트 가이드(OmpProcess가 이름 끝 "AgentGuide.md"로 찾아 읽는다). -->
     <EmbeddedResource Include="Agent\AgentGuide.md" Condition="Exists('Agent\AgentGuide.md')" />
+    <!-- 분석 스킬 묶음(K-Dense scientific-agent-skills MIT + 앱 전용 nanum-python-analysis). %LOCALAPPDATA%\NanumCsvViewer\skills\<해시>\로 풀어 omp skills.customDirectories에 건다. -->
+    <EmbeddedResource Include="Agent\Skills\**\*" LogicalName="Skills/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <!-- Python 분석 환경 요구사항 묶음(core·stats·clinical·ml). 정확한 버전 고정, AnalysisGroups가 읽는다. -->
+    <EmbeddedResource Include="Agent\Python\requirements\*.txt" LogicalName="requirements/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

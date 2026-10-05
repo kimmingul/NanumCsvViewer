@@ -13,6 +13,8 @@ namespace NanumCsvViewer.Agent.Python
         Task<PythonToolsResult> EnsureToolsAsync(PythonInterpreter python, Action<string>? progress, CancellationToken ct);
         /// <summary>결과 폴더에 lsp.json·pyproject.toml을 쓴다.</summary>
         PythonLspConfig.WriteResult WriteConfig(string outputFolder, PythonToolsResult tools, PythonInterpreter python);
+        /// <summary>앱 관리 분석 환경 상태(파일만 읽음). 관리 환경을 모르는 구현(테스트 가짜)은 null.</summary>
+        AnalysisEnvInfo? InspectManaged() => null;
     }
 
     internal sealed class PythonSetup : IPythonSetup
@@ -46,5 +48,7 @@ namespace NanumCsvViewer.Agent.Python
 
         public PythonLspConfig.WriteResult WriteConfig(string outputFolder, PythonToolsResult tools, PythonInterpreter python) =>
             PythonLspConfig.Write(outputFolder, tools.LangServer!, tools.Ruff!, python.Path);
+
+        public AnalysisEnvInfo? InspectManaged() => AnalysisEnvironment.Default.Inspect();
     }
 }

@@ -86,7 +86,7 @@ namespace NanumCsvViewer.Agent.Python
             return new PythonLocateResult(null, problem ?? "No Python interpreter was found on PATH.");
         }
 
-        private static async Task<PythonInterpreter?> InspectAsync(string exe, string[] pre, string source, IProcessRunner runner, string cwd, CancellationToken ct)
+        internal static async Task<PythonInterpreter?> InspectAsync(string exe, string[] pre, string source, IProcessRunner runner, string cwd, CancellationToken ct)
         {
             var args = pre.Concat(new[] { "-c", InfoScript }).ToArray();
             var r = await runner.RunAsync(exe, args, cwd, Timeout, null, ct).ConfigureAwait(false);

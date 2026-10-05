@@ -47,6 +47,7 @@ namespace NanumCsvViewer.Agent.Tools
         public const string WsSwitch = "ws.switch";
         public const string WsNotes = "ws.notes";
         public const string WsSetNotes = "ws.set_notes";
+        public const string PyEnsurePackages = "py.ensure_packages";
 
         private const string NoArgs = """{"type":"object","properties":{},"additionalProperties":false}""";
 
@@ -441,6 +442,18 @@ namespace NanumCsvViewer.Agent.Tools
                 "notes":{"type":"string","maxLength":20000,"description":"The text to write (max 20,000 characters in total)."},
                 "mode":{"type":"string","enum":["replace","append"],"description":"Default 'replace'."}
                 },"required":["notes"],"additionalProperties":false}
+                """),
+
+            // ---- Python 분석 환경: 에이전트는 스스로 pip install 하지 않고 이 도구로 사용자 승인 후 설치한다.
+
+            new HostToolDefinition(PyEnsurePackages,
+                "Install a package group into the app-managed Python environment after the user approves (wheels only; never pip install yourself). " +
+                "core: pandas numpy scipy statsmodels matplotlib seaborn; stats: pingouin polars dask aeon; clinical: lifelines scikit-survival pydoe; ml: scikit-learn xgboost lightgbm shap umap-learn. Instant if already installed.",
+                """
+                {"type":"object","properties":{
+                "groups":{"type":"array","items":{"type":"string","enum":["core","stats","clinical","ml"]},"minItems":1,"maxItems":4,"description":"Groups to make available (core is always included)."},
+                "reason":{"type":"string","maxLength":300,"description":"One short sentence for the approval card: what you need it for."}
+                },"required":["groups"],"additionalProperties":false}
                 """),
         };
     }

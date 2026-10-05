@@ -27,6 +27,8 @@ namespace NanumCsvViewer.Agent
         private CancellationTokenSource? _pythonCts;
         /// <summary>omp는 시작할 때만 lsp.json을 읽는다(실제 omp 18.4.4로 확인). 이번 실행이 시작된 뒤에 설정이 생겼으면 다시 시작해야 반영된다.</summary>
         private bool _lspRestartPending;
+        /// <summary>이번 omp 실행이 host.yml의 python.interpreter로 받은 관리 환경 python.exe(쓰지 않았으면 null).</summary>
+        private string? _managedPython;
 
         /// <summary>로컬 Python 분석이 켜져 있고 omp가 결과 폴더에서 실행 중일 때 그 폴더. 아니면 null.</summary>
         public string? OutputFolder => _options.AllowLocalPython && _outputFolder.Length > 0 ? _outputFolder : null;
@@ -78,7 +80,7 @@ namespace NanumCsvViewer.Agent
 
         /// <summary>실행 중인 omp의 작업 폴더·Python 가이드·진단 설정·승인 모드(host.yml)가 지금 설정과 다른가.</summary>
         private bool WorkspaceStale() =>
-            FolderStale() || ApprovalStale() || (_options.AllowLocalPython && (_options.DataPolicy != _launchedPolicy || _lspRestartPending));
+            FolderStale() || ApprovalStale() || SkillsStale() || ManagedPythonStale() || (_options.AllowLocalPython && (_options.DataPolicy != _launchedPolicy || _lspRestartPending));
 
         /// <summary>쉬는 중(연결됨, 작업 없음)이고 작업 공간이 낡았으면 같은 대화로 다시 시작한다. 작업 중이면 EndTurn이 다시 부른다.</summary>
         private void RunPendingWorkspaceRestart()
@@ -89,6 +91,10 @@ namespace NanumCsvViewer.Agent
                 : ApprovalStale()
                     ? T($"Applying the new approval mode ({AgentApprovalPolicy.ToOmp(_options.ApprovalMode)}); restarting the agent on the same conversation…",
                         $"새 승인 모드({AgentApprovalPolicy.ToOmp(_options.ApprovalMode)})를 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…")
+                    : SkillsStale() && _options.AllowLocalPython
+                        ? T("Applying the analysis-skill settings; restarting the agent on the same conversation…", "분석 스킬 설정을 반영하기 위해 같은 대화로 에이전트를 다시 시작합니다…")
+                    : ManagedPythonStale()
+                        ? T("Switching Python analysis to the managed environment; restarting the agent on the same conversation…", "Python 분석 환경을 바꾸기 위해 같은 대화로 에이전트를 다시 시작합니다…")
                     : !_options.AllowLocalPython
                         ? T("Restarting the agent on the same conversation…", "같은 대화로 에이전트를 다시 시작합니다…")
                         : _lspRestartPending
@@ -107,6 +113,7 @@ namespace NanumCsvViewer.Agent
         private async Task<string?> PreparePythonAsync(string? ompExe, int launch, CancellationToken cancellation)
         {
             _pyInterpreter = null;
+            _managedPython = null;
             _lspStatus = LspStatus.Unavailable;
             _lspRestartPending = false;
             _launchedPolicy = _options.DataPolicy;
@@ -129,20 +136,80 @@ namespace NanumCsvViewer.Agent
             catch (Exception ex) { located = new PythonLocateResult(null, ex.Message); }
             if (launch != _launchId || _disposed) return null;
 
-            if (located.Found)
+            // 앱 관리 분석 환경(core 설치됨)이 있고 사용자가 허용했으면 eval의 Python은 그것이다(host.yml의 python.interpreter). 없으면 지금까지처럼 사용자 Python.
+            var managed = DesiredManagedEnvironment();
+            PythonInterpreter? effective = located.Found ? located.Interpreter : null;
+            if (managed != null)
             {
-                _pyInterpreter = located.Interpreter;
-                try { packages = await _svc.LocalPython.PackagesAsync(located.Interpreter!, cancellation); }
+                _managedPython = managed.PythonPath;
+                effective = new PythonInterpreter(managed.PythonPath, managed.PythonVersion ?? new Version(3, 10), "managed");
+            }
+
+            if (effective != null)
+            {
+                _pyInterpreter = effective;
+                try { packages = await _svc.LocalPython.PackagesAsync(effective, cancellation); }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex) { _log.Note("package probe failed: " + ex.Message); }
                 if (launch != _launchId || _disposed) return null;
-                PrepareLanguageTools(located.Interpreter!, launch);
+                PrepareLanguageTools(effective, launch);
             }
             else
             {
                 PostPythonMissing(located);
             }
-            return PythonGuide.Build(new PythonGuideContext(_workspaceContext, _workDir, located.Interpreter, packages, _lspStatus, _options.DataPolicy));
+            if (managed == null && effective != null) PostManagedEnvironmentNotice();     // Python이 아예 없으면 위의 "Python 없음" 안내만
+            string pythonGuide = PythonGuide.Build(new PythonGuideContext(_workspaceContext, _workDir, managed != null ? effective : located.Interpreter, packages, _lspStatus, _options.DataPolicy, _skills?.Names));
+            string envGuide = AnalysisMessages.BuildGuide(_svc.LocalPython.InspectManaged(), _options.UseManagedPython, managed == null ? effective?.Path : null);
+            return pythonGuide + "\n\n" + envGuide;
+        }
+
+        /// <summary>사용할 관리 환경(허용·core 설치됨·실행 가능). 아니면 null.</summary>
+        private AnalysisEnvInfo? DesiredManagedEnvironment()
+        {
+            if (!_options.AllowLocalPython || !_options.UseManagedPython) return null;
+            try
+            {
+                return _svc.LocalPython.InspectManaged() is { IsReady: true } info && info.Has(AnalysisGroups.Core) ? info : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        }
+
+        /// <summary>omp가 지금 쓰는 Python(host.yml)이 사용자 설정·환경 상태가 정하는 값과 다른가(환경을 만들었거나 지웠거나 토글을 바꿨다).</summary>
+        private bool ManagedPythonStale() =>
+            _options.AllowLocalPython && !string.Equals(DesiredManagedEnvironment()?.PythonPath, _managedPython, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>관리 환경 없이 로컬 Python을 처음 쓸 때 한 번만, 설정에서 만들 수 있다고 알린다.</summary>
+        private void PostManagedEnvironmentNotice()
+        {
+            if (!_options.PythonEnvNoticePending || !_options.UseManagedPython) return;
+            _options = _options with { PythonEnvNoticePending = false };
+            _stream.Emit(ChatPageMessages.LinkNotice("info",
+                T("Python analysis uses your own Python. Settings ▸ AI ▸ Python environment can create a managed environment with tested package versions (pandas, scipy, statsmodels, scikit-learn, lifelines …) so analyses are reproducible.",
+                  "Python 분석은 사용자의 Python을 쓰고 있습니다. 설정 ▸ AI ▸ Python 환경에서 검증된 버전의 패키지(pandas·scipy·statsmodels·scikit-learn·lifelines 등)가 든 관리 환경을 만들 수 있어 분석을 재현할 수 있습니다."),
+                T("Open Python environment settings", "Python 환경 설정 열기"), SettingsUrl));
+            PythonEnvNoticeShown?.Invoke();
+        }
+
+        /// <summary>채팅 알림의 버튼이 설정 창을 열게 하는 앱 내부 주소(openUrl로 오면 settings 메시지로 바꿔 호스트에 넘긴다).</summary>
+        internal const string SettingsUrl = "nanumcsv://settings/ai";
+
+        /// <summary>관리 환경 없이 쓴다는 한 번짜리 안내를 채팅에 보였을 때(호스트가 '보였음'을 설정에 저장한다).</summary>
+        public event Action? PythonEnvNoticeShown;
+
+        /// <summary>앱 내부 주소면 처리하고 true. 그 밖의 주소는 호출자가 연다.</summary>
+        private bool TryHandleAppUrl(string? url)
+        {
+            if (!string.Equals(url, SettingsUrl, StringComparison.OrdinalIgnoreCase)) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse("{\"t\":\"settings\"}");
+            PageMessageUnhandled?.Invoke(doc.RootElement.Clone());
+            return true;
+        }
+
+        /// <summary>호스트 도구(py.ensure_packages 등)가 올린 진행 알림을 채팅에 보인다(UI 스레드).</summary>
+        private void OnToolNotice(string level, string text)
+        {
+            if (!_disposed) _stream.Emit(ChatPageMessages.Notice(level, text));
         }
 
         /// <summary>답변 마크다운의 상대 경로 그림을 풀 주소. 바뀔 때만 보낸다(페이지가 다시 열리면 OnPageReady가 다시 보낸다).</summary>

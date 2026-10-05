@@ -1,0 +1,11 @@
+# title-en: Machine learning
+# title-ko: 기계학습
+# desc-en: scikit-learn, xgboost, lightgbm, shap (model explanation), imbalanced-learn (resampling), umap-learn (dimension reduction).
+# size-mb: 259
+# desc-ko: scikit-learn·xgboost·lightgbm·shap(모형 설명)·imbalanced-learn(불균형 표본 재추출)·umap-learn(차원 축소).
+scikit-learn==1.7.2
+xgboost==3.1.3
+lightgbm==4.6.0
+shap==0.49.1
+imbalanced-learn==0.14.0
+umap-learn==0.5.12
