@@ -291,6 +291,26 @@ namespace NanumCsvViewer.Tests
         }
 
         [Fact]
+        public void The_settings_dialog_opens_on_every_page_while_a_workspace_file_is_open()
+        {
+            string a = MakeCsv("a.csv", CsvA);
+            string ws = Path.Combine(_dir, "w.ncvws");
+            WorkspaceFile.Save(ws, new WorkspaceFileModel());
+            var app = new AppSettings { AgentApprovalMode = "yolo", Language = "en" };
+            OnForm(app, form =>
+            {
+                Assert.True(Await(form.OpenWorkspaceFileAsync(ws)));
+                Open(form, a);
+                foreach (string page in new[] { "general", "panels", "grid", "files", "ai", "shortcuts" })
+                {
+                    using var dlg = new SettingsDialog(form, page);
+                    Assert.Equal(page, dlg.CurrentPage!.Id);
+                    dlg.Relocalize();
+                }
+            });
+        }
+
+        [Fact]
         public void A_looser_choice_for_this_workspace_is_stored_but_changes_nothing_while_the_app_is_stricter()
         {
             string ws = Path.Combine(_dir, "w.ncvws");

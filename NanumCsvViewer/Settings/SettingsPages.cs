@@ -48,9 +48,21 @@ namespace NanumCsvViewer
         /// <summary>입력 칸을 기본값으로 되돌린다(적용은 확인·적용 때).</summary>
         public abstract void ResetDefaults();
 
+        /// <summary>다시 번역하는 동안 true. 콤보 항목을 비웠다 다시 채우며 SelectedIndexChanged가 나므로, 그 변경은 사용자 조작이 아니다.</summary>
+        protected bool Relocalizing { get; private set; }
+
         public void Relocalize()
         {
-            foreach (var a in _relabel) a();
+            bool was = Relocalizing;
+            Relocalizing = true;
+            try { foreach (var a in _relabel) a(); }
+            finally { Relocalizing = was; }
+        }
+
+        /// <summary>콤보의 선택을 정한다. 항목이 아직 없거나(다시 번역 전) 범위를 벗어나면 가장 가까운 항목, 항목이 없으면 아무것도 하지 않는다.</summary>
+        protected static void SelectIndex(ComboBox cb, int index)
+        {
+            if (cb.Items.Count > 0) cb.SelectedIndex = Math.Clamp(index, 0, cb.Items.Count - 1);
         }
 
         // ---- 입력 칸 만들기 ------------------------------------------------------------------------------------
@@ -115,7 +127,7 @@ namespace NanumCsvViewer
                 cb.Items.Clear();
                 foreach (var item in items) cb.Items.Add(item());
                 cb.EndUpdate();
-                cb.SelectedIndex = Math.Clamp(index, 0, cb.Items.Count - 1);
+                SelectIndex(cb, index);
             });
             AddRow(l, cb);
             return cb;
@@ -138,7 +150,7 @@ namespace NanumCsvViewer
                 cb.Items.Clear();
                 foreach (var item in items()) cb.Items.Add(item);
                 cb.EndUpdate();
-                cb.SelectedIndex = Math.Clamp(index, 0, cb.Items.Count - 1);
+                SelectIndex(cb, index);
             });
             AddRow(l, cb);
             return cb;
@@ -212,8 +224,8 @@ namespace NanumCsvViewer
 
         public override void LoadValues()
         {
-            _language.SelectedIndex = S.Language switch { "en" => 1, "ko" => 2, _ => 0 };
-            _theme.SelectedIndex = S.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 };
+            SelectIndex(_language, S.Language switch { "en" => 1, "ko" => 2, _ => 0 });
+            SelectIndex(_theme, S.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 });
             _reopen.Checked = S.ReopenLastWorkspace;
         }
 
@@ -230,8 +242,8 @@ namespace NanumCsvViewer
         public override void ResetDefaults()
         {
             var d = new AppSettings();
-            _language.SelectedIndex = 0;
-            _theme.SelectedIndex = 0;
+            SelectIndex(_language, 0);
+            SelectIndex(_theme, 0);
             _reopen.Checked = d.ReopenLastWorkspace;
         }
     }
@@ -402,7 +414,7 @@ namespace NanumCsvViewer
 
         public override void LoadValues()
         {
-            _encoding.SelectedIndex = S.DefaultEncoding switch { EncodingDetector.Utf8 => 1, EncodingDetector.Cp949 => 2, _ => 0 };
+            SelectIndex(_encoding, S.DefaultEncoding switch { EncodingDetector.Utf8 => 1, EncodingDetector.Cp949 => 2, _ => 0 });
             _deleteIndex.Checked = S.DeleteIndexOnClose;
             _recent.Value = Math.Clamp(S.RecentCount, 1, AppSettings.MaxRecentWorkspaces);
         }
@@ -419,7 +431,7 @@ namespace NanumCsvViewer
         public override void ResetDefaults()
         {
             var d = new AppSettings();
-            _encoding.SelectedIndex = 0;
+            SelectIndex(_encoding, 0);
             _deleteIndex.Checked = d.DeleteIndexOnClose;
             _recent.Value = d.RecentCount;
         }
@@ -472,7 +484,7 @@ namespace NanumCsvViewer
             if (_scope is not null)
                 _scope.SelectedIndexChanged += (_, _) =>
                 {
-                    if (_loading) return;
+                    if (_loading || Relocalizing || _scope.SelectedIndex < 0) return;
                     ShowBaseline(Host.ScopeBaseline(_scope.SelectedIndex == 0));
                 };
             Note(() => LT(
@@ -501,8 +513,8 @@ namespace NanumCsvViewer
         private void ShowBaseline((AgentApprovalMode Mode, AgentDataPolicy Policy, bool Python) b)
         {
             _baseline = b;
-            _policy.SelectedIndex = (int)b.Policy;
-            if (_approval.Enabled) _approval.SelectedIndex = (int)b.Mode;
+            SelectIndex(_policy, (int)b.Policy);
+            if (_approval.Enabled) SelectIndex(_approval, (int)b.Mode);
             _python.Checked = b.Python;
         }
 
@@ -511,14 +523,14 @@ namespace NanumCsvViewer
             _loading = true;
             try
             {
-                if (_scope is not null) _scope.SelectedIndex = 0;
+                if (_scope is not null) SelectIndex(_scope, 0);
                 _maxRows.Value = Math.Clamp(S.AgentMaxRows, 1, 5000);
                 _omp.Text = S.AgentOmpPath ?? "";
                 _extra.Text = S.AgentExtraArgs ?? "";
                 var forced = AgentApprovalPolicy.ForcedByArgs(S.AgentExtraArgs);
                 _approval.Enabled = forced is null;
                 ShowBaseline(Host.ScopeBaseline(WorkspaceScope));
-                if (forced is { } f) _approval.SelectedIndex = (int)f.Mode;
+                if (forced is { } f) SelectIndex(_approval, (int)f.Mode);
                 Relocalize();   // 고정 안내 글자
                 _pyEnv.Reload();
                 _skills.Load(S);
@@ -566,11 +578,11 @@ namespace NanumCsvViewer
         public override void ResetDefaults()
         {
             var d = new AppSettings();
-            _policy.SelectedIndex = (int)(Enum.TryParse<AgentDataPolicy>(d.AgentDataPolicy, out var pol) ? pol : AgentDataPolicy.SummaryOnly);
+            SelectIndex(_policy, (int)(Enum.TryParse<AgentDataPolicy>(d.AgentDataPolicy, out var pol) ? pol : AgentDataPolicy.SummaryOnly));
             _maxRows.Value = d.AgentMaxRows;
             _omp.Text = "";
             _extra.Text = "";
-            if (_approval.Enabled) _approval.SelectedIndex = (int)AgentApprovalPolicy.Parse(d.AgentApprovalMode);
+            if (_approval.Enabled) SelectIndex(_approval, (int)AgentApprovalPolicy.Parse(d.AgentApprovalMode));
             _python.Checked = d.AgentAllowLocalPython;
             _pyEnv.ResetDefaults();
             _skills.ResetDefaults();

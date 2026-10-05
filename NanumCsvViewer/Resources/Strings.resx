@@ -125,7 +125,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 • Equal values keep their original order (stable sort). Clear Sort restores file order.
 
 [Analysis]
-• Facets panel (F6): see per-column distributions (histogram / top values) and click a bar to filter instantly (cross-filtering).
+• Facets panel (toolbar button, View ▸ Facets Panel, or F6): see per-column distributions (histogram / top values) and click a bar to filter instantly (cross-filtering).
 • Data / Statistics / Visualization menus: distributions, correlation, tests, models, group aggregation, pivot table (Data) and pivot chart (Visualization). Export: File ▸ Export View ▸ CSV/Markdown/JSON/HTML.
 
 [Detail Panel]

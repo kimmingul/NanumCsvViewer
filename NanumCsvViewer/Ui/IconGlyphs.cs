@@ -26,6 +26,7 @@ namespace NanumCsvViewer
         public const string Palette = "\uE790";
         public const string Explorer = "\uE8B7";
         public const string Detail = "\uE8A0";
+        public const string Facets = "\uE8FD";
         public const string Chat = "\uE8BD";
         public const string Settings = "\uE713";
         public const string Globe = "\uE774";

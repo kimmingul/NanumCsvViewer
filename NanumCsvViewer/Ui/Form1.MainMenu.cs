@@ -171,7 +171,9 @@ namespace NanumCsvViewer
                 if (_agentButton is not null && _agentButton.Checked != agent) _agentButton.Checked = agent;
                 if (_viewExplorerMenu is not null) _viewExplorerMenu.Checked = explorer;
                 if (_wsToolButton is not null) _wsToolButton.Checked = explorer;
-                if (_facetsMenu is not null) _facetsMenu.Checked = IsPanelVisible(PanelKind.Facets);
+                bool facets = IsPanelVisible(PanelKind.Facets);
+                if (_facetsMenu is not null) _facetsMenu.Checked = facets;
+                if (_facetsButton is not null && _facetsButton.Checked != facets) _facetsButton.Checked = facets;
                 bool findings = IsPanelVisible(PanelKind.Findings);
                 if (_viewFindingsMenu is not null) _viewFindingsMenu.Checked = findings;
                 if (_qualityPanelMenu is not null) _qualityPanelMenu.Checked = findings;

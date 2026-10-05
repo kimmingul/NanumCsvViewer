@@ -2,12 +2,12 @@ namespace NanumCsvViewer
 {
     // 도구 모음의 단일 구성처. 왼쪽 → 오른쪽:
     //   [열기][작업 공간 저장] | [되돌리기][다시 실행] | 찾기 상자 | 필터 [컬럼][값] | 정렬 ▲ ▼ ✕ | [셀 편집][시트 편집] | [조건부 서식]
-    //   …오른쪽 끝: [탐색기][행 상세][AI] | [설정]
+    //   …오른쪽 끝: [탐색기][패싯][행 상세][AI] | [설정]
     // 아이콘은 모두 Windows 아이콘 글꼴 글리프(IconGlyphs)로 장치 DPI·테마 글자색에 맞춰 그린다.
     // 툴팁은 "이름 (단축키)" — 단축키 표(CommandShortcuts)에서 온다.
     public partial class Form1
     {
-        private ToolStripButton? _saveWsButton, _undoButton, _redoButton, _cfButton, _settingsButton;
+        private ToolStripButton? _saveWsButton, _undoButton, _redoButton, _cfButton, _settingsButton, _facetsButton;
         private readonly List<(ToolStripItem Item, string TextEn, string TextKo, string? CommandId)> _toolbarLabels = new();
 
         private ToolStripButton IconButton(string name, string glyph, string en, string ko, string? commandId, EventHandler onClick,
@@ -64,7 +64,7 @@ namespace NanumCsvViewer
             _cfButton = IconButton("cfButton", IconGlyphs.Palette, "Conditional Formatting…", "조건부 서식…", null, (_, _) => ShowConditionalFormatManager());
 
             // 우측 정렬 항목은 나중에 추가한 것이 왼쪽에 놓인다: 설정 → 구분선 → AI → 행 상세 → 탐색기 순으로 추가하면
-            // 화면에서는 [탐색기][행 상세][AI] | [설정].
+            // 화면에서는 [탐색기][패싯][행 상세][AI] | [설정].
             _settingsButton = IconButton("settingsButton", IconGlyphs.Settings, "Settings…", "설정…", "tools.settings", (_, _) => ShowSettings(), right: true);
             _agentButton = IconButton("agentToggleButton", IconGlyphs.Chat, "AI Agent Panel", "AI 에이전트 패널", "view.ai", (_, _) => { }, right: true, checkOnClick: true);
             _agentButton.CheckedChanged += (_, _) =>
@@ -73,6 +73,12 @@ namespace NanumCsvViewer
             };
             detailToggleButton.Alignment = ToolStripItemAlignment.Right;
             ToolbarIcon(detailToggleButton, IconGlyphs.Detail, CommandShortcuts.En("view.detail"), CommandShortcuts.Ko("view.detail"), "view.detail");
+            _facetsButton = IconButton("facetsToggleButton", IconGlyphs.Facets, CommandShortcuts.En("view.facets"), CommandShortcuts.Ko("view.facets"), "view.facets",
+                (_, _) => { }, right: true, checkOnClick: true);
+            _facetsButton.CheckedChanged += (_, _) =>
+            {
+                if (!_syncingPanelToggles) SetFacetsVisible(_facetsButton.Checked);
+            };
             _wsToolButton = IconButton("workspaceToolButton", IconGlyphs.Explorer, "Workspace Explorer", "작업 공간 탐색기", "view.explorer",
                 (_, _) => SetWorkspaceExplorerVisible(!WorkspaceDockVisible), right: true);
 
@@ -87,7 +93,7 @@ namespace NanumCsvViewer
                 _editCellButton, _editSheetButton, Sep(),
                 _cfButton,
                 _settingsButton, new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right },
-                _agentButton, detailToggleButton, _wsToolButton,
+                _agentButton, detailToggleButton, _facetsButton, _wsToolButton,
             });
         }
 

@@ -283,10 +283,10 @@ namespace NanumCsvViewer.Tests
                     "filterColumnLabel", "filterColumnCombo", "filterTextBox", "applyFilterButton", "clearFilterButton", "|",
                     "sortAscButton", "sortDescButton", "clearSortButton", "|", "editCellButton", "editSheetButton", "|", "cfButton",
                 };
-                string[] right = { "settingsButton", "|", "agentToggleButton", "detailToggleButton", "workspaceToolButton" };
+                string[] right = { "settingsButton", "|", "agentToggleButton", "detailToggleButton", "facetsToggleButton", "workspaceToolButton" };
                 Func<ToolStripItem, string> name = i => i is ToolStripSeparator ? "|" : i.Name;
                 Assert.Equal(left.Concat(right), items.Select(name));
-                // 오른쪽 그룹은 우측 정렬(나중에 추가한 것이 왼쪽): 화면에서는 [탐색기][행 상세][AI] | [설정]
+                // 오른쪽 그룹은 우측 정렬(나중에 추가한 것이 왼쪽): 화면에서는 [탐색기][패싯][행 상세][AI] | [설정]
                 Assert.All(items.Skip(left.Length), i => Assert.Equal(ToolStripItemAlignment.Right, i.Alignment));
                 Assert.All(items.Take(left.Length), i => Assert.Equal(ToolStripItemAlignment.Left, i.Alignment));
 
@@ -297,7 +297,7 @@ namespace NanumCsvViewer.Tests
                 Tip("redoButton", "edit.redo"); Tip("findNextButton", "data.findNext"); Tip("clearFilterButton", "data.clearFilter");
                 Tip("clearSortButton", "data.clearSort"); Tip("editCellButton", "edit.cell"); Tip("editSheetButton", "edit.sheet");
                 Tip("settingsButton", "tools.settings"); Tip("agentToggleButton", "view.ai"); Tip("detailToggleButton", "view.detail");
-                Tip("workspaceToolButton", "view.explorer");
+                Tip("facetsToggleButton", "view.facets"); Tip("workspaceToolButton", "view.explorer");
 
                 if (IconGlyphs.FontName is null) return; // 아이콘 글꼴이 없는 환경: 글자 버튼으로 대체되어 이미지 검사는 의미 없다.
                 int px = IconGlyphs.PixelSize(form.DeviceDpi);
@@ -405,6 +405,31 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal(!explorer, form.IsPanelVisible(PanelKind.Explorer));
                 Assert.Equal(!explorer, form.ToolbarItems().OfType<ToolStripButton>().Single(b => b.Name == "workspaceToolButton").Checked);
                 Assert.True(Press(form, Keys.Control | Keys.Shift | Keys.W));
+            });
+        }
+
+        [Fact]
+        public void The_facets_toolbar_button_toggles_the_facets_panel_and_stays_in_sync_with_F6_and_code()
+        {
+            OnForm(form =>
+            {
+                Open(form, MakeCsv("a.csv", Csv));
+                var button = (ToolStripButton)form.ToolbarItems().Single(i => i.Name == "facetsToggleButton");
+                bool before = form.IsPanelVisible(PanelKind.Facets);
+                Assert.Equal(before, button.Checked);
+
+                button.PerformClick();                                                   // 버튼 → 패널
+                Assert.Equal(!before, form.IsPanelVisible(PanelKind.Facets));
+                Assert.Equal(!before, button.Checked);
+
+                Assert.True(Press(form, Keys.F6));                                       // F6 → 버튼
+                Assert.Equal(before, form.IsPanelVisible(PanelKind.Facets));
+                Assert.Equal(before, button.Checked);
+
+                form.SetPanelVisible(PanelKind.Facets, !before);                         // 코드(작업 공간 복원 등) → 버튼
+                Assert.Equal(!before, button.Checked);
+                form.SetPanelVisible(PanelKind.Facets, before);
+                Assert.Equal(before, button.Checked);
             });
         }
 
