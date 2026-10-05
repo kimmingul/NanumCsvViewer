@@ -8,6 +8,8 @@ using NanumCsvViewer.Charting;
 
 namespace NanumCsvViewer.Tests;
 
+// 실제 Form1을 만드는 테스트가 있으므로 다른 Form1 테스트와 직렬화한다(WinForms KeysConverter 초기화 경쟁).
+[Collection("SavedViewStore")]
 public class HighCardinalityTests
 {
     [Fact]

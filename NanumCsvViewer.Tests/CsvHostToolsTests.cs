@@ -12,6 +12,8 @@ namespace NanumCsvViewer.Tests
 {
     // csv.* host tool: 가짜 호스트(메모리 표)로 인자 검증·데이터 정책·승인·편집·저장·기록을, 실제 VirtualCsvDocument로
     // "필터 → 분석" 경로의 숫자를 검증한다. 네트워크·모델 호출 없음.
+    // 실제 Form1을 만드는 테스트가 있으므로 다른 Form1 테스트와 직렬화한다(WinForms KeysConverter 초기화 경쟁·SavedViewStore 경로 공유).
+    [Collection("SavedViewStore")]
     public sealed partial class CsvHostToolsTests : IDisposable
     {
         private readonly string _dir = Path.Combine(Path.GetTempPath(), "csvtools-" + Guid.NewGuid().ToString("N"));

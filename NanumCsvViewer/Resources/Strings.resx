@@ -173,8 +173,16 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 [Theme]
 • Use the theme toggle at the right of the toolbar to switch light/dark.
 
+[Workspace (several files)]
+• Each open file is a tab: Ctrl+Tab / Ctrl+Shift+Tab switch, Ctrl+W or middle-click closes. A workbook (Excel/SAS/SPSS/SQLite) is one tab with sheet buttons at the bottom.
+• View ▸ Workspace Explorer (Ctrl+Shift+W) lists sources, tables and views. Add a data file as a source, then join, append, compare or group with the wizards (join diagnostics show unmatched/duplicate keys first).
+• Workspace ▸ New Query (Ctrl+Alt+Q) opens the SQL editor (DuckDB; a single SELECT only). CSV columns are typed in table "T"; "T__raw" keeps every column as original text. ID-like columns are text — use CAST("id" AS BIGINT) to compare numerically.
+• Views are read-only tabs (save as a file, then open it, to edit). ⚠ marks a stale view; refresh recomputes it and resets that tab's filters/sort. A source used by a view cannot be renamed or removed.
+• File ▸ Open Workspace (Ctrl+Shift+O) / Save Workspace store sources and view definitions in a .ncvws file (data is not stored; Locate/Skip for missing files).
+
 [Shortcuts]
 Ctrl+O Open · Ctrl+Q Quit · Ctrl+F Find · F3 Find Next · Ctrl+G Go to Cell (row · R12C3 · C3 · Name:12)
 Ctrl+B Filter by Cell · Ctrl+Shift+L Clear Filter · Ctrl+Shift+S Clear Sort
-F4 Detail Panel · F6 Facets Panel · F1 This help</value></data>
+F4 Detail Panel · F6 Facets Panel · F1 This help
+Ctrl+Tab / Ctrl+Shift+Tab Next / Previous Tab · Ctrl+W Close Tab · Ctrl+Shift+W Workspace Explorer · Ctrl+Alt+Q New Query · Ctrl+Shift+O Open Workspace</value></data>
 </root>

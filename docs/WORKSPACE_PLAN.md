@@ -48,3 +48,28 @@
 ## 6. 원칙
 
 정직한 결과(조인 행 폭증·키 불일치·타입 변환 실패·잘림을 숨기지 않음), 원본 파일 불변, 취소 가능, 1 GB급 CSV에서도 UI가 멈추지 않음.
+
+## 구현 현황 (v3.0.0 예정, 버전 번호는 그대로 2.2.0)
+
+계획한 1~5단계가 모두 구현되었다(테스트 1566개 통과).
+
+- **탭**: 다중 문서 탭(Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+W / 가운데 클릭 / 탭 메뉴), 통합 문서는 탭 하나 + 하단 시트 버튼. 보기 ▸ 작업 공간 탐색기(Ctrl+Shift+W).
+- **엔진**(`Workspace/*`): DuckDB. CSV = 테이블 `T`(TRY_CAST 타입) + `T__raw`(원본 텍스트), 엑셀·SAS·SPSS·SQLite = 스키마 + 테이블. **SELECT 하나만** 허용. CP949 CSV는 UTF-8 임시 사본으로 변환.
+- **SQL 편집기**: 작업 공간 ▸ 새 질의(Ctrl+Alt+Q; Ctrl+Shift+Q는 품질 프로파일 실행으로 유지). 결과는 Result 탭.
+- **뷰**: 읽기 전용 View 탭, 원본 변경 시 ⚠ stale, 새로 고침.
+- **마법사**(`Workspace/UI/Wizards/*`, `WizardSql.cs`): 조인(진단 포함)·이어 붙이기·비교·그룹. 생성 SQL을 보여 주고 편집 가능.
+- **에이전트**: `ws.list_tables/describe/add_source/query/check_join/create_view/append/compare/group/materialize/open/switch`, `AgentGuide.md`의 작업 흐름·SQL 규칙·데이터 정책별 `ws.query` 동작. omp 분석 폴더는 작업 공간 단위로 고정(`<작업 공간 폴더>\<이름>_분석결과` 또는 첫 데이터 파일 폴더).
+- **작업 공간 파일**: `.ncvws`, 파일 ▸ 작업 공간 열기(Ctrl+Shift+O)/저장, 최근 목록, 상대+절대 경로, 없는 파일은 위치 지정/건너뛰기. 뷰 정의만 저장하고 데이터는 저장하지 않음. 설치 프로그램이 `.ncvws` 연결을 등록.
+- **실체화**: 테이블·뷰를 새 CSV·xlsx로 저장.
+
+### 알려진 제한
+
+- 뷰 새로 고침은 그 View 탭의 필터·정렬을 초기화한다.
+- 뷰는 읽기 전용이다(편집하려면 파일로 저장한 뒤 연다).
+- 식별자성 열은 텍스트(VARCHAR)다. 숫자 비교·조인은 `CAST`가 필요하다.
+- CSV 스캔은 단일 스레드이며 열 개수가 다른 행(ragged row)을 허용한다.
+- DB 원본(엑셀·SAS·SPSS·SQLite)은 앱이 다시 가져올 때만 갱신된다.
+- DuckDB 때문에 포터블 exe가 x64 기준 약 48 MB로 커진다.
+- 뷰가 쓰는 원본의 이름 바꾸기·제거는 거부된다.
+- 릴리즈(v3.0.0)는 사용자 요청 시에만 진행한다.
+

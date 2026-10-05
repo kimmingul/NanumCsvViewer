@@ -112,6 +112,14 @@ Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: stri
 Root: HKA; Subkey: "Software\Classes\.sqlite3\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".sqlite3"; ValueData: ""
 Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".sqlite3"; ValueData: "{#ProgId}"
+; 작업 공간 파일(.ncvws)은 앱 전용 형식이므로 기본 연결로 등록한다.
+Root: HKA; Subkey: "Software\Classes\NanumCsvViewer.Workspace"; ValueType: string; ValueName: ""; ValueData: "{#MyAppName} Workspace"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\NanumCsvViewer.Workspace\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\NanumCsvViewer.exe,0"
+Root: HKA; Subkey: "Software\Classes\NanumCsvViewer.Workspace\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\NanumCsvViewer.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.ncvws"; ValueType: string; ValueName: ""; ValueData: "NanumCsvViewer.Workspace"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.ncvws\OpenWithProgids"; ValueType: string; ValueName: "NanumCsvViewer.Workspace"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\NanumCsvViewer.exe\SupportedTypes"; ValueType: string; ValueName: ".ncvws"; ValueData: ""
+Root: HKA; Subkey: "{#AppRegKey}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ncvws"; ValueData: "NanumCsvViewer.Workspace"
 
 [Run]
 Filename: "{app}\NanumCsvViewer.exe"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
