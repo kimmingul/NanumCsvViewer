@@ -213,6 +213,7 @@ namespace NanumCsvViewer.Tests
                         RunVersion = (_, _) => Task.FromResult<string?>("omp/18.4.4"),
                         ReadGuide = () => "# guide",
                         LocalPython = new FakePythonSetup(),
+                        ReadModelUsage = _ => OmpModelUsage.Result.Fail(OmpModelUsage.Status.NoDatabase, "test"),
                     });
                 controller.StartOnFirstUse(() => _dir);
                 controller.SetWorkspaceContext((AgentWorkspaceContext)Call(form, "BuildAgentWorkspaceContext")!);

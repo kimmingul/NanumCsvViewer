@@ -33,6 +33,10 @@ namespace NanumCsvViewer.Agent
         internal IPythonSetup LocalPython { get; init; } = new PythonSetup();
         /// <summary>분석 스킬을 풀 루트(null이면 %LOCALAPPDATA%\NanumCsvViewer\skills). 테스트는 임시 폴더로 바꾼다.</summary>
         public string? SkillRoot { get; init; }
+        /// <summary>omp의 에이전트 폴더(agent.db 위치). null이면 omp 추가 인자의 --profile·환경 변수(OMP_PROFILE, PI_CODING_AGENT_DIR …)에서 찾는다.</summary>
+        public string? AgentDirectory { get; init; }
+        /// <summary>omp 사용 기록(모델별 마지막 사용) 읽기. UI 스레드 밖에서 부른다. 테스트는 가짜로 교체한다.</summary>
+        internal Func<string, OmpModelUsage.Result> ReadModelUsage { get; init; } = dir => OmpModelUsage.Read(dir);
     }
 
     /// <summary>

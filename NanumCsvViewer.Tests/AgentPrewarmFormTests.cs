@@ -117,6 +117,7 @@ namespace NanumCsvViewer.Tests
                     ReadGuide = () => "# guide",
                     LocalPython = new FakePythonSetup(),
                     SkillRoot = Path.Combine(_dir, "skills"),
+                    ReadModelUsage = _ => OmpModelUsage.Result.Fail(OmpModelUsage.Status.NoDatabase, "test"),
                 });
             controller.StartOnFirstUse(() => (string)Call(form, "AgentWorkingDirectory")!);
             SetField(form, "_agentController", controller);

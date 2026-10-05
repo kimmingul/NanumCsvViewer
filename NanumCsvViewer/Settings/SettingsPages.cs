@@ -492,6 +492,8 @@ namespace NanumCsvViewer
             Note(() => LT(
                 "The agent is omp (oh-my-pi), which uses the models you configured in omp. 'Summary only' sends the schema, aggregates and analysis results, never raw cell values. Edits are stored in an undoable overlay; the original file is never written. omp starts when you send your first message.",
                 "에이전트는 omp(oh-my-pi)이며 omp에 설정한 모델을 씁니다. '요약만'은 스키마·집계·분석 결과만 보내고 원시 셀 값은 보내지 않습니다. 편집은 되돌릴 수 있는 덮개에 쌓이고 원본 파일은 쓰지 않습니다. omp는 첫 메시지를 보낼 때 시작합니다."));
+            // 채팅 모델 선택기의 "최근 사용" 그룹이 쓰는 omp 기록을 읽을 수 있는지(읽기만 하는 상태 줄).
+            Note(() => Host.AgentModelUsageStatus());
         }
 
         private bool WorkspaceScope => _scope is not null && _scope.SelectedIndex == 0;

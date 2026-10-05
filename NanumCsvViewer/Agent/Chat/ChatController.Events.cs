@@ -168,6 +168,7 @@ namespace NanumCsvViewer.Agent
                 }
                 _modelList = set.ToList();
                 PostCatalog();
+                RefreshModelUsage();
             });
 
         private void RequestLevels() =>
@@ -192,8 +193,11 @@ namespace NanumCsvViewer.Agent
                 PostCatalog();
             }, _ => { /* 로그인 제공자 이름은 보기 좋게 쓰는 용도뿐 */ });
 
-        private void PostCatalog() =>
-            _page.Post(ChatPageMessages.Catalog(_modelList, _levels.Count > 0 ? _levels : DefaultLevels.ToList(), _providers));
+        private void PostCatalog()
+        {
+            _postedRecent = OmpModelUsage.Recent(_usageItems, _modelList);
+            _page.Post(ChatPageMessages.Catalog(_modelList, _levels.Count > 0 ? _levels : DefaultLevels.ToList(), _providers, _postedRecent));
+        }
 
         private void ApplyCommands(JsonElement commands)
         {

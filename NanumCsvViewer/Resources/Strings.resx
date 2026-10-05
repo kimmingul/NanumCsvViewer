@@ -137,6 +137,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 [Settings]
 • Tools ▸ Settings… (Ctrl+,) — General (theme system / light / dark, language auto / English / Korean; View ▸ Theme and Language also work), Panels &amp; Layout, Grid, Files, AI Agent, Shortcuts.
 • At startup the AI panel is on; the row detail panel, facets and explorer are off. Change this in Panels &amp; Layout, or turn on "remember last state". While the AI panel is visible, the AI agent (omp) starts in the background a moment after the app is idle (the model, thinking and approval pickers are ready before you type); while the panel is hidden it starts only when you open the panel or send the first message.
+• The model button under the AI chat box lists "Recently used" models first (the last 8 you picked, newest first; omp's own usage record is read, read-only), then every model by provider. The recent ones also stay in their provider group. If omp's record cannot be read (for example after an omp update changes its format), the chat shows a one-time notice per omp version and only the full list is shown; Settings ▸ AI Agent shows the status.
 
 [Workspace (several files)]
 • Each open file is a tab: Ctrl+Tab / Ctrl+Shift+Tab switch, Ctrl+W or middle-click closes. A workbook (Excel/SAS/SPSS/SQLite) is one tab with sheet buttons at the bottom.

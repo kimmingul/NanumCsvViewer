@@ -49,6 +49,7 @@
   "page.markdown.copy": "복사",
   "page.modelpicker.noMatch": "맞는 모델이 없습니다",
   "page.modelpicker.none": "모델 없음",
+  "page.modelpicker.recent": "최근 사용",
   "page.modelpicker.search": "모델 검색",
   "page.modelpicker.title": "모델: {0}",
   "page.sheet.closeTitle": "닫기 (Esc)",

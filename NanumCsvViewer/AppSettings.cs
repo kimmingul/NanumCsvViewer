@@ -47,6 +47,8 @@ namespace NanumCsvViewer
         public string AgentApprovalMode { get; set; } = "yolo";
         /// <summary>승인 모드를 사용자가 직접 골랐거나 기본 모드 안내를 이미 보였으면 true(안내는 한 번만).</summary>
         public bool AgentApprovalNoticeShown { get; set; } = false;
+        /// <summary>"최근 사용 모델을 읽을 수 없음" 경고를 이미 채팅에 보인 omp 버전(빈 문자열 = 아직 안 보임). omp 버전마다 한 번만 알린다.</summary>
+        public string AgentModelUsageAlertVersion { get; set; } = "";
 
         // ---- v3 작업 공간
         /// <summary>최근에 열거나 저장한 작업 공간 파일(.ncvws) 전체 경로, 가장 최근이 앞.</summary>

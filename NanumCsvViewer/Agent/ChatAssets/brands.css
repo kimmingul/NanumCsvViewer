@@ -82,6 +82,8 @@
 .model-row { padding-left: 18px; }
 .model-row .popup-name { font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .model-row.current .popup-name { font-weight: 700; }
+/* Under "Recently used" there is no provider heading, so the row names its provider at the right edge. */
+.model-row .model-provider-tag { margin-left: auto; padding-left: 8px; font-size: 11px; }
 
 /* "Answered by" tag above an answer when the model changed. */
 .model-tag {

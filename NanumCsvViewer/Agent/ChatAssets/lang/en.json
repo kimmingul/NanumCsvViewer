@@ -49,6 +49,7 @@
   "page.markdown.copy": "Copy",
   "page.modelpicker.noMatch": "No matching model",
   "page.modelpicker.none": "No model",
+  "page.modelpicker.recent": "Recently used",
   "page.modelpicker.search": "Search models",
   "page.modelpicker.title": "Model: {0}",
   "page.sheet.closeTitle": "Close (Esc)",

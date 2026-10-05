@@ -22,6 +22,7 @@ namespace NanumCsvViewer.Agent
     /// <param name="SkillsOff">끈 개별 스킬 이름(쉼표 목록).</param>
     /// <param name="UseManagedPython">앱이 관리하는 Python 분석 환경(%LOCALAPPDATA%\NanumCsvViewer\python-analysis)이 있으면 에이전트의 Python을 그것으로 한다(기본 켬). 없으면 사용자 Python.</param>
     /// <param name="PythonEnvNoticePending">true면 관리 환경 없이 로컬 Python을 처음 켠 연결에서 설정 안내를 채팅에 한 번 보이고 PythonEnvNoticeShown을 올린다.</param>
+    /// <param name="ModelUsageAlertedVersion">"최근 사용 모델을 읽을 수 없음" 경고를 이미 보인 omp 버전(없으면 빈 문자열). omp 버전마다 한 번만 경고하고 ModelUsageAlertShown이 새 값을 알린다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
@@ -37,7 +38,8 @@ namespace NanumCsvViewer.Agent
         string SkillCategoriesOff = "",
         string SkillsOff = "",
         bool UseManagedPython = true,
-        bool PythonEnvNoticePending = false)
+        bool PythonEnvNoticePending = false,
+        string ModelUsageAlertedVersion = "")
     {
         /// <summary>분석 스킬 구성(설정). 로컬 Python이 켜져 있을 때만 실제로 실린다(<see cref="SkillSelection"/>).</summary>
         internal SkillSelection Skills => SkillSelection.Create(SkillsEnabled, (SkillCategoriesOff ?? "").Split(','), (SkillsOff ?? "").Split(','));

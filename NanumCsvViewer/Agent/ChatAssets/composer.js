@@ -271,7 +271,7 @@
 
   function setCatalog(msg) {
     catalog = { models: msg.models || [], levels: msg.levels || [] };
-    global.ChatModelPicker.catalog(catalog.models, msg.providers);
+    global.ChatModelPicker.catalog(catalog.models, msg.providers, msg.recent);
     status(state);
   }
 

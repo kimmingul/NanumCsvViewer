@@ -25,6 +25,11 @@ namespace NanumCsvViewer.Tests
         /// <summary>`omp usage` 같은 CLI 호출 가짜. 기본은 실패(null).</summary>
         public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> Cli { get; set; } =
             (_, _, _, _) => Task.FromResult<string?>(null);
+        /// <summary>omp 모델 사용 기록 가짜. 기본은 기록 파일 없음(실제 ~/.omp를 읽지 않는다). 시작하기 전에 바꾼다.</summary>
+        public Func<string, OmpModelUsage.Result> Usage { get; set; } =
+            _ => OmpModelUsage.Result.Fail(OmpModelUsage.Status.NoDatabase, "test");
+        /// <summary>읽은 에이전트 폴더들(UI 밖 스레드에서 쌓인다).</summary>
+        public List<string> UsageDirs { get; } = new();
         /// <summary>분석 스킬을 푸는 임시 루트(실제 %LOCALAPPDATA%를 건드리지 않는다). 끝나면 지운다.</summary>
         public string SkillRoot { get; } = Path.Combine(Path.GetTempPath(), "ncv-skillroot-" + Guid.NewGuid().ToString("N"));
 
@@ -46,6 +51,8 @@ namespace NanumCsvViewer.Tests
                 LocalPython = python ?? new FakePythonSetup(),
                 SessionRoot = sessionRoot,
                 SkillRoot = SkillRoot,
+                AgentDirectory = Path.Combine(Path.GetTempPath(), "ncv-fake-omp-agent"),
+                ReadModelUsage = dir => { lock (UsageDirs) UsageDirs.Add(dir); return Usage(dir); },
             };
             Controller = new ChatController(Page, Tools, options ?? new AgentHostOptions(Language: "en", AppVersion: "1.2.3"), services);
             Controller.PageMessageUnhandled += e => { lock (Unhandled) Unhandled.Add(e); };

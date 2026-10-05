@@ -1,10 +1,13 @@
 (function (global) {
   'use strict';
 
-  // The model button under the message box: logo + short name. Its menu groups the models by
-  // provider (provider logo + name), each row with the maker's logo, and filters as you type.
+  // The model button under the message box: logo + short name. Its menu starts with a "Recently used" group (from omp's own usage
+  // record, sent by the host as `recent`; absent when the record cannot be read), then groups all models by provider (provider logo +
+  // name), each row with the maker's logo, and filters as you type. A recent model also stays in its provider group: the provider
+  // groups always list every model, so browsing by provider never has holes; the search box filters both parts.
   let button, menu, search, list;
   let models = [];
+  let recent = [];
   let providerNames = {};
   let current = '';
   let enabled = false;
@@ -36,14 +39,46 @@
     button.disabled = !enabled;
   }
 
+  function addRow(sel, showProvider) {
+    const row = document.createElement('div');
+    row.className = 'popup-item model-row' + (sel === current ? ' current' : '');
+    row.appendChild(B().modelIcon(sel));
+    const name = document.createElement('span');
+    name.className = 'popup-name';
+    name.textContent = B().split(sel).model;
+    row.appendChild(name);
+    if (showProvider) {
+      // Under "Recently used" the provider heading is missing, so the row names its provider.
+      const tag = document.createElement('span');
+      tag.className = 'popup-desc model-provider-tag';
+      tag.textContent = providerLabel(B().split(sel).provider);
+      row.appendChild(tag);
+    }
+    row.addEventListener('mousedown', e => { e.preventDefault(); choose(sel); });
+    row.dataset.value = sel;
+    list.appendChild(row);
+    rows.push(row);
+  }
+
   function renderList() {
     const needle = search.value.trim().toLowerCase();
     list.innerHTML = '';
     rows = [];
+    const matches = sel => !needle || sel.toLowerCase().includes(needle);
+    const recents = recent.filter(sel => models.includes(sel) && matches(sel));
+    if (recents.length) {
+      const head = document.createElement('div');
+      head.className = 'model-group model-recent';
+      const title = document.createElement('span');
+      title.textContent = T('page.modelpicker.recent');
+      head.appendChild(title);
+      list.appendChild(head);
+      for (const sel of recents) addRow(sel, true);
+    }
     const known = models.includes(current) || !current ? models : [current].concat(models);
     let group = null;
     for (const sel of known) {
-      if (needle && !sel.toLowerCase().includes(needle)) continue;
+      if (!matches(sel)) continue;
       const { provider } = B().split(sel);
       if (provider !== group) {
         group = provider;
@@ -55,17 +90,7 @@
         head.appendChild(name);
         list.appendChild(head);
       }
-      const row = document.createElement('div');
-      row.className = 'popup-item model-row' + (sel === current ? ' current' : '');
-      row.appendChild(B().modelIcon(sel));
-      const name = document.createElement('span');
-      name.className = 'popup-name';
-      name.textContent = B().split(sel).model;
-      row.appendChild(name);
-      row.addEventListener('mousedown', e => { e.preventDefault(); choose(sel); });
-      row.dataset.value = sel;
-      list.appendChild(row);
-      rows.push(row);
+      addRow(sel, false);
     }
     if (!rows.length) {
       const empty = document.createElement('div');
@@ -129,8 +154,9 @@
     renderButton();
   }
 
-  function catalog(items, providers) {
+  function catalog(items, providers, recentItems) {
     models = Array.isArray(items) ? items : [];
+    recent = Array.isArray(recentItems) ? recentItems : [];
     providerNames = providers || {};
     if (!menu.hidden) renderList();
   }

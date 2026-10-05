@@ -139,6 +139,7 @@ namespace NanumCsvViewer
             _agentController.ApprovalModeApplier = ApplyApprovalFromChat;
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.PythonEnvNoticeShown += () => { _settings.AgentPythonEnvNoticeShown = true; _settings.Save(); };
+            _agentController.ModelUsageAlertShown += version => { _settings.AgentModelUsageAlertVersion = version; _settings.Save(); };
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
             // omp는 바로 시작하지 않는다: 패널이 보이는 채로 앱이 한가해지면 곧(KickAgentPrewarm) 메시지 없이 시작해 모델·생각·승인 선택이 첫 메시지 전에
             // 준비되고, 패널이 숨겨져 있으면 첫 메시지(또는 패널을 열 때)까지 미룬다. 작업 공간 파일이 열려 있으면 그 작업 공간의
@@ -217,6 +218,10 @@ namespace NanumCsvViewer
             }
             return new AgentWorkspaceContext(WorkspaceFilePath, entries, _wfAgent.Notes);
         }
+
+        /// <summary>설정 ▸ AI 에이전트의 한 줄 상태: omp가 적어 둔 모델 사용 기록을 읽을 수 있는지(에이전트를 시작해 읽어 보기 전이면 안내).</summary>
+        internal string AgentModelUsageStatus() =>
+            _agentController?.ModelUsageStatusText ?? ChatController.ModelUsageStatusLine(null, Loc.CurrentLanguage == "ko");
 
         /// <summary>작업 공간 단위의 고정 분석 폴더(만들지 않음). 로컬 Python이 꺼져 있거나 에이전트가 아직 없으면 null.</summary>
         string? ICsvAgentHost.AnalysisFolder => _agentController?.AnalysisFolder;

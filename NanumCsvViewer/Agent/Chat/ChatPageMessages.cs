@@ -125,10 +125,12 @@ namespace NanumCsvViewer.Agent.Chat
                 o["workspaceLimitLabel"] = s.WorkspaceLimitLabel;
             });
 
-        public static string Catalog(IReadOnlyList<string> models, IReadOnlyList<string> levels, IReadOnlyDictionary<string, string> providers) =>
+        /// <summary>recent: omp의 사용 기록에서 고른 "최근 사용" 모델(models 안의 것만, 최근 순). 기록을 못 읽으면 빈 배열.</summary>
+        public static string Catalog(IReadOnlyList<string> models, IReadOnlyList<string> levels, IReadOnlyDictionary<string, string> providers, IReadOnlyList<string>? recent = null) =>
             Build("catalog", o =>
             {
                 o["models"] = ToArray(models);
+                o["recent"] = ToArray(recent ?? Array.Empty<string>());
                 o["levels"] = ToArray(levels);
                 var p = new JsonObject();
                 foreach (var kv in providers) p[kv.Key] = kv.Value;

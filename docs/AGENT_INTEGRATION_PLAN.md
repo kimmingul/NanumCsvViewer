@@ -180,3 +180,16 @@ NanumCsvViewer.exe
 - '요약만' 정책에서도 Python 출력은 모델에 갈 수 있다. 출력 정책은 지시이며 하드 보장이 아니다.
 - 앱 정보 창에는 라이선스 목록이 없다(고지는 `NOTICE.txt`와 풀린 스킬 폴더에 있음).
 - 검증: `SkillPackTests` 39개, 전체 1837 통과. 실제 omp 18.4.4 + 합성 자료로 스킬 발견과 Bland-Altman(라벨·머리말·산출물) 확인.
+
+## 14. 모델 선택기의 '최근 사용'
+
+- **출처**: omp가 `<에이전트 폴더>\agent.db`(SQLite, WAL)의 `model_usage(model_key TEXT PRIMARY KEY, last_used_at INTEGER)`에 적는 "모델 마지막 사용 시각"(키 `provider/id`, 유닉스 초). RPC `get_available_models`에는 최근성 정보가 없다(확인).
+- **omp 18.4.4로 확인한 것**: ① RPC `set_model`은 응답을 돌려주기 전에 이 표를 갱신한다(`--no-session`, 임시 cwd에서 전후 비교). ② 기본 모델로 프롬프트만 보낸 `omp -p`는 갱신하지 않는다. ③ omp가 `--mode rpc`로 실행 중일 때 읽기 전용 연결로 WAL이 읽히고 잠금 오류가 없다. ④ 에이전트 폴더: 기본 프로필은 `PI_CODING_AGENT_DIR`(있으면) 아니면 `~/<PI_CONFIG_DIR|.omp>/agent`, 이름 있는 프로필(`--profile`, `OMP_PROFILE`, 옛 `PI_PROFILE`)은 `~/.omp/profiles/<이름>/agent`이며 이때 `PI_CODING_AGENT_DIR`는 무시된다. 앱은 이런 인자·환경 변수를 따로 넘기지 않고 환경을 물려주므로(사용자가 'omp 추가 인자'에 `--profile`을 넣은 경우 포함) `OmpAgentDir`가 같은 규칙으로 폴더를 찾는다. `.env` 파일로 바꾼 위치는 따라가지 않는다.
+- **`OmpModelUsage.Read`**(`Agent/OmpModelUsage.cs`, 순수·UI 스레드 밖): `Mode=ReadOnly`·`Pooling=false`·`PRAGMA busy_timeout=250`, 쓰기·체크포인트 없음. 결과 `Ok | NoDatabase | Busy | SchemaChanged | Error` + `Items(키, 마지막 사용 UTC)` + `Detail`. 표·두 열(선언 형식 TEXT/INT 계열)을 `PRAGMA table_info`로, 값은 `typeof()`로 확인한다: 키가 text가 아니거나 시각이 정수가 아니거나 2000~2100년(초 단위) 밖(밀리초로 바뀐 경우)이면 `SchemaChanged`. `provider/id` 모양이 아닌 행은 건너뛰되 전부 그렇다면 `SchemaChanged`. 잠금(SQLITE_BUSY/LOCKED)은 200 ms 뒤 한 번 다시 시도하고 그래도 안 되면 `Busy`. 파일 없음은 `NoDatabase`, 그 밖은 `Error`.
+- **컨트롤러**: 모델 목록을 받을 때마다(`RequestModels`)와 `set_model` 성공 뒤에 UI 밖에서 읽고, 목록은 기다리지 않고 먼저 보낸다. `recent` = 현재 목록에 있는 키만, 최근 순(같으면 키 순), 8개. 카탈로그 메시지에 `recent` 배열을 싣고, 읽기 결과로 `recent`가 달라질 때만 다시 보낸다. 잠겨서 못 읽으면 직전 값을 유지하고, 그 밖의 실패는 비워 전체 목록(현재 동작)으로 되돌아간다.
+- **경고**: `SchemaChanged`·`Error`일 때만 채팅 알림(warn) "omp 내부 형식이 바뀌어 최근 사용 모델을 표시할 수 없습니다. 전체 모델 목록을 표시합니다. 앱을 업데이트하세요. (이유)"(영어판 포함). `NoDatabase`는 알리지 않고, `Busy`는 연속 3번(각각 재시도 포함) 못 읽을 때만 "계속 잠겨 있다"고 알린다. **omp 버전마다 한 번**: `AppSettings.AgentModelUsageAlertVersion` ↔ `AgentHostOptions.ModelUsageAlertedVersion`(`ModelUsageAlertShown` 이벤트로 저장). 모든 비정상 결과는 rpc.log에 남는다.
+- **선택기 화면**: 메뉴 맨 위 '최근 사용'(페이지 i18n `page.modelpicker.recent`) 그룹, 제공자 이름은 행 오른쪽에 작게. **최근 모델은 제공자별 전체 목록에도 그대로 남긴다** — 제공자별로 훑을 때 모델이 빠지면 오히려 헷갈리고, 목록은 이미 길어서 중복 몇 줄이 더 낫다. 검색은 두 곳 모두에 적용, 현재 모델은 어느 쪽에서든 선택·굵게 표시. 기록을 못 읽으면 그룹이 없다(전체 목록만).
+- **설정 ▸ AI 에이전트**: 맨 아래 읽기 전용 한 줄 "최근 사용 모델: omp 기록 사용 중 / 읽을 수 없음 (이유) / 아직 확인하지 않음".
+- **진단용 환경 변수**: `NANUMCSV_OMP_AGENT_DIR`가 있으면 앱이 최근 사용 기록만 그 폴더에서 읽는다(omp 자신은 영향 없음). 실제 DB를 건드리지 않고 형식 변경 경보를 재현하는 데 쓴다.
+- **한계**: omp가 `model_usage`를 쓰는 때가 앱이 `set_model`을 보낼 때뿐이면, 모델을 바꾸지 않고 기본 모델만 쓰는 사용자는 '최근 사용'이 갱신되지 않는다. 내부 형식이라 omp 업데이트로 언제든 달라질 수 있어 위 경보와 폴백이 있다.
+- **검증**: `OmpModelUsageTests`(임시 SQLite: 정상·빈 표·WAL에서 쓰는 쪽이 열려 있을 때·쓰기 없음·파일 없음·표/열/선언형식/값형식(밀리초·텍스트·실수)·`/` 없는 키·깨진 파일·잠금 Busy와 재시도 성공, 정렬·필터·8개 제한, 에이전트 폴더 규칙, 컨트롤러의 `recent`·set_model 뒤 갱신·폴백·경고 1회/버전/한국어/Busy 연속/예외) 36개, 전체 1885 통과. 실제 앱(Debug)에서 이 PC의 기록으로 '최근 사용'이 보이는 것과, 열 이름을 바꾼 복사본으로 경고·전체 목록·설정 줄이 나오는 것을 확인했다.

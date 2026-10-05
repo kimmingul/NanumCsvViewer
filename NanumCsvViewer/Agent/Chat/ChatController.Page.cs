@@ -287,6 +287,8 @@ namespace NanumCsvViewer.Agent
                 // 생각 수준 목록은 모델에 따라 달라진다.
                 RequestLevels();
                 RequestState();
+                // omp는 set_model 응답 전에 사용 기록을 갱신한다(실제 omp 18.4.4로 확인): 바로 읽어 "최근 사용"을 새로 고친다.
+                RefreshModelUsage();
             });
         }
 
