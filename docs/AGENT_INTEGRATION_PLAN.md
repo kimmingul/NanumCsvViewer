@@ -108,7 +108,7 @@ NanumCsvViewer.exe
   직접 고른 색의 테마 자동 조정, 글자색 자동 대비. 에이전트 `csv.format_undo`, 테마 색 이름 지정.
 - omp 추가 인자에 `--approval-mode X`·`--yolo`·`--auto-approve`가 있으면 그 값이 실제 모드가 되어 드롭다운·설정이 잠기고, 마우스를 올리면 이유를 보여 준다. 앱 카드도 실제 모드를 따른다.
 
-## 10. v3 — 여러 파일 작업 공간 `ws.*` 도구 (v3.0.0 예정)
+## 10. v3.0.0 — 여러 파일 작업 공간 `ws.*` 도구
 
 - 도구: `ws.list_tables`(테이블·뷰·열 타입·행 수·열린 탭·활성 탭), `ws.describe`(타입, **변환 실패 수**, 고유/null 수, 키 후보), `ws.add_source`(데이터 파일만, 읽기 전용),
   `ws.query`(SELECT 하나만), `ws.check_join`(조인 전 진단: 일치/불일치 키, null·중복, 카디널리티, 예상 행 수), `ws.create_view`·`ws.append`·`ws.compare`·`ws.group`(뷰 생성, 원본 불변),
