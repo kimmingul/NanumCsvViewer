@@ -1275,9 +1275,19 @@ namespace NanumCsvViewer
                 BackColor = _palette.Window,
                 Padding = new Padding(2, 1, 2, 1),
             };
-            Controls.Add(_sheetTabs);
-            // 상태바 바로 위(상태바가 더 바깥/아래)에 놓는다.
-            Controls.SetChildIndex(_sheetTabs, Controls.GetChildIndex(statusStrip1));
+            // 그리드가 있는 영역(splitContainer1.Panel2) 안에 둔다: 폼 최상위에 두면 왼쪽 탐색기·오른쪽 AI 패널 밑까지 창 폭 전체로 펼쳐진다.
+            splitContainer1.Panel2.Controls.Add(_sheetTabs);
+            OrderGridAreaControls();
+        }
+
+        // 그리드 영역의 도킹 순서(앞 = 안쪽): 그리드(Fill) · 시트 탭(바로 아래) · 패싯(오른쪽, 검사 결과 위쪽 전체 높이) · 검사 결과(맨 아래, 영역 전체 폭).
+        // 도킹은 z-순서의 뒤쪽 컨트롤부터 자리를 잡으므로, 패싯이 시트 탭보다 뒤에 있어야 시트 탭이 그리드 아래에만 놓인다.
+        private void OrderGridAreaControls()
+        {
+            var panel = splitContainer1.Panel2;
+            int i = 0;
+            foreach (Control? c in new Control?[] { grid, _sheetTabs, _facetsPanel, _qualityPanel })
+                if (c is not null && ReferenceEquals(c.Parent, panel)) panel.Controls.SetChildIndex(c, i++);
         }
 
         private void HideSheetTabs()
@@ -1346,7 +1356,7 @@ namespace NanumCsvViewer
                 Visible = false,
             };
             splitContainer1.Panel2.Controls.Add(_facetsPanel);
-            _facetsPanel.BringToFront();
+            OrderGridAreaControls();
         }
 
         // 현재(필터된) 뷰의 표본으로 컬럼별 분포를 다시 계산 → 크로스필터링.
@@ -2446,9 +2456,9 @@ namespace NanumCsvViewer
             _qualityPanel.ExportRequested += ExportQualityReport;
             _qualityPanel.AdvancedStatsRequested += ShowAdvancedStatsFromQuality;
             _qualityPanel.CloseRequested += () => SetFindingsVisible(false);
-            // 칩 바와 같은 검증된 방식: 폼 최상위에서 outerSplit 옆에 도킹(하단, 상태바 위).
-            Controls.Add(_qualityPanel);
-            Controls.SetChildIndex(_qualityPanel, Controls.GetChildIndex(MainContent) + 1);
+            // 그리드 영역(splitContainer1.Panel2) 안, 시트 탭 아래에 도킹한다(폼 최상위에 두면 탐색기·AI 패널 밑까지 펼쳐진다).
+            splitContainer1.Panel2.Controls.Add(_qualityPanel);
+            OrderGridAreaControls();
         }
 
         private bool _findingsPinned;   // 사용자가 직접(메뉴·설정·레이아웃) 켠 검사 결과 패널: 문서·탭이 바뀌어도 자동으로 숨기지 않는다

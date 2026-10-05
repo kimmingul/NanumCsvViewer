@@ -13,6 +13,10 @@ namespace NanumCsvViewer.Agent.Chat
         string? Input(string title, string prompt, string initial, bool multiline);
         /// <summary>HTML 내보내기 경로 선택. 취소하면 null.</summary>
         string? PickExportPath(string suggestedFileName);
+        /// <summary>파일 여러 개 고르기(filter는 OpenFileDialog 형식). 취소하면 null.</summary>
+        IReadOnlyList<string>? PickFiles(string title, string filter);
+        /// <summary>폴더 하나 고르기. 취소하면 null.</summary>
+        string? PickFolder(string description);
         /// <summary>http/https 주소를 기본 브라우저로 연다(그 밖의 스킴은 무시).</summary>
         void OpenUrl(string url);
         void SetClipboard(string text);
@@ -77,6 +81,18 @@ namespace NanumCsvViewer.Agent.Chat
                 OverwritePrompt = true,
             };
             return dlg.ShowDialog(Form.ActiveForm) == DialogResult.OK ? dlg.FileName : null;
+        }
+
+        public IReadOnlyList<string>? PickFiles(string title, string filter)
+        {
+            using var dlg = new OpenFileDialog { Multiselect = true, Title = title, Filter = filter, CheckFileExists = true };
+            return dlg.ShowDialog(Form.ActiveForm) == DialogResult.OK ? dlg.FileNames : null;
+        }
+
+        public string? PickFolder(string description)
+        {
+            using var dlg = new FolderBrowserDialog { Description = description, UseDescriptionForTitle = true };
+            return dlg.ShowDialog(Form.ActiveForm) == DialogResult.OK ? dlg.SelectedPath : null;
         }
 
         public void OpenUrl(string url)

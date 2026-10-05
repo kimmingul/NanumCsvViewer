@@ -78,7 +78,7 @@ namespace NanumCsvViewer
             Fill(_fileMenu,
                 _openMenu, _clipboardOpenMenu, Sep(),
                 _closeTabMenu, _closeOthersMenu, _closeAllTabsMenu, Sep(),
-                _wfOpenMenu, _wfRecentMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, Sep(),
+                _wfNewMenu, _wfOpenMenu, _wfRecentMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, Sep(),
                 _exportMenu, Sep(),
                 _quitMenu);
             _fileMenu.DropDownOpening += (_, _) => UpdateCloseWorkspaceMenu();

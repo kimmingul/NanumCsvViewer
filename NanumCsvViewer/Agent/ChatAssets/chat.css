@@ -68,6 +68,8 @@ body { display: flex; flex-direction: column; }
   max-width: 85%;
 }
 .user-text { white-space: pre-wrap; word-break: break-word; }
+/* Files attached to a message, above its text. */
+.user-attach { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 
 .turn-assistant { align-items: stretch; }
 .assistant-bubble { color: var(--fg); }

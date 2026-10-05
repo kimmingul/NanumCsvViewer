@@ -171,7 +171,9 @@ namespace NanumCsvViewer.Agent
                     Path.Combine(local, "NanumCsvViewer", "chat"), AppInfo.Version);
                 var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(local, "NanumCsvViewer", "WebView2"));
 
-                var web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor, AllowExternalDrop = false };
+                // 끌어놓기는 켠다: 페이지가 파일 끌기를 받아 postMessageWithAdditionalObjects로 넘기고(OnWebMessageReceived의 attachDrop),
+                // 페이지는 file: 이동을 막는다. 끄면 WebView2가 드롭 대상 자체를 거절해 부모 컨트롤도 드롭을 받지 못한다(실제 확인).
+                var web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor, AllowExternalDrop = true };
                 Controls.Add(web);
                 _web = web;
                 await web.EnsureCoreWebView2Async(env);
@@ -347,8 +349,27 @@ namespace NanumCsvViewer.Agent
                         catch (Exception) { /* 클립보드를 다른 프로그램이 잡고 있음 */ }
                     }
                     return;
+                case "attachDrop":
+                    // 끌어놓은 파일·폴더의 경로는 브라우저가 건 File 객체(AdditionalObjects)에서만 읽는다 — 페이지가 글로 보낸 경로는 믿지 않는다.
+                    // 컨트롤러가 받는 attachPaths는 이 패널만 만든다(페이지가 직접 보낸 같은 이름의 메시지는 아래 case에서 버린다).
+                    var dropped = DroppedPaths(e.AdditionalObjects);
+                    if (dropped.Count > 0)
+                        Received?.Invoke(JsonSerializer.SerializeToElement(new { t = "attachPaths", paths = dropped }));
+                    return;
+                case "attachPaths":
+                    return;
             }
             Received?.Invoke(msg);
+        }
+
+        /// <summary>끌어놓은 File 객체들의 전체 경로(경로를 알 수 없는 항목은 제외).</summary>
+        internal static List<string> DroppedPaths(IEnumerable<object>? objects)
+        {
+            var paths = new List<string>();
+            if (objects is null) return paths;
+            foreach (var o in objects)
+                if (o is CoreWebView2File { Path: { Length: > 0 } path }) paths.Add(path);
+            return paths;
         }
 
         private void SendNow(string json)

@@ -110,7 +110,7 @@ namespace NanumCsvViewer.Agent.Chat
                         if (isTitle) { title = AgentEventParser.CollapseWhitespace(root.Str("title")); continue; }
                         var msg = root.Child("message");
                         if (msg.IsObject() && msg.Str("role") == "user")
-                            firstUser = AgentEventParser.CollapseWhitespace(msg.Child("content").ContentText());
+                            firstUser = AgentEventParser.CollapseWhitespace(AttachmentContext.StripContext(msg.Child("content").ContentText()));
                     }
                     catch (JsonException) { }
                     if (title.Length > 0 && firstUser.Length > 0) break;

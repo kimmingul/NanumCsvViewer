@@ -27,6 +27,7 @@ namespace NanumCsvViewer
         {
             new("file.open",          "Open…",                 "열기…",                 C | Keys.O),
             new("file.closeTab",      "Close Tab",             "탭 닫기",               C | Keys.W),
+            new("file.newWorkspace",  "New Workspace…",        "새 작업 공간…",         C | S | Keys.N),
             new("file.openWorkspace", "Open Workspace…",       "작업 공간 열기…",       C | S | Keys.O),
             new("file.saveWorkspace", "Save Workspace",        "작업 공간 저장",        C | Keys.S),
             new("file.closeWorkspace", "Close Workspace",      "작업 공간 닫기",        Keys.None),   // 키 없음: 보편적인 키가 비어 있지 않다

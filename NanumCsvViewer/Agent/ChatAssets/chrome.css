@@ -93,13 +93,15 @@ body.hide-thinking .tool-group.only-thinking { display: none; }
   font-family: inherit;
 }
 .composer-box {
+  position: relative;
   display: flex;
-  align-items: flex-end;
-  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--assistantBg);
-  padding: 8px 8px 8px 12px;
+  padding: 8px 8px 6px 12px;
 }
 .composer-box:focus-within { border-color: var(--muted); }
 #input {
@@ -130,6 +132,79 @@ body.hide-thinking .tool-group.only-thinking { display: none; }
 }
 #send-btn:disabled { opacity: 0.3; cursor: default; }
 #send-btn.stop { background: var(--muted); }
+/* Bottom row of the box: + (files/folders) on the left, send/stop on the right. */
+.composer-row { display: flex; align-items: center; gap: 6px; }
+#attach-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+#attach-btn:hover { color: var(--fg); background: rgba(127, 127, 127, 0.15); }
+/* Files added to the workspace, waiting for the next message. */
+#attach-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-right: 4px; max-height: 92px; overflow-y: auto; }
+#attach-chips:empty { display: none; }
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 4px 1px 8px;
+  background: rgba(127, 127, 127, 0.12);
+}
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.attach-x {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.attach-x:hover { color: var(--fg); background: rgba(127, 127, 127, 0.25); }
+#attach-menu { left: 0; min-width: 170px; padding: 4px 0; }
+.attach-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.attach-item:hover, .attach-item:focus-visible { background: rgba(127, 127, 127, 0.18); outline: none; }
+/* The host shows this while files are dragged over the panel. */
+#drop-overlay {
+  position: fixed;
+  inset: 8px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 16px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--fg);
+  font-size: 14px;
+  pointer-events: none;
+}
+#drop-overlay[hidden] { display: none; }
 .composer-footer {
   display: flex;
   /* One line at any width and in any language: the selects shrink instead of wrapping. */

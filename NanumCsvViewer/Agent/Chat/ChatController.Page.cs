@@ -19,10 +19,16 @@ namespace NanumCsvViewer.Agent
                     break;
                 case "submit":
                     {
-                        bool ok = Submit(msg.Str("text"), msg.Bool("followUp") == true);
+                        bool ok = Submit(msg.Str("text"), msg.Bool("followUp") == true, ParseAttachments(msg.Child("attachments")));
                         _page.Post(ChatPageMessages.Submitted(msg.Str("id"), ok));
                         break;
                     }
+                case "attach":
+                    AttachFromDialog(msg.Str("kind"));
+                    break;
+                case "attachPaths":
+                    AttachPaths(msg.Child("paths").Items().Select(p => p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "").ToList());
+                    break;
                 case "abort":
                     StopTurn();
                     break;
@@ -95,12 +101,18 @@ namespace NanumCsvViewer.Agent
 
         /// <summary>
         /// 입력창 제출. 대기 중이면 prompt, 작업 중이면 steer(다음 단계에 읽힘) 또는 followUp(턴 뒤). 슬래시 명령은 앱이 처리하거나 omp로 넘긴다.
-        /// 보냈으면 true(페이지가 입력창을 비운다).
+        /// 보냈으면 true(페이지가 입력창을 비운다). attachments: 입력창 칩으로 붙인 작업 공간 파일 — 일반 메시지(슬래시·! 명령이 아닌 것)에만 쓰이고,
+        /// omp에 가는 글 앞에 파일·표 이름 머리말이 붙는다(<see cref="AttachmentContext"/>; 파일 내용은 없다).
         /// </summary>
-        public bool Submit(string text, bool followUp = false)
+        public bool Submit(string text, bool followUp = false) => Submit(text, followUp, null);
+
+        /// <inheritdoc cref="Submit(string, bool)"/>
+        internal bool Submit(string text, bool followUp, IReadOnlyList<ChatAttachment>? attachments)
         {
             string trimmed = (text ?? "").Trim();
             if (trimmed.Length == 0) return false;
+            if (attachments is { Count: > 0 } && trimmed[0] is not ('/' or '!'))
+                trimmed = AttachmentContext.Compose(attachments, trimmed);
             if (IsStartDeferred) return StartDeferredWith(trimmed, followUp);   // 첫 사용: omp를 지금 시작하고 연결되면 이 메시지를 보낸다
             if (_prewarming && !_connected && _pendingSubmit == null)
             {
@@ -194,7 +206,7 @@ namespace NanumCsvViewer.Agent
             }
             _stream.Emit(ChatPageMessages.User(message, _clock.UnixMs));
             // 이 턴에서 에이전트가 만드는 뷰의 출처에 적는다(슬래시 명령은 사용자 요청이 아니다).
-            if (!message.StartsWith('/')) _lastUserRequest = message;
+            if (!message.StartsWith('/')) _lastUserRequest = AttachmentContext.StripContext(message);
             _activity.PromptSent();
             Track(client, task, "prompt",
                 data =>

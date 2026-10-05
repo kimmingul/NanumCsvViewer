@@ -412,6 +412,9 @@ namespace NanumCsvViewer.Tests
         public Func<string, IReadOnlyList<string>, string?> OnSelect { get; set; } = (_, o) => o.Count > 0 ? o[0] : null;
         public Func<string, string, string, bool, string?> OnInput { get; set; } = (_, _, initial, _) => initial;
         public string? ExportPath { get; set; }
+        public IReadOnlyList<string>? PickedFiles { get; set; }
+        public string? PickedFolder { get; set; }
+        public List<string> PickFilters { get; } = new();
         public List<string> Opened { get; } = new();
         public List<string> Clipboard { get; } = new();
         public List<string> ConfirmTitles { get; } = new();
@@ -420,6 +423,8 @@ namespace NanumCsvViewer.Tests
         public string? Select(string title, IReadOnlyList<string> options) => OnSelect(title, options);
         public string? Input(string title, string prompt, string initial, bool multiline) => OnInput(title, prompt, initial, multiline);
         public string? PickExportPath(string suggestedFileName) => ExportPath;
+        public IReadOnlyList<string>? PickFiles(string title, string filter) { PickFilters.Add(filter); return PickedFiles; }
+        public string? PickFolder(string description) => PickedFolder;
         public void OpenUrl(string url) => Opened.Add(url);
         public void SetClipboard(string text) => Clipboard.Add(text);
     }

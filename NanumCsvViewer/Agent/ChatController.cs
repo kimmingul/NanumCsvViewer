@@ -171,6 +171,7 @@ namespace NanumCsvViewer.Agent
         {
             if (_disposed) return;
             try { _pythonCts?.Cancel(); } catch { }
+            try { _attachCts?.Cancel(); } catch { }
             TearDown(force: true);
             _disposed = true;
             _page.Received -= OnPageMessage;

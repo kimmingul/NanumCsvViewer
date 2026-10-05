@@ -14,7 +14,7 @@ namespace NanumCsvViewer
         private readonly List<WorkspaceFileView> _wfCarriedViews = new();
         private bool _wfBusy;
         private bool _wfCloseDecided;
-        private ToolStripMenuItem? _wfOpenMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, _wfRecentMenu;
+        private ToolStripMenuItem? _wfNewMenu, _wfOpenMenu, _wfSaveMenu, _wfSaveAsMenu, _wfCloseMenu, _wfRecentMenu;
 
         /// <summary>저장 확인(예/아니오/취소) 대화 상자를 대신하는 이음매(테스트용). null이면 실제 MessageBox.</summary>
         internal Func<string, DialogResult>? WorkspaceSavePrompt;
@@ -28,6 +28,7 @@ namespace NanumCsvViewer
         // Form1.AgentUi.BuildAgentFeatures에서 호출. 항목만 만든다(파일 메뉴 조립은 Ui/Form1.MainMenu.cs).
         private void BuildWorkspaceFileFeatures()
         {
+            _wfNewMenu = MakeCmd("file.newWorkspace", async (_, _) => await NewWorkspaceAsync());
             _wfOpenMenu = MakeCmd("file.openWorkspace", async (_, _) => await OpenWorkspaceDialogAsync());
             _wfSaveMenu = MakeCmd("file.saveWorkspace", (_, _) => SaveWorkspace(saveAs: false)); // 작업 공간 파일이 없으면 다른 이름으로 저장 대화상자
             _wfSaveAsMenu = MakeItem("Save Workspace As…", "작업 공간을 다른 이름으로 저장…", (_, _) => SaveWorkspace(saveAs: true));
@@ -121,15 +122,7 @@ namespace NanumCsvViewer
             string? closed = _wfFilePath;
             if (!CloseAllTabs(askUnsaved: true)) return false;
 
-            var problems = new List<string>();
-            _wfFilePath = null;
-            _wfAgent = new WorkspaceFileAgent();   // 닫은 작업 공간의 제한·메모·대화 연결을 버린다
-            _wfCarriedViews.Clear();
-            _wfSavedSignature = "";
-            _wfAppliedLayout = null;
-            ClearWorkspaceState(problems);
-            Text = ProgramName;
-            if (LayoutReady) ApplyLayout(StartupLayout());
+            var problems = ResetWorkspaceSession(keepTitle: false);
             SwitchAgentToOpenedWorkspace();   // 파일 없는 작업 공간으로: 대화는 아직 시작 전이면 그대로 미루고, 떠 있으면 새 대화로
             if (closed is not null) RememberRecentWorkspace(closed);
             statusLabel.Text = closed is null
@@ -219,6 +212,15 @@ namespace NanumCsvViewer
                 target = Path.GetFullPath(dlg.FileName);
             }
 
+            return WriteWorkspaceFile(target, freshConversation: false);
+        }
+
+        /// <summary>
+        /// 지금 상태를 target에 쓰고 그 파일을 현재 작업 공간 파일로 삼는다(원본 경로 보호 포함, 실패하면 안내 후 false). freshConversation이면 지금 떠 있는 대화를
+        /// 파일에 연결하지 않는다(새 작업 공간은 새 대화로 시작).
+        /// </summary>
+        private bool WriteWorkspaceFile(string target, bool freshConversation)
+        {
             // 원본 파일은 어떤 경우에도 쓰지 않는다: 작업 공간 파일이 열려 있거나 등록된 원본과 같은 경로면 거절.
             if (IsWorkspaceSourcePath(target))
             {
@@ -231,6 +233,7 @@ namespace NanumCsvViewer
             try
             {
                 model = CaptureWorkspaceModel(target);
+                if (freshConversation && model.Agent is not null) model.Agent.Session = null;
                 WorkspaceFile.Save(target, model);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
@@ -247,6 +250,24 @@ namespace NanumCsvViewer
             statusLabel.Text = LT("Workspace saved: ", "작업 공간을 저장했습니다: ") + target;
             PostAgentContext();   // 작업 공간 파일이 생기면 에이전트의 분석 폴더가 그 옆으로 바뀐다
             return true;
+        }
+
+        /// <summary>
+        /// 탭이 모두 닫힌 뒤(또는 새 작업 공간처럼 탭을 남기는 경우) 작업 공간 상태를 비운다: 파일 연결·에이전트 제한/메모/대화 연결·보관 중인 뷰·저장 서명 버리기 →
+        /// 원본·뷰 지우기 → 제목(keepTitle이 아니면)·앱 시작 레이아웃. 지우지 못한 항목 목록을 돌려준다.
+        /// </summary>
+        private List<string> ResetWorkspaceSession(bool keepTitle)
+        {
+            var problems = new List<string>();
+            _wfFilePath = null;
+            _wfAgent = new WorkspaceFileAgent();   // 닫은 작업 공간의 제한·메모·대화 연결을 버린다
+            _wfCarriedViews.Clear();
+            _wfSavedSignature = "";
+            _wfAppliedLayout = null;
+            ClearWorkspaceState(problems);
+            if (!keepTitle) Text = ProgramName;
+            if (LayoutReady) ApplyLayout(StartupLayout());
+            return problems;
         }
 
         private bool IsWorkspaceSourcePath(string full)

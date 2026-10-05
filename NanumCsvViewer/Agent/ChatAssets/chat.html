@@ -16,7 +16,7 @@
     <button id="title-btn" class="icon-btn" title="Session list" data-i18n-title="page.topbar.sessionListTitle" data-i18n="page.topbar.newChat">New chat</button>
     <span id="project-chip" class="chip" hidden></span>
     <span class="spacer"></span>
-    <button id="new-btn" class="icon-btn" title="New session" data-i18n-title="page.topbar.newSessionTitle">＋</button>
+    <button id="new-btn" class="icon-btn" title="New chat" data-i18n-title="page.topbar.newSessionTitle">＋</button>
     <button id="export-btn" class="icon-btn" title="Export to HTML" data-i18n-title="page.topbar.exportTitle">⤓</button>
     <button id="settings-btn" class="icon-btn" title="Settings" data-i18n-title="page.topbar.settingsTitle">⚙</button>
   </div>
@@ -41,8 +41,17 @@
       </div>
       <div id="chips"></div>
       <div class="composer-box">
+        <div id="attach-menu" class="popup" hidden role="menu">
+          <button type="button" class="attach-item" role="menuitem" data-kind="files" data-i18n="page.composer.attachFiles">Add files…</button>
+          <button type="button" class="attach-item" role="menuitem" data-kind="folder" data-i18n="page.composer.attachFolder">Add folder…</button>
+        </div>
+        <div id="attach-chips"></div>
         <textarea id="input" rows="1" spellcheck="false" placeholder="Type a message · / for commands" data-i18n-placeholder="page.composer.placeholder"></textarea>
-        <button id="send-btn" title="Send (Enter)" data-i18n-title="page.composer.sendTitle" disabled>↑</button>
+        <div class="composer-row">
+          <button id="attach-btn" type="button" title="Add files or folders" aria-label="Add files or folders" aria-haspopup="menu" data-i18n-title="page.composer.attachTitle" data-i18n-aria-label="page.composer.attachTitle">+</button>
+          <span class="spacer"></span>
+          <button id="send-btn" title="Send (Enter)" data-i18n-title="page.composer.sendTitle" disabled>↑</button>
+        </div>
       </div>
       <div class="composer-footer">
         <span id="approval-wrap"><select id="approval-select" hidden title="Approval mode" data-i18n-title="page.composer.approvalTitle">
@@ -59,6 +68,7 @@
       </div>
     </div>
   </div>
+  <div id="drop-overlay" hidden data-i18n="page.composer.dropHint">Drop files or a folder to add them to the workspace</div>
   <script src="brands.js"></script>
   <script src="markdown.js"></script>
   <script src="activity.js"></script>
@@ -68,6 +78,7 @@
   <script src="queue.js"></script>
   <script src="topbar.js"></script>
   <script src="modelpicker.js"></script>
+  <script src="attach.js"></script>
   <script src="composer.js"></script>
   <script src="panels.js"></script>
   <script src="clicks.js"></script>

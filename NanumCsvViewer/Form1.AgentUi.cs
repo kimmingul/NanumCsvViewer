@@ -134,6 +134,7 @@ namespace NanumCsvViewer
             var options = AgentOptions();
             _agentController = new ChatController(_agentPanel, new CsvHostTools(this, AgentOptions), options);
             _agentController.PageMessageUnhandled += OnAgentPageMessage;
+            _agentController.AttachHost = CreateAgentAttachHost();
             _agentController.StatusChanged += _ => { };
             // 채팅 승인 선택: 작업 공간 파일이 열려 있으면 "이 작업 공간 / 앱 기본값"을 묻고 알맞은 곳에 저장한다.
             _agentController.ApprovalModeApplier = ApplyApprovalFromChat;

@@ -13,11 +13,39 @@ namespace NanumCsvViewer.Agent.Chat
             return RpcProtocol.Serialize(o);
         }
 
-        public static string User(string text, long ts) => Build("user", o => { o["text"] = text; o["ts"] = ts; });
+        /// <summary>
+        /// 사용자 말풍선. omp에 보낸 글에 첨부 머리말이 있으면(<see cref="AttachmentContext"/>) 말풍선에는 사용자가 쓴 글과 파일 칩(attachments)만 싣는다.
+        /// </summary>
+        public static string User(string text, long ts) => Build("user", o => { FillUser(o, text); o["ts"] = ts; });
 
-        /// <summary>실행 중에 보낸 메시지: queue는 'steer'(다음 단계에 읽힘) 또는 'followUp'(턴 뒤). sent는 omp에 보낸 원문.</summary>
+        /// <summary>실행 중에 보낸 메시지: queue는 'steer'(다음 단계에 읽힘) 또는 'followUp'(턴 뒤). sent는 omp에 보낸 원문(머리말 포함).</summary>
         public static string QueuedUser(string text, string queue, string sent, long ts) =>
-            Build("user", o => { o["text"] = text; o["queue"] = queue; o["sent"] = sent; o["ts"] = ts; });
+            Build("user", o => { FillUser(o, text); o["queue"] = queue; o["sent"] = sent; o["ts"] = ts; });
+
+        private static void FillUser(JsonObject o, string text)
+        {
+            if (AttachmentContext.TryParse(text, out var items, out string visible))
+            {
+                o["text"] = visible;
+                o["attachments"] = AttachmentArray(items);
+            }
+            else o["text"] = text;
+        }
+
+        private static JsonArray AttachmentArray(IEnumerable<ChatAttachment> items)
+        {
+            var arr = new JsonArray();
+            foreach (var a in items)
+            {
+                var tables = new JsonArray();
+                foreach (string t in a.Tables) tables.Add(t);
+                arr.Add(new JsonObject { ["name"] = a.Name, ["path"] = a.Path, ["label"] = "📎 " + a.Name, ["tables"] = tables });
+            }
+            return arr;
+        }
+
+        /// <summary>+ 메뉴/끌어놓기로 작업 공간에 올린 파일들: 입력창이 칩으로 보여 준다(다음 전송에 머리말로 붙는다).</summary>
+        public static string Attached(IReadOnlyList<ChatAttachment> items) => Build("attached", o => o["items"] = AttachmentArray(items));
 
         public static string Queue(IReadOnlyList<string> steering, IReadOnlyList<string> followUp, bool fromState) =>
             Build("queue", o =>
@@ -185,6 +213,11 @@ namespace NanumCsvViewer.Agent.Chat
                 {
                     var it = items[i];
                     var j = new JsonObject { ["role"] = it.Role, ["text"] = it.Text };
+                    if (it.Role == "user" && AttachmentContext.TryParse(it.Text, out var attached, out string visible))
+                    {
+                        j["text"] = visible;
+                        j["attachments"] = AttachmentArray(attached);
+                    }
                     if (it.Role == "user")
                     {
                         j["ts"] = it.Timestamp;

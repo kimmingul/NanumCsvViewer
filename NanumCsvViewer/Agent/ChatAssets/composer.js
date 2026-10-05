@@ -50,16 +50,21 @@
   }
 
   // followUp: while the agent works, send after the turn instead of at its next step.
+  // The workspace files in the chips go along as names (never contents); slash and ! commands carry none.
   function submit(followUp) {
     const text = input.value.trim();
     if (!text || state.shell || !(state.connected || state.ready)) return;
     const id = 's' + (++nextSubmission);
-    pending.set(id, { raw: input.value, text });
-    post({ t: 'submit', id, text, followUp: !!followUp });
+    const attached = /^[\/!]/.test(text) ? [] : global.ChatAttach.snapshot();
+    pending.set(id, { raw: input.value, text, attached });
+    post({
+      t: 'submit', id, text, followUp: !!followUp,
+      attachments: attached.map(a => ({ name: a.name, tables: a.tables }))
+    });
   }
 
   // The host's answer for submission id. Accepted: remember it and clear what was sent (a draft
-  // typed since stays). Rejected: keep everything for another try.
+  // typed since stays; so do chips added since). Rejected: keep everything for another try.
   function submitted(id, ok) {
     const snap = pending.get(id);
     pending.delete(id);
@@ -67,6 +72,7 @@
     if (history[history.length - 1] !== snap.text) history.push(snap.text);
     if (history.length > MaxHistory) history.shift();
     historyIndex = -1;
+    if (snap.attached.length) global.ChatAttach.sent(snap.attached);
     if (input.value === snap.raw) {
       input.value = '';
       autosize();

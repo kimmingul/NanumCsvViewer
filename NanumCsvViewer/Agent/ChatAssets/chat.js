@@ -120,11 +120,14 @@
     }
   }
 
-  function userTurn(text, ts) {
+  // attachments: the workspace files the message carried (chips above its text).
+  function userTurn(text, ts, attachments) {
     const turn = document.createElement('div');
     turn.className = 'turn turn-user';
     const bubble = document.createElement('div');
     bubble.className = 'user-bubble';
+    const chips = global.ChatAttach.bubbleChips(attachments);
+    if (chips) bubble.appendChild(chips);
     const body = document.createElement('div');
     body.className = 'user-text';
     body.textContent = text || '';
@@ -138,7 +141,7 @@
     const wasNear = isNearBottom();
     closeAssistantBlock();
     currentTurn = null;
-    const turn = userTurn(msg.text, msg.ts);
+    const turn = userTurn(msg.text, msg.ts, msg.attachments);
     if (msg.queue) global.ChatQueue.mark(turn.firstChild, msg.queue, msg.sent);
     // Above the working line: the turn goes on below the message.
     const working = document.getElementById('working');
@@ -281,7 +284,7 @@
     for (const item of items) {
       if (!item) continue;
       if (item.role === 'user') {
-        const turn = userTurn(item.text, item.ts);
+        const turn = userTurn(item.text, item.ts, item.attachments);
         logEl.appendChild(turn);
         global.ChatTurnTime.append(logEl, item);
       } else if (!item.text) { global.ChatTurnTime.append(logEl, item); } else {
@@ -342,6 +345,7 @@
       case 'commands': global.ChatComposer.commands(msg.items); break;
       case 'submitted': global.ChatComposer.submitted(msg.id, msg.ok); break;
       case 'setInput': global.ChatComposer.setInput(msg.text); break;
+      case 'attached': global.ChatAttach.add(msg.items); break;
       case 'insertText': global.ChatComposer.insertText(msg.text); break;
       case 'files': global.ChatComposer.files(msg.items); break;
       case 'approval': global.ChatCards.approval(msg); break;
@@ -388,6 +392,7 @@
     global.ChatTopbar.wire();
     global.ChatModelPicker.wire();
     global.ChatComposer.wire();
+    global.ChatAttach.wire();
     global.ChatPanels.wire();
     scrollBtn = document.getElementById('scroll-bottom-btn');
     if (scrollBtn) {
