@@ -15,9 +15,9 @@
     <Product>Nanum CSV Viewer</Product>
     <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
     <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
-    <Version>3.2.0</Version>
-    <FileVersion>3.2.0.0</FileVersion>
-    <AssemblyVersion>3.2.0.0</AssemblyVersion>
+    <Version>3.3.0</Version>
+    <FileVersion>3.3.0.0</FileVersion>
+    <AssemblyVersion>3.3.0.0</AssemblyVersion>
     <!-- 릴리즈 날짜: release.ps1이 publish 시 -p:ReleaseDate로 주입. 미지정(dev 빌드)이면 빌드일. -->
     <ReleaseDate Condition="'$(ReleaseDate)' == ''">$([System.DateTime]::Now.ToString("yyyy-MM-dd"))</ReleaseDate>
     <!-- Microsoft.Web.WebView2는 WinForms 프로젝트에도 Wpf.dll 참조를 가져와 WindowsBase 버전 충돌 경고(MSB3277)가 난다. 동작에는 영향 없음. -->

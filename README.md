@@ -5,7 +5,7 @@
 
 > .NET 10 · Windows Forms · 단일 실행 파일(.exe) 배포 지원
 
-### Unreleased — 분석 스킬 팩·관리형 Python 분석 환경
+### v3.3.0 — 분석 스킬 팩·관리형 Python 분석 환경
 
 - **분석 스킬 팩 20개** — 임상 연구 7(PK/PD·NCA, 임상 보고서, 연구용 의사결정 지원 문서화, 실험 설계, 검정력, scikit-survival, 분석법 검증) · 일반 통계 9(탐색적 분석, 통계 분석, statsmodels, aeon 시계열, 과학 시각화, matplotlib, seaborn, polars, dask) · 기계학습 3(scikit-learn, SHAP, UMAP) · 앱 전용 1(`nanum-python-analysis`). 19개는 [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) v2.72.0(MIT)을 원본 그대로 가져온 것이고, 앱 전용 1개는 이 앱이 작성했습니다. 네트워크·GPU·업로드·환자 개별 판단이 필요한 26개는 검토 후 제외했습니다.
 - **로드 조건·토큰 비용** — **로컬 Python이 켜져 있고 마스터 스위치가 켜져 있을 때만** 실립니다(Python이 꺼져 있으면 0 토큰). 설정 ▸ AI 에이전트 ▸ '분석 스킬'에서 전체·분류별·스킬별로 끌 수 있고, 스킬마다 토큰 추정과 총합(전체 켬 약 550 토큰)이 보입니다. 선택을 바꾸면 같은 대화로 에이전트가 다시 시작합니다. 앱 전용 스킬은 팩이 켜져 있는 한 항상 함께 로드됩니다.
