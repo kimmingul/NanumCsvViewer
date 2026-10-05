@@ -156,6 +156,7 @@ namespace NanumCsvViewer.Agent
             if (_activity.Busy) EndTurn(stopped: true);
             _shellRunning = false;
             StopTimer();
+            _prewarming = false;
             SetStatus(T("Not connected", "연결 안 됨"), false);
         }
 
@@ -287,6 +288,7 @@ namespace NanumCsvViewer.Agent
                 RequestState();
             }
             _connected = true;
+            _prewarming = false;
             if (_historyOnConnect)
             {
                 // 작업 공간의 대화를 이어받았다: 화면은 비어 있으니 omp에 저장된 기록을 다시 불러온다.
@@ -305,6 +307,7 @@ namespace NanumCsvViewer.Agent
         private void Fail(string message)
         {
             _connected = false;
+            _prewarming = false;
             DropPendingSubmit();
             TearDown(force: true);
             SetStatus(message, true);
@@ -459,7 +462,7 @@ namespace NanumCsvViewer.Agent
                 State = _statusText,
                 Error = _statusError,
                 Connected = _connected,
-                Ready = _connected || IsStartDeferred,
+                Ready = _connected || IsStartDeferred || _prewarming,
                 Busy = _activity.Busy || _shellRunning,
                 Shell = _shellRunning,
                 Activity = _activity.Busy ? _activity.Text : "",

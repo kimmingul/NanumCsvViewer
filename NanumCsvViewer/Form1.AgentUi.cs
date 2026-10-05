@@ -67,6 +67,7 @@ namespace NanumCsvViewer
 
             if (!visible)
             {
+                _agentPrewarmTimer?.Stop();
                 _agentSplit.Panel2Collapsed = true;
                 RaisePanelChanged(PanelKind.Agent);
                 return;
@@ -91,6 +92,7 @@ namespace NanumCsvViewer
             }
             if (focus) _agentPanel!.FocusInput();
             RaisePanelChanged(PanelKind.Agent);
+            KickAgentPrewarm();
         }
 
         /// <summary>AI 패널 폭(논리 단위). 작업 공간 레이아웃이 정한 값이 있으면 그것, 아니면 앱 설정.</summary>
@@ -138,10 +140,55 @@ namespace NanumCsvViewer
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.PythonEnvNoticeShown += () => { _settings.AgentPythonEnvNoticeShown = true; _settings.Save(); };
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
-            // omp는 첫 메시지를 보낼 때 시작한다(패널이 시작할 때부터 떠 있어도 프로세스를 만들지 않는다). 작업 공간 파일이 열려 있으면 그 작업 공간의
+            // omp는 바로 시작하지 않는다: 패널이 보이는 채로 앱이 한가해지면 곧(KickAgentPrewarm) 메시지 없이 시작해 모델·생각·승인 선택이 첫 메시지 전에
+            // 준비되고, 패널이 숨겨져 있으면 첫 메시지(또는 패널을 열 때)까지 미룬다. 작업 공간 파일이 열려 있으면 그 작업 공간의
             // 대화를 이어 가고(없거나 사라졌으면 새 대화 + 알림), 파일이 없으면 새 대화. 작업 폴더는 시작하는 순간의 열린 파일 기준.
             _agentController.StartOnFirstUse(AgentWorkingDirectory, _wfFilePath is null ? null : WorkspaceConversationOf(_wfAgent));
             PostAgentContext();
+        }
+
+        // ---- omp 미리 시작 -----------------------------------------------------------------------------------------
+
+        private const int AgentPrewarmDelayMs = 1500;
+        private System.Windows.Forms.Timer? _agentPrewarmTimer;
+
+        /// <summary>
+        /// 패널이 보이고 omp가 아직 미뤄져 있으면 짧은 지연 뒤 미리 시작할 차례를 잡는다(이미 잡혀 있으면 그대로). 시작 배치·패널 열기·작업 공간 열기/닫기/전환·
+        /// 파일 열기(모두 <see cref="PostAgentContext"/>를 거친다) 뒤에 부른다. 실제 시작은 <see cref="TryPrewarmAgent"/>가 판단한다.
+        /// </summary>
+        private void KickAgentPrewarm()
+        {
+            if (IsDisposed || _closing || !AgentPanelVisible || _agentController is not { IsStartDeferred: true }) return;
+            _agentPrewarmTimer ??= CreateAgentPrewarmTimer();
+            if (!_agentPrewarmTimer.Enabled) _agentPrewarmTimer.Start();
+        }
+
+        private System.Windows.Forms.Timer CreateAgentPrewarmTimer()
+        {
+            var timer = new System.Windows.Forms.Timer { Interval = AgentPrewarmDelayMs };
+            timer.Tick += (_, _) => TryPrewarmAgent();
+            return timer;
+        }
+
+        /// <summary>
+        /// 미리 시작 판단(타이머 한 번). 패널이 숨겨졌거나 이미 시작했으면 아무것도 안 한다. 작업 공간 열기·저장·닫기, 파일 열기·전환, 편집·필터 같은 앞 작업이
+        /// 도는 중이면 다시 잡는다(백그라운드 인덱싱은 기다리지 않는다). 로컬 Python이 켜져 있는데 아직 작업 공간 파일도 데이터 파일도 없으면 분석 폴더가
+        /// 정해지지 않았으므로 지금 시작하면 파일을 여는 순간 한 번 더 다시 시작해야 한다: 그때(PostAgentContext → Kick)까지 미룬다. 시작했으면 true.
+        /// </summary>
+        internal bool TryPrewarmAgent()
+        {
+            _agentPrewarmTimer?.Stop();
+            if (IsDisposed || _closing || !AgentPanelVisible || _agentController is not { IsStartDeferred: true } controller) return false;
+            if (_wfBusy || _openGate.CurrentCount == 0 || ForegroundWorkRunning()) { KickAgentPrewarm(); return false; }
+            if (AgentAnalysisFolderUndecided()) return false;
+            return controller.StartDeferredNow();
+        }
+
+        private bool AgentAnalysisFolderUndecided()
+        {
+            if (!AgentOptions().AllowLocalPython) return false;
+            var context = BuildAgentWorkspaceContext();
+            return context.WorkspaceFile is null && context.FirstDataFile is null;
         }
 
         /// <summary>omp의 작업 폴더: 열린 파일의 폴더, 없으면 문서 폴더.</summary>
@@ -180,6 +227,7 @@ namespace NanumCsvViewer
         private void PostAgentContext()
         {
             _agentController?.SetWorkspaceContext(BuildAgentWorkspaceContext());
+            KickAgentPrewarm();
             if (_agentPanel is null) return;
             int edits = _doc is null || _doc.Edits.IsEmpty ? 0 : 1;
             string displayName = _t?.DisplayName ?? (_currentPath is null ? "" : Path.GetFileName(_currentPath));
@@ -351,6 +399,8 @@ namespace NanumCsvViewer
         // 종료(OnFormClosing)에서 호출.
         private void ShutdownAgent()
         {
+            _agentPrewarmTimer?.Dispose();
+            _agentPrewarmTimer = null;
             _agentController?.Dispose();
             _agentController = null;
         }

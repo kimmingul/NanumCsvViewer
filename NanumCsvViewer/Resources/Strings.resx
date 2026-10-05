@@ -136,7 +136,7 @@ Use a UTF-8 or CP949 (EUC-KR) file.</value></data>
 
 [Settings]
 • Tools ▸ Settings… (Ctrl+,) — General (theme system / light / dark, language auto / English / Korean; View ▸ Theme and Language also work), Panels &amp; Layout, Grid, Files, AI Agent, Shortcuts.
-• At startup the AI panel is on; the row detail panel, facets and explorer are off. Change this in Panels &amp; Layout, or turn on "remember last state". The AI agent (omp) starts when you send the first message, not at launch.
+• At startup the AI panel is on; the row detail panel, facets and explorer are off. Change this in Panels &amp; Layout, or turn on "remember last state". While the AI panel is visible, the AI agent (omp) starts in the background a moment after the app is idle (the model, thinking and approval pickers are ready before you type); while the panel is hidden it starts only when you open the panel or send the first message.
 
 [Workspace (several files)]
 • Each open file is a tab: Ctrl+Tab / Ctrl+Shift+Tab switch, Ctrl+W or middle-click closes. A workbook (Excel/SAS/SPSS/SQLite) is one tab with sheet buttons at the bottom.
