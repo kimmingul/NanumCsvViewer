@@ -38,6 +38,7 @@ namespace NanumCsvViewer
             splitContainer1 = new SplitContainer();
             cellValueTextBox = new TextBox();
             cellAddressBox = new TextBox();
+            cellAddressHost = new ChromeAddressHost();
             grid = new BufferedDataGridView();
             detailRichText = new RichTextBox();
             detailHeaderLabel = new Label();
@@ -50,7 +51,7 @@ namespace NanumCsvViewer
             openFileDialog1 = new OpenFileDialog();
             tabStrip = new TabStrip();
             workspaceDockHost = new Panel();
-            workspaceSplitter = new Splitter();
+            workspaceSplitter = new DividerSplitter();
             menuStrip1.SuspendLayout();
             toolStrip1.SuspendLayout();
             gridContextMenu.SuspendLayout();
@@ -154,7 +155,7 @@ namespace NanumCsvViewer
             // splitContainer1.Panel1
             // 
             splitContainer1.Panel1.Controls.Add(cellValueTextBox);
-            splitContainer1.Panel1.Controls.Add(cellAddressBox);
+            splitContainer1.Panel1.Controls.Add(cellAddressHost);
             splitContainer1.Panel1MinSize = 22;
             // 
             // splitContainer1.Panel2
@@ -165,28 +166,36 @@ namespace NanumCsvViewer
             splitContainer1.SplitterDistance = 329;
             splitContainer1.TabIndex = 0;
             // 
-            // cellValueTextBox
-            // 
+            // cellValueTextBox — 값 줄: 입력 상자 모양 그대로
+            //
             cellValueTextBox.BackColor = SystemColors.Window;
             cellValueTextBox.BorderStyle = BorderStyle.FixedSingle;
             cellValueTextBox.Dock = DockStyle.Fill;
-            cellValueTextBox.Location = new Point(150, 0);
+            cellValueTextBox.Location = new Point(194, 0);
             cellValueTextBox.Multiline = true;
             cellValueTextBox.Name = "cellValueTextBox";
             cellValueTextBox.ReadOnly = true;
             cellValueTextBox.ScrollBars = ScrollBars.Vertical;
-            cellValueTextBox.Size = new Size(858, 329);
+            cellValueTextBox.Size = new Size(814, 329);
             cellValueTextBox.TabIndex = 0;
-            // 
-            // cellAddressBox (Excel 이름 상자처럼 편집 가능: 120 · R120C3 · C3 · 이름:120)
-            // 
-            cellAddressBox.BackColor = SystemColors.Window;
-            cellAddressBox.BorderStyle = BorderStyle.FixedSingle;
-            cellAddressBox.Dock = DockStyle.Left;
-            cellAddressBox.Location = new Point(0, 0);
+            //
+            // cellAddressHost — 주소 상자를 담는 머리글 칸(Ui/PanelChrome.cs): 평소엔 글자만, 포커스가 있으면 밑줄
+            //
+            cellAddressHost.Controls.Add(cellAddressBox);
+            cellAddressHost.Dock = DockStyle.Left;
+            cellAddressHost.Location = new Point(0, 0);
+            cellAddressHost.Name = "cellAddressHost";
+            cellAddressHost.Size = new Size(194, 23);
+            cellAddressHost.TabIndex = 1;
+            //
+            // cellAddressBox (Excel 이름 상자처럼 편집 가능: 120 · R120C3 · C3 · 이름:120). 테두리 없음 — 포커스일 때만 칸이 밑줄을 그린다.
+            //
+            cellAddressBox.BackColor = SystemColors.Control;
+            cellAddressBox.BorderStyle = BorderStyle.None;
+            cellAddressBox.Location = new Point(2, 4);
             cellAddressBox.Name = "cellAddressBox";
-            cellAddressBox.Size = new Size(190, 23);
-            cellAddressBox.TabIndex = 1;
+            cellAddressBox.Size = new Size(188, 16);
+            cellAddressBox.TabIndex = 0;
             // 
             // grid
             // 
@@ -233,12 +242,12 @@ namespace NanumCsvViewer
             // detailHeaderLabel
             // 
             detailHeaderLabel.BackColor = SystemColors.Control;
-            detailHeaderLabel.BorderStyle = BorderStyle.FixedSingle;
+            detailHeaderLabel.BorderStyle = BorderStyle.None;
             detailHeaderLabel.Dock = DockStyle.Top;
             detailHeaderLabel.Location = new Point(0, 0);
             detailHeaderLabel.Name = "detailHeaderLabel";
             detailHeaderLabel.Padding = new Padding(5, 0, 0, 0);
-            detailHeaderLabel.Size = new Size(96, 22);
+            detailHeaderLabel.Size = new Size(96, 30);
             detailHeaderLabel.TabIndex = 1;
             detailHeaderLabel.Text = "행 상세";
             detailHeaderLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -310,11 +319,11 @@ namespace NanumCsvViewer
             workspaceDockHost.Width = 260;
             workspaceDockHost.Visible = false;
             // 
-            // workspaceSplitter
-            // 
+            // workspaceSplitter — 폭·색은 Ui/Form1.PanelChrome.cs가 규격(PanelChrome)대로 정한다.
+            //
             workspaceSplitter.Dock = DockStyle.Left;
             workspaceSplitter.Name = "workspaceSplitter";
-            workspaceSplitter.Width = 4;
+            workspaceSplitter.Width = 5;
             workspaceSplitter.MinSize = 120;
             workspaceSplitter.MinExtra = 300;
             workspaceSplitter.TabStop = false;
@@ -379,6 +388,7 @@ namespace NanumCsvViewer
         private SplitContainer outerSplit;
         private SplitContainer splitContainer1;
         private TextBox cellAddressBox;
+        private ChromeAddressHost cellAddressHost;
         private TextBox cellValueTextBox;
         private Label detailHeaderLabel;
         private RichTextBox detailRichText;
@@ -393,6 +403,6 @@ namespace NanumCsvViewer
         private OpenFileDialog openFileDialog1;
         private TabStrip tabStrip;
         private Panel workspaceDockHost;
-        private Splitter workspaceSplitter;
+        private DividerSplitter workspaceSplitter;
     }
 }

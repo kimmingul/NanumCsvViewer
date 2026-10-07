@@ -64,7 +64,7 @@ namespace NanumCsvViewer
             DragEnter += OnDragEnter;
             DragDrop += OnDragDrop;
 
-            _bar = new ToolStrip { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, Name = "workspaceBar", RenderMode = ToolStripRenderMode.ManagerRenderMode };
+            _bar = new ToolStrip { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, Name = "workspaceBar", RenderMode = ToolStripRenderMode.ManagerRenderMode, AutoSize = false, Padding = new Padding(2, 0, 2, 1) };
             _btnFiles = new ToolStripButton { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "wsAddFiles" };
             _btnFolder = new ToolStripButton { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "wsAddFolder" };
             _btnRefresh = new ToolStripButton { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "wsRefresh" };
@@ -115,9 +115,19 @@ namespace NanumCsvViewer
             _cancel.BackColor = palette.Surface;
             _cancel.ForeColor = palette.Text;
             _cancel.FlatAppearance.BorderColor = palette.Border;
-            _bar.BackColor = palette.ToolStrip;
-            _bar.ForeColor = palette.Text;
+            _bar.BackColor = PanelChrome.HeaderBackground(palette);
+            _bar.ForeColor = PanelChrome.HeaderText(palette);
+            ApplyHeaderHeight();
             _tree.Invalidate();
+        }
+
+        /// <summary>머리글(도구 띠) 높이를 공통 규격(<see cref="PanelChrome.HeaderHeight"/> 논리 px, 아래 1px 경계선 포함)으로.</summary>
+        private void ApplyHeaderHeight() => _bar.Height = LogicalToDeviceUnits(PanelChrome.HeaderHeight);
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            ApplyHeaderHeight();
         }
 
         public void Relocalize()

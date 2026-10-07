@@ -251,7 +251,7 @@ namespace NanumCsvViewer.Tests
             OnForm(settings, form =>
             {
                 var d = form.StartupLayout();
-                Assert.Equal((true, false, false, false, false, true), (d.Agent, d.Detail, d.Facets, d.Explorer, d.Findings, d.CellBar));
+                Assert.Equal((true, false, false, true, false, true), (d.Agent, d.Detail, d.Facets, d.Explorer, d.Findings, d.CellBar));   // AI·탐색기·셀 줄
 
                 settings.StartupPanels = new PanelLayout { Agent = false, Detail = true };
                 Assert.True(form.StartupLayout().Detail);

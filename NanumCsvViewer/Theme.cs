@@ -84,11 +84,14 @@ namespace NanumCsvViewer
                 {
                     case DataGridView g: StyleGrid(g, p); break;
                     case ToolStrip ts: ts.BackColor = p.ToolStrip; ts.ForeColor = p.Text; break;
+                    case ChromeAddressHost host: host.ApplyPalette(p); break;   // 안의 주소 상자는 칸이 색을 정한다(테두리 없음)
+                    case TextBox when c.Parent is ChromeAddressHost: break;
                     case TextBox tb: tb.BackColor = p.Surface; tb.ForeColor = p.Text; tb.BorderStyle = BorderStyle.FixedSingle; break;
                     case RichTextBox rtb: rtb.BackColor = p.Surface; rtb.ForeColor = p.Text; break;
                     case Label lb: lb.BackColor = p.Window; lb.ForeColor = p.Text; break;
+                    case DividerSplitter ds: ds.ApplyPalette(p); break;
                     case SplitContainer sc:
-                        sc.BackColor = p.Border; // 스플리터 띠
+                        PanelChrome.StyleSplitter(sc, p); // 분할 면: 창 배경 + 경계색 1px 선(Ui/PanelChrome.cs)
                         sc.Panel1.BackColor = p.Window;
                         sc.Panel2.BackColor = p.Window;
                         break;

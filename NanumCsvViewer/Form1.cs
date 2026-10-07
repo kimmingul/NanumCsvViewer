@@ -75,7 +75,7 @@ namespace NanumCsvViewer
             DpiChanged += (_, _) =>
             {
                 RefreshToolbarIcons();
-                BeginInvoke(() => { ApplyGridFont(); UpdateRowHeaderWidth(); });
+                BeginInvoke(() => { ApplyGridFont(); UpdateRowHeaderWidth(); ApplyPanelChromeMetrics(); });
             };
 
             // 셀 내 줄바꿈을 여러 줄로 표시
@@ -89,7 +89,7 @@ namespace NanumCsvViewer
             grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             grid.ColumnHeadersHeight = 30;
 
-            try { splitContainer1.SplitterDistance = 26; } catch { /* 초기 크기에 따라 무시 */ }
+            ApplyPanelChromeMetrics();   // 머리글 높이·분할 면 폭(Ui/Form1.PanelChrome.cs)
 
             _rowCountTimer = new System.Windows.Forms.Timer { Interval = 100 };
             _rowCountTimer.Tick += (_, _) => RefreshRowCount();
@@ -182,7 +182,7 @@ namespace NanumCsvViewer
             _qualityPanel?.ApplyPalette(_palette); // 품질 패널은 서브아이템 색이 고정돼 별도 재적용 필요(이슈 #26)
             tabStrip.ApplyPalette(_palette);
             workspaceDockHost.BackColor = _palette.Window;
-            workspaceSplitter.BackColor = _palette.Border;
+            ApplyPanelChromeColors();
             ApplyWorkspaceTheme();
             ApplyAgentTheme();
             grid.Invalidate();
@@ -1287,17 +1287,8 @@ namespace NanumCsvViewer
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            // 셀 값 표시줄을 한 줄 높이로 컴팩트하게 시작(레이아웃 확정 후 설정).
-            try
-            {
-                int want = _singleLineHeight + 4;
-                if (want >= splitContainer1.Panel1MinSize &&
-                    want <= splitContainer1.Height - splitContainer1.Panel2MinSize - splitContainer1.SplitterWidth)
-                {
-                    splitContainer1.SplitterDistance = want;
-                }
-            }
-            catch { }
+            // 머리글 높이·분할 면 폭을 현재 배율로, 셀 줄을 머리글 높이로 컴팩트하게 시작(레이아웃 확정 후 설정).
+            ApplyPanelChromeMetrics();
 
             // 시작 패널: 설정(또는 '마지막 상태 기억')이 정한 대로. 예전처럼 상세 패널을 무조건 켜지 않는다.
             ApplyStartupLayout();

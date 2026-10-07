@@ -68,7 +68,8 @@ namespace NanumCsvViewer.Tests
                 try
                 {
                     SynchronizationContext.SetSynchronizationContext(new System.Windows.Forms.WindowsFormsSynchronizationContext());
-                    using var form = new Form1(new AppSettings());
+                    // 탐색기를 시작부터 켜 두면 "도킹 영역을 펼치면 본문이 밀린다"를 볼 수 없으므로 옛 시작 배치(탐색기 꺼짐)로 연다.
+                    using var form = new Form1(new AppSettings { StartupPanels = new PanelLayout() });
                     _ = form.Handle;
                     body(form);
                 }

@@ -199,6 +199,8 @@ namespace NanumCsvViewer.Agent
         {
             var vars = new Dictionary<string, object>();
             foreach (var kv in Palette(dark)) vars[kv.Key] = kv.Value;
+            // 패널 머리글 공통 규격(상단 바의 높이·배경·글자·아래 1px 경계선): 앱 팔레트에서 온다.
+            foreach (var kv in PanelChrome.CssVars(ThemePalette.For(dark ? AppTheme.Dark : AppTheme.Light))) vars[kv.Key] = kv.Value;
             vars["font"] = FontStack(uiFontName);
             vars["monoFont"] = MonoStack;
             vars["fontSize"] = FontPx(uiFontPoints);

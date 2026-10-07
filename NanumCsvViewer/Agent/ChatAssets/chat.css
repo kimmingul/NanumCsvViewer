@@ -18,6 +18,13 @@
   --tokString: #ce9178;
   --tokComment: #6a9955;
   --tokNumber: #b5cea8;
+  /* Shared panel header (PanelChrome.cs); the host overrides these with the app palette. */
+  --chromeH: 30px;
+  --chromeBg: #2d2d30;
+  --chromeFg: #e6e6e6;
+  --chromeBorder: #404040;
+  --chromeFs: 12px;
+  --chromeFw: 400;
 }
 
 *, *::before, *::after { box-sizing: border-box; }

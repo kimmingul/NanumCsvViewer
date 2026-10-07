@@ -61,8 +61,22 @@ namespace NanumCsvViewer
         public List<string> RecentWorkspaces { get; set; } = new();
 
         // ---- v3.2 설정 대화 상자
-        /// <summary>시작할 때 처음 보이는 패널(기본: AI 켜짐, 나머지 꺼짐, 셀 값 표시줄 켜짐). <see cref="RememberLastPanels"/>가 켜져 있으면 무시된다.</summary>
-        public PanelLayout StartupPanels { get; set; } = new();
+        /// <summary>시작할 때 처음 보이는 패널(기본: 작업 공간 탐색기·AI 켜짐, 행 상세·패싯·검사 결과 꺼짐, 셀 값 표시줄 켜짐). <see cref="RememberLastPanels"/>가 켜져 있으면 무시된다.</summary>
+        public PanelLayout StartupPanels { get; set; } = DefaultStartupPanels();
+
+        /// <summary>
+        /// 패널 기본값을 어느 판까지 반영했는지(0 = 3.4.1 이전 파일). 3.4.1에서 시작 패널 기본에 탐색기가 들어왔다 — 옛 기본값 그대로인 파일만 한 번 탐색기를 켠다.
+        /// 설정을 읽을 때(<see cref="Normalize"/>) 갱신되고 저장할 때도 현재 판으로 기록한다.
+        /// </summary>
+        public int PanelDefaultsVersion { get; set; }
+        public const int CurrentPanelDefaultsVersion = 1;
+
+        /// <summary>앱의 기본 시작 패널.</summary>
+        internal static PanelLayout DefaultStartupPanels() => new() { Explorer = true };
+
+        /// <summary>3.4.1 이전의 기본 시작 패널(AI·셀 값 표시줄만 켜짐)과 표시 상태가 정확히 같은가.</summary>
+        private static bool IsPre341Default(PanelLayout p) =>
+            p.Agent && !p.Detail && !p.Facets && !p.Explorer && !p.Findings && p.CellBar;
 
         /// <summary>true면 시작할 때 <see cref="StartupPanels"/> 대신 마지막으로 종료할 때의 패널 상태(<see cref="LastPanels"/>)를 쓴다.</summary>
         public bool RememberLastPanels { get; set; } = false;
@@ -132,7 +146,13 @@ namespace NanumCsvViewer
         {
             Theme = Theme is "Light" or "Dark" ? Theme : "";
             Language = Language is "en" or "ko" ? Language : "auto";
-            StartupPanels = (StartupPanels ?? new()).Normalized();
+            StartupPanels = (StartupPanels ?? DefaultStartupPanels()).Normalized();
+            if (PanelDefaultsVersion < CurrentPanelDefaultsVersion)
+            {
+                // 한 번만: 사용자가 건드리지 않은(옛 기본 그대로인) 시작 패널에만 새 기본(탐색기 켜짐)을 준다. 직접 고른 값은 그대로 둔다.
+                if (IsPre341Default(StartupPanels)) StartupPanels.Explorer = true;
+                PanelDefaultsVersion = CurrentPanelDefaultsVersion;
+            }
             LastPanels = LastPanels?.Normalized();
             DetailPanelWidth = DetailPanelWidth <= 0 ? 0 : Math.Clamp(DetailPanelWidth, PanelLayout.MinWidth, PanelLayout.MaxWidth);
             ExplorerPanelWidth = ExplorerPanelWidth <= 0 ? 0 : Math.Clamp(ExplorerPanelWidth, PanelLayout.MinWidth, PanelLayout.MaxWidth);
@@ -195,6 +215,7 @@ namespace NanumCsvViewer
         {
             try
             {
+                PanelDefaultsVersion = CurrentPanelDefaultsVersion;   // 이 판이 쓴 파일은 새 기본을 이미 반영했다(다음에 읽을 때 옛 기본으로 오인해 바꾸지 않게)
                 Directory.CreateDirectory(Dir);
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
             }

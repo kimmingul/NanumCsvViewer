@@ -802,9 +802,10 @@ namespace NanumCsvViewer
             b.Click += onClick;
             void Reposition()
             {
-                try { b.Top = 1; b.Left = Math.Max(0, outerSplit.Panel2.ClientSize.Width - rightOffset); } catch { }
+                try { b.Top = Math.Max(0, (detailHeaderLabel.Height - b.Height) / 2); b.Left = Math.Max(0, outerSplit.Panel2.ClientSize.Width - rightOffset); } catch { }
             }
             outerSplit.Panel2.ClientSizeChanged += (_, _) => Reposition();
+            detailHeaderLabel.SizeChanged += (_, _) => Reposition();
             Reposition();
             return b;
         }

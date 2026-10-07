@@ -18,14 +18,14 @@ namespace NanumCsvViewer.Tests
         // ---- 기본값·저장 -------------------------------------------------------------------------------------
 
         [Fact]
-        public void Defaults_start_with_the_ai_panel_on_and_row_detail_facets_and_explorer_off()
+        public void Defaults_start_with_the_explorer_and_ai_panels_on_and_row_detail_facets_off()
         {
             var s = new AppSettings();
             var p = s.StartupPanels;
             Assert.True(p.Agent);
             Assert.False(p.Detail);
             Assert.False(p.Facets);
-            Assert.False(p.Explorer);
+            Assert.True(p.Explorer);
             Assert.False(p.Findings);
             Assert.True(p.CellBar);
             Assert.False(s.RememberLastPanels);
@@ -34,6 +34,67 @@ namespace NanumCsvViewer.Tests
             Assert.Equal("", s.Theme);
             Assert.Equal("auto", s.DefaultEncoding);
             Assert.False(s.ReopenLastWorkspace);
+        }
+
+        private static AppSettings FromJson(string json) => JsonSerializer.Deserialize<AppSettings>(json)!.Normalize();
+
+        private const string Pre341Default = """{ "Agent": true, "Detail": false, "Facets": false, "Explorer": false, "Findings": false, "CellBar": true }""";
+
+        [Fact]
+        public void A_file_that_still_holds_the_old_default_startup_panels_gets_the_explorer_once()
+        {
+            var s = FromJson("{ \"StartupPanels\": " + Pre341Default + " }");
+            Assert.True(s.StartupPanels.Explorer);
+            Assert.True(s.StartupPanels.Agent && s.StartupPanels.CellBar);
+            Assert.False(s.StartupPanels.Detail || s.StartupPanels.Facets || s.StartupPanels.Findings);
+            Assert.Equal(AppSettings.CurrentPanelDefaultsVersion, s.PanelDefaultsVersion);
+        }
+
+        [Theory]
+        [InlineData("""{ "Agent": false, "Detail": false, "Facets": false, "Explorer": false, "Findings": false, "CellBar": true }""")]   // AI를 껐다
+        [InlineData("""{ "Agent": true, "Detail": true, "Facets": false, "Explorer": false, "Findings": false, "CellBar": true }""")]    // 행 상세를 켰다
+        [InlineData("""{ "Agent": true, "Detail": false, "Facets": false, "Explorer": false, "Findings": false, "CellBar": false }""")]  // 셀 줄을 껐다
+        [InlineData("""{ "Agent": true, "Detail": false, "Facets": false, "Explorer": false, "Findings": true, "CellBar": true }""")]
+        public void A_customized_startup_panel_choice_is_left_alone_by_the_migration(string panels)
+        {
+            var s = FromJson("{ \"StartupPanels\": " + panels + " }");
+            Assert.False(s.StartupPanels.Explorer);
+            var expect = JsonSerializer.Deserialize<PanelLayout>(panels)!;
+            Assert.True(expect.SameVisibility(s.StartupPanels));
+            Assert.Equal(AppSettings.CurrentPanelDefaultsVersion, s.PanelDefaultsVersion);   // 그래도 한 번 처리한 것으로 기록한다
+        }
+
+        [Fact]
+        public void The_migration_runs_once_so_turning_the_explorer_off_again_sticks()
+        {
+            var s = FromJson("{ \"StartupPanels\": " + Pre341Default + " }");
+            Assert.True(s.StartupPanels.Explorer);
+
+            s.StartupPanels.Explorer = false;            // 설정에서 사용자가 끈다 → 옛 기본과 같은 모양이 다시 된다
+            var again = RoundTrip(s);                    // 저장 → 다시 읽기(마커가 있으니 다시 켜지 않는다)
+            Assert.False(again.StartupPanels.Explorer);
+            Assert.False(again.Normalize().StartupPanels.Explorer);
+        }
+
+        [Fact]
+        public void A_file_written_by_this_version_is_never_migrated_even_if_it_looks_like_the_old_default()
+        {
+            var s = new AppSettings { StartupPanels = new PanelLayout() };   // 새 설치에서 사용자가 탐색기를 꺼 둔 채 저장
+            var path = Path.Combine(Path.GetTempPath(), "nanum_settings_" + Guid.NewGuid().ToString("N"));
+            var previous = AppSettings.DirectoryOverride;   // 테스트 전역 격리 폴더(TestEnvironment)를 돌려 놓는다
+            AppSettings.DirectoryOverride = path;
+            try
+            {
+                s.Save();
+                var loaded = AppSettings.Load();
+                Assert.False(loaded.StartupPanels.Explorer);
+                Assert.Equal(AppSettings.CurrentPanelDefaultsVersion, loaded.PanelDefaultsVersion);
+            }
+            finally
+            {
+                AppSettings.DirectoryOverride = previous;
+                try { Directory.Delete(path, true); } catch { }
+            }
         }
 
         [Fact]
@@ -288,7 +349,7 @@ namespace NanumCsvViewer.Tests
 
         private static AppSettings NonDefault() => new()
         {
-            Theme = "Dark",
+            Theme = "Dark", PanelDefaultsVersion = AppSettings.CurrentPanelDefaultsVersion,   // 읽어 온 설정은 이미 마커가 있다(저장하면 기록된다)
             StartupPanels = new PanelLayout { Agent = false, Detail = true, Facets = true, Explorer = true, Findings = true, CellBar = false },
             RememberLastPanels = true, RememberWindow = false, ReopenLastWorkspace = true,
             ShowTypeBadges = false, MaxCellLines = 8, GridFontSize = 12f,
