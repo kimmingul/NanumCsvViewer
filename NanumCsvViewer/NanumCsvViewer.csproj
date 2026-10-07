@@ -6,6 +6,8 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Per-Monitor V2: WebView2(msedgewebview2.exe)와 같은 DPI 모드. System aware이면 msedgewebview2.exe에 HIGHDPIAWARE 호환성 레이어가 걸린 PC에서 0x8007139F로 채팅이 시작되지 않았다(WebViewInitTests가 이 설정을 확인). -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- 2GB가 넘는 파일을 안전하게 메모리 매핑/버퍼링하려면 64비트 프로세스가 필요합니다. -->
     <PlatformTarget>x64</PlatformTarget>
@@ -15,9 +17,9 @@
     <Product>Nanum CSV Viewer</Product>
     <AssemblyTitle>Nanum CSV Viewer</AssemblyTitle>
     <Description>대용량 CSV를 빠르게 열고 탐색하는 Windows 데스크톱 뷰어.</Description>
-    <Version>3.3.5</Version>
-    <FileVersion>3.3.5.0</FileVersion>
-    <AssemblyVersion>3.3.5.0</AssemblyVersion>
+    <Version>3.4.0</Version>
+    <FileVersion>3.4.0.0</FileVersion>
+    <AssemblyVersion>3.4.0.0</AssemblyVersion>
     <!-- 릴리즈 날짜: release.ps1이 publish 시 -p:ReleaseDate로 주입. 미지정(dev 빌드)이면 빌드일. -->
     <ReleaseDate Condition="'$(ReleaseDate)' == ''">$([System.DateTime]::Now.ToString("yyyy-MM-dd"))</ReleaseDate>
     <!-- Microsoft.Web.WebView2는 WinForms 프로젝트에도 Wpf.dll 참조를 가져와 WindowsBase 버전 충돌 경고(MSB3277)가 난다. 동작에는 영향 없음. -->

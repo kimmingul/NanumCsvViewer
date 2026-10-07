@@ -475,6 +475,11 @@ namespace NanumCsvViewer
             _maxRows = Number(() => LT("Row limit per request", "요청당 행 상한"), 1, 5000);
             _omp = Text(() => LT("omp path (blank = auto)", "omp 경로 (비우면 자동)"));
             _extra = Text(() => LT("Extra omp arguments", "omp 추가 인자"));
+            ActionButton(() => LT("AI Setup Assistant…", "AI 환경 설정 도우미…"), () =>
+            {
+                Host.ShowAiSetupAssistant(modal: true, owner: FindForm());
+                _omp.Text = S.AgentOmpPath ?? "";   // 도우미가 omp 경로를 바꿨을 수 있다
+            });
             _approval = Combo(() => LT("Approval mode", "승인 모드"),
                 () => Enum.GetValues<AgentApprovalMode>().Select(m => ApprovalTexts.Label(m, Loc.CurrentLanguage == "ko")).ToArray());
             // omp 추가 인자(--approval-mode·--yolo·--auto-approve)가 모드를 고정하면 선택을 막고 이유를 보여 준다.

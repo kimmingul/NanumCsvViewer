@@ -25,6 +25,8 @@ namespace NanumCsvViewer
         // ---- v2 AI 에이전트
         /// <summary>omp 실행 파일 경로. 비우면 자동 탐색.</summary>
         public string? AgentOmpPath { get; set; }
+        /// <summary>마지막으로 검증한 omp(경로|버전|크기|수정 시각). 같은 파일이면 시작할 때 `--version` 실행을 건너뛴다. 파일이 없어지거나 바뀌면 다시 탐색한다.</summary>
+        public string? AgentOmpVerified { get; set; }
         /// <summary>omp 명령줄에 덧붙일 인자.</summary>
         public string? AgentExtraArgs { get; set; }
         /// <summary>AgentDataPolicy 이름(SummaryOnly | RowsWithApproval | RowsAllowed).</summary>
@@ -49,6 +51,10 @@ namespace NanumCsvViewer
         public bool AgentApprovalNoticeShown { get; set; } = false;
         /// <summary>"최근 사용 모델을 읽을 수 없음" 경고를 이미 채팅에 보인 omp 버전(빈 문자열 = 아직 안 보임). omp 버전마다 한 번만 알린다.</summary>
         public string AgentModelUsageAlertVersion { get; set; } = "";
+        /// <summary>AI 설정 도우미를 자동으로 연 앱 버전(앱 버전마다 한 번). 메뉴·설정에서 직접 여는 것은 무관.</summary>
+        public string AiSetupShownVersion { get; set; } = "";
+        /// <summary>도우미의 '다시 표시하지 않기'를 눌렀으면 true(자동으로 열지 않는다).</summary>
+        public bool AiSetupDisabled { get; set; } = false;
 
         // ---- v3 작업 공간
         /// <summary>최근에 열거나 저장한 작업 공간 파일(.ncvws) 전체 경로, 가장 최근이 앞.</summary>

@@ -1318,12 +1318,12 @@ namespace NanumCsvViewer
             {
                 int first = grid.FirstDisplayedScrollingColumnIndex;
                 if (first < 0) return;
-                if (x < grid.RowHeadersWidth + 24)
+                if (x < grid.RowHeadersWidth + LogicalToDeviceUnits(24))
                 {
                     int prev = AdjacentVisibleColumn(first, -1);
                     if (prev >= 0) grid.FirstDisplayedScrollingColumnIndex = prev;
                 }
-                else if (x > grid.ClientSize.Width - 24)
+                else if (x > grid.ClientSize.Width - LogicalToDeviceUnits(24))
                 {
                     int lastCol = grid.Columns.GetLastColumn(DataGridViewElementStates.Visible, DataGridViewElementStates.None)?.Index ?? -1;
                     var lastRect = lastCol >= 0 ? grid.GetColumnDisplayRectangle(lastCol, false) : Rectangle.Empty;

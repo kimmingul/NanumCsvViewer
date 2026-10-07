@@ -19,7 +19,7 @@ NanumCsvViewer.exe
   MCP 서버를 두지 않는다. 앱이 omp의 호스트가 되어 `set_host_tools`로 도구를 등록하고 `host_tool_call`을 직접 처리한다.
 - **UI**: RAD Agent(`D:/repo/RADAgent/src/chat`, MIT, 같은 회사)의 HTML/CSS/JS 채팅 페이지를 이식한다.
   WebView2(`Microsoft.Web.WebView2`)로 `https://nanumcsv.local/`에 매핑. 페이지 ↔ 호스트 메시지 형식은 RAD Agent와 같다.
-- **omp 위치**: PATH의 `omp.exe` → `%LOCALAPPDATA%\omp\omp.exe` → 설정의 경로. 최소 버전 18.4.4. 없으면 패널에 설치 안내.
+- **omp 위치**: 설정의 경로 → PATH의 `omp.exe`(그다음 `omp.cmd`/`omp.bat`) → `%LOCALAPPDATA%\omp\omp.exe`(§16에서 바뀐 순서·설치·검증). 최소 버전 18.4.4. 없으면 패널에 설치 안내와 설정 도우미.
 - **omp의 역할**: 모델·인증·작업 목록·하위 에이전트·세션 저장은 omp가 맡는다. 앱은 LLM을 직접 부르지 않는다.
 
 ## 3. csv.* 도구 (1차)
@@ -203,3 +203,49 @@ NanumCsvViewer.exe
 - **말풍선·기록**: omp에는 머리말이 붙은 원문이 가고(대기열 `sent`도 원문 — 취소는 omp가 가진 글로 찾는다), 화면에는 `ChatPageMessages.User/QueuedUser/History`가 `AttachmentContext.TryParse`로 머리말을 떼어 **글 + `attachments` 칩**을 싣는다. 그래서 대화를 다시 불러오거나(`history`) 세션 목록 제목(`SessionCatalog`)·뷰 출처(`_lastUserRequest`)에도 머리말 줄이 아니라 사용자가 쓴 글만 나온다. 읽지 못하는 머리말은 글자 그대로 보인다(표 이름에 공백이 없다는 작업 공간 규칙에 기댐). 칩은 보낸 뒤 지워지고(보내는 동안 새로 단 칩은 남음), ×는 그 메시지에서만 뺀다.
 - **상단 `＋`**(새 세션)는 동작 그대로, 툴팁만 "새 대화 / New chat".
 - **검증**: `ChatAttachTests`(형식 걸러내기·지원하지 않는 형식 알림·폴더 비재귀·10개 초과 확인/취소·엔진 없음·실패 파일·진행 중 거절·끌어놓은 경로·머리말 내용(표 이름만, 데이터·경로 없음)·슬래시 제외·대기열 `sent`·머리말 왕복/40개 상한/읽지 못하는 머리말·기록 칩·세션 제목) 26개와 실제 `Form1` 호스트 `ChatAttachFormTests`(작업 공간 파일 없이 CSV 둘+DB, 탭 0, 멱등, DB 표 이름) 1개, 전체 1947 통과. 실제 앱(Debug, 가짜 omp)에서 `+` → 파일 3개 대화 상자(UIA)·칩·탐색기 원본 3·탭 0·폴더 비재귀·12개 확인 취소/확인·OS 끌어놓기(폴더+파일)·전송 시 RPC `prompt`의 머리말과 칩이 있는 말풍선·슬래시 명령 제외를 확인했다.
+
+## 16. AI 환경 설정 안정화 — omp 찾기·설치, WebView2 실패 처리, 설정 도우미
+
+처음 설치한 PC·회사 PC에서 채팅이 빈 화면이나 모호한 오류로 끝나는 일을 줄이기 위해, 실패 원인을 **분류해 말해 주고** 앱 안에서 고치게 한다. 모델에는 아무것도 보내지 않으며, 앱은 어떤 정보도 외부로 보내지 않는다(내려받기 때 GitHub에 요청하는 것만 예외).
+
+### 16.1 omp 찾기 (`Agent/Rpc/OmpDiscovery.cs`)
+
+- **순서**: ① 설정의 omp 경로(`AgentOmpPath`, `%VAR%` 확장) → ② PATH의 `omp.exe` → ③ PATH의 `omp.cmd`/`omp.bat`(PATHEXT 순서) → ④ `omp.ps1`은 **찾아도 쓰지 않고** "미지원 래퍼"로 표시(표준 입출력 RPC에 쓸 수 없음) → ⑤ `%LOCALAPPDATA%\omp\omp.exe`(공식 설치 스크립트와 같은 위치). 설정 경로에 파일이 없어도 다른 곳에서 찾으면 계속 쓰되 "설정 경로 없음"을 알린다.
+- **PATH 새로 읽기**: 프로세스 PATH를 앞에 두고, 레지스트리 Machine → User의 `Path`(미확장 원문을 `%VAR%` 확장)에서 **새 항목만** 뒤에 덧붙인다(대소문자·끝 `\` 무시). 앱을 켠 뒤에 omp를 설치하거나 PATH를 고쳐도 [다시 시도]로 잡힌다. omp 자식 프로세스의 PATH도 같은 값으로 덮어 omp가 실행하는 도구가 최신 PATH를 보게 한다.
+- **검증**: `omp --version`(10초)의 `omp/<버전>`을 읽어 **최소 18.4.4**를 확인한다. 같은 파일(경로·크기·수정 시각)을 이미 검증했으면(`AppSettings.AgentOmpVerified` 캐시; `.cmd`는 캐시하지 않음) 실행을 건너뛴다. 결과 `OmpProblemKind`: `NotFound | ConfiguredPathMissing | UnsupportedWrapper | NotRunnable | TooOld | UnknownVersion`. 결과는 확인한 위치를 모두 나열한 문단(`Describe`)과 영어 평문(`ToDiagnosticText`)을 만든다.
+- **후보**: 못 쓸 때만 `OmpCandidate`를 채운다 — 다운로드 폴더·PATH의 릴리스 원본 이름(`omp-windows-x64.exe`/`omp-windows-arm64.exe`, 이 PC 아키텍처 우선)과 **실행 중인 omp 프로세스**의 실행 파일. 자동으로 쓰지 않고 사용자가 [이 파일 설치]를 고를 때만 복사한다.
+
+### 16.2 omp 설치·내려받기 (`Agent/Rpc/OmpInstaller.cs`, `ChatController.OmpSetup.cs`)
+
+- **채팅 오류 알림**: omp를 못 쓰면 상태 줄 한 줄 + 채팅에 확인한 위치를 담은 오류와 버튼 알림 — [찾아보기…] · [이 파일로 설치(후보마다)] · [다운로드하여 설치] · [다시 시도] · [설치 안내(GitHub)] — 과 선택 체크박스 "사용자 PATH에도 추가(기본 꺼짐)". 버튼은 앱 내부 주소 `nanumcsv://omp/{browse | install?src=… | download | retry}`로 컨트롤러가 처리한다. 같은 실패가 `SetupNeeded` 이벤트로 설정 도우미도 연다(§16.4).
+- **파일에서 설치**(`InstallFromFileAsync`): 후보를 `%LOCALAPPDATA%\omp\omp.install-<guid>.exe`로 **스트림 복사**(NTFS 대체 스트림 `Zone.Identifier`는 따라오지 않음, 실행 중인 원본도 읽음)하고 차단 표시를 지운 뒤 `--version`(≥ 18.4.4)으로 검증한 다음에만 `omp.exe`를 바꾼다. 이미 설치 위치에 있는 파일이면 복사 없이 차단 표시만 풀고 검증한다.
+- **내려받기**(`DownloadAndInstallAsync`, 사용자 확인 후): ① GitHub `repos/can1357/oh-my-pi/releases/latest`(초안·시험판은 거부) 응답에서 `omp-windows-<x64|arm64>.exe`를 고른다(이 PC 아키텍처, 그 밖은 `NoAsset`). ② 에셋 URL이 `github.com`(또는 하위 도메인)의 HTTPS가 아니면 거부. ③ **SHA-256**은 에셋의 `digest`(`sha256:<hex>`)와 `SHA256SUMS.txt`에서 얻고, 둘 다 있는데 다르면 `DigestMismatch`로 거부, **둘 다 없으면 `NoDigest`로 설치하지 않는다**(직접 받아 '파일로 설치'를 안내). ④ 디스크 여유(필요 크기 + 64 MB)를 확인하고 임시 파일로 받으며 해시를 같은 패스에서 계산한다(한 바이트도 60초 동안 못 받으면 중단, 길이가 모자라면 오류). ⑤ 해시가 다르면 임시 파일을 버린다. ⑥ `--version` 검증(≥ 18.4.4). ⑦ 대상이 없으면 이동, 있으면 **원자적 교체**(실패하면 기존 설치 그대로; 대상이 실행 중이면 `InUse`로 닫고 다시 시도하라고 안내). 시스템(IE) 프록시와 현재 Windows 계정 자격 증명을 쓰며(연결 20초·API 30초 제한), 취소할 수 있다.
+- **설정은 건드리지 않는다**: `AgentOmpPath`를 자동으로 바꾸지 않는다(호스트 `OnAiSetupOmpInstalled`가, 설정에 적힌 경로의 파일이 없을 때만 설치 경로로 바꾼다). [찾아보기…]로 고른 파일은 검증 뒤 설정에 저장한다.
+- **사용자 PATH 추가**(선택): `HKCU\Environment\Path`에 설치 폴더를 덧붙인다(이미 있으면 대소문자·끝 `\`·`%VAR%` 확장을 무시하고 그대로 둠, 값 종류 REG_EXPAND_SZ 보존), 그리고 `WM_SETTINGCHANGE("Environment")`를 방송한다(응답 없는 창은 기다리지 않음). 실패해도 설치는 성공으로 두고 이유를 알린다.
+- **서명**: omp 릴리스(MIT)는 **Authenticode 서명이 없다**. SHA-256 대조는 "전송 중 변조·손상이 없음"을 보장할 뿐 게시자 신원을 증명하지 않는다. 앱은 SmartScreen·보안 프로그램의 경고를 우회하지 않는다.
+
+### 16.3 WebView2 실패 처리 (`Agent/WebView/`, `AgentChatPanel.cs`)
+
+- **분류**(`WebViewProblem`): `RuntimeMissing`(런타임 없음; 이때만 설치 링크) / `CompatLayer`(`0x8007139F` + DPI 호환성 레이어) / `StateMismatch`(`0x8007139F`인데 레이어 없음 — 같은 데이터 폴더를 다른 인자로 쓰는 프로세스 등) / `AccessDenied`(`0x80070005`, 사용자 데이터 폴더 `%LOCALAPPDATA%\NanumCsvViewer\WebView2` 권한) / `BinaryOrArch`(`0x8007007E`/`0x800700C1`, 런타임 손상) / `Other`. `WebViewFailureText.Build`가 원인별 한/영 안내문을 만든다(런타임이 있으면 "다시 설치"를 권하지 않음).
+- **호환성 레이어**(`CompatLayers`): `HKCU`·`HKLM`(64/32비트 뷰) `…\AppCompatFlags\Layers`에서 `msedgewebview2.exe`·`NanumCsvViewer.exe` 값을 읽고, DPI 토큰(`HIGHDPIAWARE`·`DPIUNAWARE`·`GDIDPISCALING`·`PERPROCESSSYSTEMDPIFORCEON/OFF`)을 가진 것을 표시한다. **HKCU만** [설정 해제]로 지울 수 있다: 먼저 HKCU Layers 전체를 regedit 형식 `%LOCALAPPDATA%\NanumCsvViewer\backup\appcompat-<yyyyMMdd-HHmmss>.reg`(UTF-16 LE, 더블클릭 병합으로 복원)로 저장하고(저장 실패 시 아무것도 바꾸지 않음), 값에 DPI 토큰만 있으면 삭제, 다른 호환성 토큰(예: `WINXPSP3`)이 있으면 DPI 토큰만 빼고 다시 쓴다. HKLM 항목은 관리자 권한이 필요해 안내만 한다.
+- **다시 시도**: 컨트롤을 새로 만들어 초기화를 다시 한다(실패한 `CoreWebView2` 상태를 재사용하지 않음).
+- **DPI 모드**: `ApplicationHighDpiMode`를 **PerMonitorV2**로(`NanumCsvViewer.csproj`; `WebViewInitTests`가 확인). System aware일 때 `msedgewebview2.exe`에 `HIGHDPIAWARE` 레이어가 걸린 PC에서 컨트롤러 생성이 `0x8007139F`로 실패했고, PerMonitorV2에서는 같은 레이어가 있어도 채팅이 뜬다(실제 앱에서 확인). `DPIUNAWARE`·`GDIDPISCALING` 레이어는 PerMonitorV2에서도 초기화를 막아 위 [설정 해제]가 필요하다.
+- **로그**: `%LOCALAPPDATA%\NanumCsvViewer\agent\webview2-init.log` — 초기화가 **실패할 때마다** 시각·앱 버전·WebView2 상태 보고(런타임 버전·DPI 모드·배율·감지한 레이어·분류)·예외를 덧붙인다(성공은 기록하지 않음). 지원용 환경 변수 **`NANUMCSV_WEBVIEW2_LOG=1`**을 주고 시작하면 브라우저 로그(`--enable-logging`)를 `agent\webview2-browser.log`에 남기며 앱의 모든 WebView2에 적용된다(프로세스 시작 때 한 번만 읽음).
+
+### 16.4 AI 환경 설정 도우미 (`Agent/Setup/`, `Ui/Form1.AgentSetup.cs`)
+
+- **진입점**: 도구 ▸ **AI 환경 설정 도우미…**, 설정 ▸ AI 에이전트의 같은 이름 단추(모달), 그리고 **자동**: WebView2 초기화 실패(`WebViewInitFailed`)·omp 못 찾음·채팅 시작 실패 때 **앱 버전마다 한 번**(`AppSettings.AiSetupShownVersion`에 현재 버전 기록) 열린다. 도우미의 '다시 표시하지 않기'(`AiSetupDisabled`)를 켜면 자동으로는 열지 않는다(메뉴·설정은 무관). 보이지 않는 창에서는 열지 않는다.
+- **네 단계**(`AiSetupRunner`, 상태 `Pending/Checking/Ok/Warn/Fail/Blocked`): ① **WebView2** — 런타임 버전·앱 DPI 모드·시스템 배율·호환성 레이어·마지막 초기화 결과 → [런타임 설치 페이지 열기] · [DPI 호환성 설정 해제] · [다시 시도] · [로그 폴더 열기]. ② **omp** — §16.1 결과 → [찾아보기…] · [이 파일 설치(복사)] · [omp 내려받기](너무 오래된 경우 "최신 omp 내려받기") + '사용자 PATH에도 추가' 체크. ③ **로그인**(omp가 됐을 때만) ④ **연결 시험**: `omp --mode rpc --no-session`을 짧게 띄워 핸드셰이크·`get_login_providers`·`get_available_models`만 확인한다 — **프롬프트를 보내지 않으므로 모델 호출 비용이 없다**. 모델이 1개 이상이면 로그인 단계가 정상(로그인한 제공자 또는 API 키·환경 변수 출처를 표시), 0개면 실패로 제공자 목록을 보여 준다.
+- **로그인**(`OmpRpcAccountProbe.LoginAsync`): 제공자 옆 [로그인]/[다시 로그인] → RPC `login`(제한 시간 5분, 취소 가능). omp가 `open_url` 확장 UI 요청으로 알려 준 **OAuth 인증 주소를 기본 브라우저로 열고**(주소 복사 단추도 있음), 코드 붙여 넣기 같은 짧은 입력은 도우미의 입력란으로 받는다. **API 키처럼 비밀 값**을 요구하는 제공자는 omp RPC가 거절하므로(오류 문구가 secret/terminal/API key를 말함) 도우미는 [이 제공자로 터미널에서 로그인](`omp login`을 새 터미널에서 실행)과 제공자 환경 변수 안내로 돌린다. 로그인 성공 뒤에는 `CredentialsChanged`로 에이전트를 다시 시작하고 단계를 다시 검사한다(같은 프로세스는 새 자격 증명을 모를 수 있어 다음 검사 때 프로세스를 새로 띄움).
+- **빈 모델 목록 알림**: 채팅의 "사용할 수 있는 AI 모델이 없습니다…" 알림에 **[로그인…]** 단추(`nanumcsv://setup/login`)가 붙고, 누르면 도우미의 로그인 단계가 열린다(자동 규칙과 무관).
+- **고친 뒤**: omp 경로·설치·로그인이 바뀌면 설정을 저장하고 에이전트를 다시 시작하며, WebView2를 고치면 채팅 화면을 다시 시도한다(`Form1.AgentSetup.cs`).
+
+### 16.5 진단 정보 복사 (`AiDiagnostics.cs`)
+
+- **도움말 ▸ AI 환경 진단 정보 복사**(도우미에도 같은 단추): 앱 버전, OS·아키텍처(OS/프로세스)·.NET·UI 문화권·창 DPI, `-- WebView2 --`(감지 결과), `-- omp --`(§16.1 `ToDiagnosticText`), `-- Python analysis environment --`, `-- Agent settings --`, `webview2-init.log` 끝 60줄, `rpc.log`의 최근 400줄에서 추린 60줄 요약(프레임 종류만, 메시지 내용 없음)을 영어 평문으로 모아 클립보드에 넣고 파일 저장 여부를 묻는다.
+- **가리기**(`DiagnosticRedactor`, 패턴 기반): `sk-…`·`Bearer …`·JWT·GitHub 토큰·Google API 키·Slack 토큰·AWS 키, 이름에 `api key/token/secret/password/authorization/credential/verifier/auth code`가 들어간 `이름: 값`·`이름=값`(복수형 `tokens`는 제외), 인증 URL의 `code·state·token·key·…` 쿼리 값, `--api-key` 인자, 영문·숫자를 모두 가진 40자 이상 불투명 문자열 → `<redacted>`; 사용자 폴더는 `%USERPROFILE%`, `C:\Users\<이름>`과 사용자 이름은 `<user>`로 바꾼다. **모르는 형식의 비밀은 못 가릴 수 있으므로** 복사 후 붙여 넣기 전에 훑어보도록 안내한다. 셀 값·질문·답변 같은 데이터 내용은 애초에 수집하지 않는다.
+
+### 16.6 한계와 검증
+
+- **한계**: 최신 정식 릴리스만 내려받고(버전 선택·자동 업데이트 없음) SHA-256이 없으면 설치하지 않는다. 코드 서명이 없어 SmartScreen이 경고할 수 있다. OAuth 제공자만 도우미 안에서 로그인한다. HKLM 호환성 설정은 안내만 한다. 도우미는 omp RPC(`get_login_providers`·`get_available_models`·`login`·확장 UI 요청)에 기대므로 omp 쪽이 바뀌면 해당 단계가 실패로 표시될 수 있다. 가리기는 패턴 기반이다.
+- **검증**: 전체 2090 통과(`OmpDiscoveryTests`·`OmpInstallerTests`·`OmpSetupChatTests`·`CompatLayersTests`·`WebViewInitTests`·`AiSetupWizardTests` 등, 가짜 레지스트리·가짜 HTTP·임시 폴더·가짜 omp). 실제 앱(Debug, 100% 배율)에서 HKCU `msedgewebview2.exe=HIGHDPIAWARE` 레이어가 있을 때 System aware는 `0x8007139F`로 실패하고 PerMonitorV2는 채팅이 뜨는 것을 확인했고(레이어는 확인 뒤 되돌림), 도우미의 네 단계가 이 PC에서 모두 정상으로 나오는 것을 확인했다. **확인하지 못한 것**: 150% 이상 배율·다중 모니터, 실제 앱에서 omp를 못 찾는 상태(가짜 "없음")의 도우미·채팅 오류 화면, 실제 GitHub 서버에서의 내려받기, 실제 OAuth 로그인 완료.

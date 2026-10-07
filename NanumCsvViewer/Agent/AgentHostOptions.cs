@@ -4,8 +4,8 @@ namespace NanumCsvViewer.Agent
     /// 에이전트 호스트(ChatController, CsvHostTools)가 읽는 설정. 앱 설정이 바뀔 때마다 새 인스턴스를 만들어 넘긴다
     /// (CsvHostTools는 Func로 그때그때 읽는다).
     /// </summary>
-    /// <param name="OmpPath">omp 실행 파일 경로. null/빈 문자열이면 자동 탐색(PATH → %LOCALAPPDATA%\omp\omp.exe).
-    /// 값이 있고 파일이 있으면 그 경로를 먼저 쓴다.</param>
+    /// <param name="OmpPath">omp 실행 파일 경로. null/빈 문자열이면 자동 탐색(PATH(레지스트리에서 다시 읽음)의 omp.exe → omp.cmd → %LOCALAPPDATA%\omp\omp.exe).
+    /// 값이 있고 파일이 있으면 그 경로를 먼저 쓴다. 값이 있는데 파일이 없으면 자동 탐색으로 넘어가되 아무것도 못 찾으면 그 경로가 없다고 알린다.</param>
     /// <param name="ExtraArgs">omp 명령줄에 그대로 덧붙일 인자(공백 구분, "..." 인용 가능). 예: --model anthropic/claude-sonnet-4-5</param>
     /// <param name="Language">"ko" 또는 "en". 가이드·알림 문구의 언어.</param>
     /// <param name="DataPolicy">모델로 보낼 수 있는 데이터 범위.</param>
@@ -23,6 +23,7 @@ namespace NanumCsvViewer.Agent
     /// <param name="UseManagedPython">앱이 관리하는 Python 분석 환경(%LOCALAPPDATA%\NanumCsvViewer\python-analysis)이 있으면 에이전트의 Python을 그것으로 한다(기본 켬). 없으면 사용자 Python.</param>
     /// <param name="PythonEnvNoticePending">true면 관리 환경 없이 로컬 Python을 처음 켠 연결에서 설정 안내를 채팅에 한 번 보이고 PythonEnvNoticeShown을 올린다.</param>
     /// <param name="ModelUsageAlertedVersion">"최근 사용 모델을 읽을 수 없음" 경고를 이미 보인 omp 버전(없으면 빈 문자열). omp 버전마다 한 번만 경고하고 ModelUsageAlertShown이 새 값을 알린다.</param>
+    /// <param name="OmpVerified">마지막으로 검증한 omp(<see cref="Rpc.OmpDiscovery.MakeCacheEntry"/>). 같은 파일이면 시작할 때 `--version` 실행을 건너뛴다.</param>
     public sealed record AgentHostOptions(
         string? OmpPath = null,
         string? ExtraArgs = null,
@@ -39,7 +40,8 @@ namespace NanumCsvViewer.Agent
         string SkillsOff = "",
         bool UseManagedPython = true,
         bool PythonEnvNoticePending = false,
-        string ModelUsageAlertedVersion = "")
+        string ModelUsageAlertedVersion = "",
+        string? OmpVerified = null)
     {
         /// <summary>분석 스킬 구성(설정). 로컬 Python이 켜져 있을 때만 실제로 실린다(<see cref="SkillSelection"/>).</summary>
         internal SkillSelection Skills => SkillSelection.Create(SkillsEnabled, (SkillCategoriesOff ?? "").Split(','), (SkillsOff ?? "").Split(','));

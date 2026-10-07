@@ -204,6 +204,35 @@
       notice.appendChild(document.createTextNode(' '));
       notice.appendChild(link);
     }
+    // A notice may carry several host buttons (omp setup). The optional checkbox (off by default) adds "&path=1" to buttons that ask for it.
+    if (msg && Array.isArray(msg.actions) && msg.actions.length) {
+      const row = document.createElement('div');
+      row.className = 'notice-actions';
+      let box = null;
+      if (msg.checkbox) {
+        const label = document.createElement('label');
+        box = document.createElement('input');
+        box.type = 'checkbox';
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(' ' + msg.checkbox));
+        row.appendChild(label);
+      }
+      const links = [];
+      const sync = () => links.forEach(({ link, url, pathOption }) =>
+        link.setAttribute('data-url', box && box.checked && pathOption ? url + '&path=1' : url));
+      for (const action of msg.actions) {
+        const link = document.createElement('a');
+        link.className = 'chat-link';
+        link.href = '#';
+        link.textContent = action.text || action.url;
+        links.push({ link, url: action.url, pathOption: !!action.pathOption });
+        row.appendChild(document.createTextNode(' '));
+        row.appendChild(link);
+      }
+      if (box) box.addEventListener('change', sync);
+      sync();
+      notice.appendChild(row);
+    }
     // A retry waiting for its delay can be called off; the button goes when the turn ends.
     if (level === 'retry' && !Array.isArray(models)) {
       const stop = document.createElement('button');

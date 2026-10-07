@@ -1047,7 +1047,7 @@ namespace NanumCsvViewer
         }
 
         // 칩과 토글이 같은 높이를 쓰도록 공용 계산.
-        private int ChipRowHeight() => TextRenderer.MeasureText("Ag", Font).Height + 7;
+        private int ChipRowHeight() => TextRenderer.MeasureText("Ag", Font).Height + LogicalToDeviceUnits(7);
 
         private Control MakeModeToggle()
         {
@@ -1087,7 +1087,7 @@ namespace NanumCsvViewer
             int h = ChipRowHeight();
             int textW = TextRenderer.MeasureText(label, Font).Width;
             int xW = TextRenderer.MeasureText("✕", boldFont).Width;
-            const int padL = 8, gap = 5, padR = 8;
+            int padL = LogicalToDeviceUnits(8), gap = LogicalToDeviceUnits(5), padR = LogicalToDeviceUnits(8);
 
             var chip = new Panel
             {
@@ -1408,7 +1408,7 @@ namespace NanumCsvViewer
                     var old = _facetsPanel.Controls.Cast<Control>().ToArray();
                     _facetsPanel.Controls.Clear();
                     foreach (var control in old) control.Dispose();
-                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(214, 0),
+                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(LogicalToDeviceUnits(FacetView.WidthLogical), 0),
                         Text = LT($"Facets: first {result.count:N0} of {view.Count:N0} rows", $"패싯: 전체 {view.Count:N0}행 중 처음 {result.count:N0}행"), ForeColor = _palette.Text });
                     foreach (var facet in result.facets)
                         _facetsPanel.Controls.Add(new FacetView(facet.Name, _palette, facet.Rows));
@@ -1424,7 +1424,7 @@ namespace NanumCsvViewer
                     var old = _facetsPanel.Controls.Cast<Control>().ToArray();
                     _facetsPanel.Controls.Clear();
                     foreach (var control in old) control.Dispose();
-                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(214, 0),
+                    _facetsPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(LogicalToDeviceUnits(FacetView.WidthLogical), 0),
                         Text = LT("Unable to calculate facets. Toggle the panel to retry.", "패싯을 계산하지 못했습니다. 패널을 다시 열어 재시도하세요."), ForeColor = _palette.Text });
                 }
             }

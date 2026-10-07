@@ -118,7 +118,7 @@ namespace NanumCsvViewer
                 grid.Font = Font;
             }
             old?.Dispose();
-            grid.ColumnHeadersHeight = Math.Max(30, grid.Font.Height + 12);
+            grid.ColumnHeadersHeight = Math.Max(LogicalToDeviceUnits(30), grid.Font.Height + LogicalToDeviceUnits(12));
         }
 
         /// <summary>글꼴 크기·최대 줄 수가 바뀌었다: 행 높이를 다시 계산하게 한다(현재 셀·스크롤 위치는 유지).</summary>

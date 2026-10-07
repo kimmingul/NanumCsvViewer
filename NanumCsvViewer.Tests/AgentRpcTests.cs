@@ -473,46 +473,6 @@ namespace NanumCsvViewer.Tests
             Assert.True(new OmpVersion(9, 99, 99) < OmpVersion.Minimum);
         }
 
-        private static Func<string, string?> Env(string? path, string? local) =>
-            name => name == "PATH" ? path : name == "LOCALAPPDATA" ? local : null;
-
-        [Fact]
-        public void Locator_prefers_configured_then_PATH_then_LocalAppData()
-        {
-            string pathDir = Path.Combine("C:\\", "tools");
-            string onPath = Path.Combine(pathDir, "omp.exe");
-            string local = Path.Combine("C:\\Users\\u\\AppData\\Local", "omp", "omp.exe");
-            string configured = "D:\\mine\\omp.exe";
-            var env = Env(pathDir + Path.PathSeparator + "C:\\other", "C:\\Users\\u\\AppData\\Local");
-
-            Assert.Equal(configured, OmpLocator.FindExecutable(configured, env, p => p == configured || p == onPath || p == local));
-            // 설정 경로에 파일이 없으면 자동 탐색으로 넘어간다.
-            Assert.Equal(onPath, OmpLocator.FindExecutable(configured, env, p => p == onPath || p == local));
-            Assert.Equal(local, OmpLocator.FindExecutable(null, env, p => p == local));
-            Assert.Null(OmpLocator.FindExecutable("", env, _ => false));
-        }
-
-        [Fact]
-        public async Task Probe_reports_missing_old_unknown_and_ok()
-        {
-            var env = Env("C:\\bin", null);
-            Func<string, bool> exists = p => p == Path.Combine("C:\\bin", "omp.exe");
-
-            var none = await OmpLocator.ProbeAsync(null, false, (_, _) => Task.FromResult<string?>("omp/18.4.4"), env, _ => false);
-            Assert.Equal(OmpStatus.NotFound, none.Status);
-
-            var old = await OmpLocator.ProbeAsync(null, false, (_, _) => Task.FromResult<string?>("omp/18.4.3"), env, exists);
-            Assert.Equal(OmpStatus.TooOld, old.Status);
-            Assert.Contains("18.4.4", old.Message);
-
-            var unknown = await OmpLocator.ProbeAsync(null, false, (_, _) => Task.FromResult<string?>(null), env, exists);
-            Assert.Equal(OmpStatus.UnknownVersion, unknown.Status);
-
-            var ok = await OmpLocator.ProbeAsync(null, false, (_, _) => Task.FromResult<string?>("omp/18.5.0"), env, exists);
-            Assert.True(ok.IsOk);
-            Assert.Equal(new OmpVersion(18, 5, 0), ok.Version);
-        }
-
         [Fact]
         public void Arguments_follow_the_documented_order_and_keep_quoted_extras_whole()
         {

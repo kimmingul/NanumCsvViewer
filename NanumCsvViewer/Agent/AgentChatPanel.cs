@@ -154,14 +154,38 @@ namespace NanumCsvViewer.Agent
             if (!DesignMode && !_initStarted) _ = InitializeAsync();
         }
 
+        /// <summary>
+        /// [다시 시도]와 같다: 안내 화면과 WebView2 컨트롤을 버리고 새 컨트롤·새 환경으로 처음부터 다시 시작한다
+        /// (CreateCoreWebView2Controller가 실패한 뒤에는 같은 컨트롤을 다시 쓰지 않는다).
+        /// </summary>
+        public void RetryInit()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(RetryInit); return; }
+            if (_initStarted) return;
+            DiscardWeb();
+            if (_fallback is not null) { Controls.Remove(_fallback); _fallback.Dispose(); _fallback = null; }
+            _queue.Reset();
+            _reloads = 0;
+            _ = InitializeAsync();
+        }
+
+        private void DiscardWeb()
+        {
+            if (_web is null) return;
+            Controls.Remove(_web);
+            try { _web.Dispose(); } catch (Exception) { /* 이미 실패한 컨트롤 */ }
+            _web = null;
+        }
+
         private async Task InitializeAsync()
         {
             _initStarted = true;
-            if (!IsWebView2Available(out _))
+            if (!IsWebView2Available(out var version))
             {
-                ShowFallback(LT(
-                    "The AI chat needs the Microsoft Edge WebView2 Runtime, which is not installed on this PC.",
-                    "AI 채팅에는 Microsoft Edge WebView2 런타임이 필요하지만 이 PC에는 설치되어 있지 않습니다."));
+                var missing = new InvalidOperationException("WebView2 Runtime is not installed.");
+                WebViewDiagnostics.RecordFailure(missing);
+                ShowFailure(WebViewProblem.RuntimeMissing, missing, Array.Empty<CompatLayerEntry>());
                 return;
             }
             try
@@ -169,7 +193,7 @@ namespace NanumCsvViewer.Agent
                 var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 var assetDir = ChatAssetStore.Extract(typeof(AgentChatPanel).Assembly,
                     Path.Combine(local, "NanumCsvViewer", "chat"), AppInfo.Version);
-                var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(local, "NanumCsvViewer", "WebView2"));
+                var env = await WebViewDiagnostics.CreateEnvironmentAsync();
 
                 // 끌어놓기는 켠다: 페이지가 파일 끌기를 받아 postMessageWithAdditionalObjects로 넘기고(OnWebMessageReceived의 attachDrop),
                 // 페이지는 file: 이동을 막는다. 끄면 WebView2가 드롭 대상 자체를 거절해 부모 컨트롤도 드롭을 받지 못한다(실제 확인).
@@ -205,47 +229,100 @@ namespace NanumCsvViewer.Agent
                     controller.AcceleratorKeyPressed += OnAcceleratorKeyPressed;
                 core.ProcessFailed += OnProcessFailed;
                 core.Navigate(PageUrl);
+                WebViewDiagnostics.RecordSuccess();
             }
             catch (Exception ex)
             {
-                if (_web is not null) { Controls.Remove(_web); _web.Dispose(); _web = null; }
-                ShowFallback(LT("The chat page could not be started: ", "채팅 화면을 시작하지 못했습니다: ") + ex.Message);
+                DiscardWeb();
+                if (IsDisposed) return;
+                var layers = CompatLayers.Find();
+                WebViewDiagnostics.RecordFailure(ex);
+                ShowFailure(WebViewDiagnostics.Classify(ex, version, layers), ex, layers);
             }
         }
 
-        private void ShowFallback(string message)
+        private void ShowFailure(WebViewProblem problem, Exception ex, IReadOnlyList<CompatLayerEntry> layers)
+        {
+            var text = WebViewFailureText.Build(problem, WebViewDiagnostics.HResultOf(ex), ex.Message,
+                WebViewDiagnostics.UserDataFolder, WebViewDiagnostics.LogPath, layers, Loc.CurrentLanguage == "ko");
+            var removable = problem is WebViewProblem.CompatLayer or WebViewProblem.StateMismatch
+                ? layers.Where(l => l.DpiRelated && l.Removable).ToList()
+                : new List<CompatLayerEntry>();
+            ShowFallback(text, WebViewFailureText.ShowsInstallLink(problem), removable);
+        }
+
+        private void ShowFallback(string message, bool installLink = false, IReadOnlyList<CompatLayerEntry>? removable = null)
         {
             _initStarted = false;
             if (_fallback is not null) { Controls.Remove(_fallback); _fallback.Dispose(); }
             var palette = ChatTheme.Palette(_dark);
             var fg = ColorTranslator.FromHtml(palette["fg"]);
-            var panel = new Panel { Dock = DockStyle.Fill, BackColor = BackColor, Padding = new Padding(16) };
+            int pad = LogicalToDeviceUnits(16), gap = LogicalToDeviceUnits(8);
+            var panel = new Panel { Dock = DockStyle.Fill, BackColor = BackColor, Padding = new Padding(pad), AutoScroll = true };
             var label = new Label
             {
-                Dock = DockStyle.Top, AutoSize = true, MaximumSize = new Size(10000, 0), ForeColor = fg,
-                Text = message + Environment.NewLine + Environment.NewLine +
-                       LT("Install it, then press Retry.", "설치한 뒤 [다시 시도]를 누르세요."),
+                Dock = DockStyle.Top, AutoSize = true, MaximumSize = new Size(10000, 0), ForeColor = fg, Text = message,
             };
-            var link = new LinkLabel
+            LinkLabel? link = null;
+            if (installLink)
             {
-                Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 8, 0, 8),
-                Text = RuntimeInstallUrl, LinkColor = ColorTranslator.FromHtml(palette["link"]),
-                ActiveLinkColor = ColorTranslator.FromHtml(palette["link"]),
-            };
-            link.LinkClicked += (_, _) => OpenInBrowser(RuntimeInstallUrl);
+                link = new LinkLabel
+                {
+                    Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, gap, 0, gap),
+                    Text = WebViewDiagnostics.RuntimeInstallUrl, LinkColor = ColorTranslator.FromHtml(palette["link"]),
+                    ActiveLinkColor = ColorTranslator.FromHtml(palette["link"]),
+                };
+                link.LinkClicked += (_, _) => OpenInBrowser(WebViewDiagnostics.RuntimeInstallUrl);
+            }
             var retry = new Button { Dock = DockStyle.Top, AutoSize = true, Text = LT("Retry", "다시 시도"), FlatStyle = FlatStyle.System };
-            retry.Click += (_, _) =>
+            retry.Click += (_, _) => RetryInit();
+            Button? remove = null;
+            if (removable is { Count: > 0 })
             {
-                if (_fallback is not null) { Controls.Remove(_fallback); _fallback.Dispose(); _fallback = null; }
-                if (!_initStarted) _ = InitializeAsync();
-            };
-            // Dock=Top은 추가한 역순으로 쌓인다.
+                remove = new Button { Dock = DockStyle.Top, AutoSize = true, Text = LT("Remove setting", "설정 해제"), FlatStyle = FlatStyle.System };
+                remove.Click += (_, _) => RemoveLayers(removable);
+            }
+            // Dock=Top은 추가한 역순으로 쌓인다: 안내문 → (링크) → [설정 해제] → [다시 시도].
             panel.Controls.Add(retry);
-            panel.Controls.Add(link);
+            if (remove is not null) panel.Controls.Add(remove);
+            if (link is not null) panel.Controls.Add(link);
             panel.Controls.Add(label);
             _fallback = panel;
             Controls.Add(panel);
             panel.BringToFront();
+        }
+
+        /// <summary>확인 → 백업(.reg) → 해당 HKCU 값의 DPI 설정만 해제 → 백업 위치 안내 → 다시 시도.</summary>
+        private void RemoveLayers(IReadOnlyList<CompatLayerEntry> entries)
+        {
+            var backup = CompatLayers.DefaultBackupPath();
+            var list = string.Join(Environment.NewLine, entries.Select(e => $"  {e.ExePath} = {e.Flags}"));
+            var owner = FindForm();
+            var ask = MessageBox.Show(owner,
+                LT("Remove these Windows compatibility (DPI) settings for the current user?", "현재 사용자에 걸린 다음 Windows 호환성(DPI) 설정을 해제할까요?")
+                + Environment.NewLine + Environment.NewLine + list + Environment.NewLine + Environment.NewLine
+                + LT("A backup (.reg) of the current settings is saved first:", "먼저 현재 설정의 백업(.reg)을 저장합니다:") + Environment.NewLine + backup
+                + Environment.NewLine + LT("Double-click it to restore.", "더블클릭하면 되돌립니다."),
+                LT("Remove compatibility setting", "호환성 설정 해제"), MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (ask != DialogResult.Yes) return;
+
+            // 각 항목은 그 시점의 HKCU Layers 전체를 백업한다: 첫 백업이 원래 상태이고, 둘째부터는 접미사로 파일을 나눠 덮어쓰지 않는다.
+            var notes = new List<string>();
+            bool allOk = true;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                string path = i == 0 ? backup : Path.ChangeExtension(backup, null) + $"-{i + 1}.reg";
+                var r = CompatLayers.RemoveUserLayer(entries[i], path);
+                allOk &= r.Ok;
+                if (!r.Ok) notes.Add(entries[i].ExePath + ": " + r.Message);
+            }
+            if (allOk)
+                MessageBox.Show(owner, LT("Done. The original settings were saved to:", "해제했습니다. 원래 설정은 다음 파일에 저장했습니다:") + Environment.NewLine + backup,
+                    LT("Remove compatibility setting", "호환성 설정 해제"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            else
+                MessageBox.Show(owner, LT("Some settings could not be removed:", "일부 설정을 해제하지 못했습니다:") + Environment.NewLine + string.Join(Environment.NewLine, notes),
+                    LT("Remove compatibility setting", "호환성 설정 해제"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            RetryInit();
         }
 
         /// <summary>

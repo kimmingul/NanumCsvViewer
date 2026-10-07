@@ -151,7 +151,7 @@ namespace NanumCsvViewer
                 if (!AgentChatPanel.IsWebView2Available(out _)) { ShowPlain(); return; }
                 string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 string assets = ChatAssetStore.Extract(typeof(AgentChatPanel).Assembly, Path.Combine(local, "NanumCsvViewer", "chat"), AppInfo.Version);
-                var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(local, "NanumCsvViewer", "WebView2"));
+                var env = await WebViewDiagnostics.CreateEnvironmentAsync();
                 if (IsDisposed) return;
                 var web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = _palette.Surface, AllowExternalDrop = false };
                 Controls.Add(web);

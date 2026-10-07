@@ -9,7 +9,14 @@ namespace NanumCsvViewer
     /// </summary>
     internal sealed class FacetView : Panel
     {
-        private const int TitleH = 19, RowH = 17, LabelW = 86, CountW = 36, BottomPad = 6;
+        // 논리 픽셀(96 DPI 기준). 현재 모니터 DPI로 바꾼 값은 아래 속성을 쓴다.
+        public const int WidthLogical = 214;
+        private int TitleH => S(19);
+        private int RowH => S(17);
+        private int LabelW => S(86);
+        private int CountW => S(36);
+        private int BottomPad => S(6);
+        private int S(int logical) => LogicalToDeviceUnits(logical);
 
         private readonly string _title;
         private readonly ThemePalette _palette;
@@ -23,9 +30,8 @@ namespace NanumCsvViewer
             _rows = rows.ToArray();
             _maxCount = _rows.Length == 0 ? 1 : Math.Max(1, _rows.Max(r => r.Count));
 
-            Width = 214;
-            Height = TitleH + _rows.Length * RowH + BottomPad;
-            Margin = new Padding(4, 3, 4, 1);
+            ApplySize();
+            Margin = new Padding(LogicalToDeviceUnits(4), LogicalToDeviceUnits(3), LogicalToDeviceUnits(4), LogicalToDeviceUnits(1));
             BackColor = _palette.Surface;
             DoubleBuffered = true;
             Cursor = Cursors.Hand;
@@ -35,22 +41,22 @@ namespace NanumCsvViewer
         {
             var g = e.Graphics;
             using var titleFont = new Font(Font, FontStyle.Bold);
-            TextRenderer.DrawText(g, _title, titleFont, new Rectangle(2, 1, Width - 4, TitleH - 2), _palette.Accent,
+            TextRenderer.DrawText(g, _title, titleFont, new Rectangle(S(2), S(1), Width - S(4), TitleH - S(2)), _palette.Accent,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
-            int barX = LabelW + 2;
-            int barMaxW = Math.Max(8, Width - LabelW - CountW - 8);
+            int barX = LabelW + S(2);
+            int barMaxW = Math.Max(S(8), Width - LabelW - CountW - S(8));
             using var barBrush = new SolidBrush(Color.FromArgb(90, _palette.Accent));
 
             for (int i = 0; i < _rows.Length; i++)
             {
                 int y = TitleH + i * RowH;
                 var (label, count, _) = _rows[i];
-                TextRenderer.DrawText(g, label, Font, new Rectangle(2, y, LabelW - 4, RowH), _palette.Text,
+                TextRenderer.DrawText(g, label, Font, new Rectangle(S(2), y, LabelW - S(4), RowH), _palette.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 int w = (int)(barMaxW * (count / (double)_maxCount));
-                g.FillRectangle(barBrush, barX, y + 2, Math.Max(1, w), RowH - 5);
-                TextRenderer.DrawText(g, count.ToString("N0"), Font, new Rectangle(Width - CountW - 2, y, CountW, RowH), _palette.Text,
+                g.FillRectangle(barBrush, barX, y + S(2), Math.Max(1, w), RowH - S(5));
+                TextRenderer.DrawText(g, count.ToString("N0"), Font, new Rectangle(Width - CountW - S(2), y, CountW, RowH), _palette.Text,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
         }
@@ -61,6 +67,19 @@ namespace NanumCsvViewer
             int i = (e.Y - TitleH) / RowH;
             if (i >= 0 && i < _rows.Length) _rows[i].OnClick();
             base.OnMouseClick(e);
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            ApplySize();
+            Invalidate();
+        }
+
+        private void ApplySize()
+        {
+            Width = LogicalToDeviceUnits(WidthLogical);
+            Height = TitleH + _rows.Length * RowH + BottomPad;
         }
     }
 }

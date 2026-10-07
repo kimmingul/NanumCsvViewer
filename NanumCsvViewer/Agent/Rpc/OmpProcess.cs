@@ -45,6 +45,7 @@ namespace NanumCsvViewer.Agent.Rpc
                 WorkingDirectory = info.WorkingDirectory,
             };
             foreach (string a in info.Arguments) psi.ArgumentList.Add(a);
+            OmpPathEnvironment.Apply(psi);   // 앱이 뜬 뒤에 바뀐 PATH(레지스트리)를 omp와 omp가 실행하는 도구가 보게 한다
             var process = Process.Start(psi) ?? throw new InvalidOperationException("omp did not start");
             return new RealProcess(process, info.StderrLogPath);
         }

@@ -200,6 +200,7 @@ namespace NanumCsvViewer.Agent
         /// <summary>앱 내부 주소면 처리하고 true. 그 밖의 주소는 호출자가 연다.</summary>
         private bool TryHandleAppUrl(string? url)
         {
+            if (TryHandleOmpUrl(url)) return true;
             if (!string.Equals(url, SettingsUrl, StringComparison.OrdinalIgnoreCase)) return false;
             using var doc = System.Text.Json.JsonDocument.Parse("{\"t\":\"settings\"}");
             PageMessageUnhandled?.Invoke(doc.RootElement.Clone());

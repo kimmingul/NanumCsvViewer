@@ -169,7 +169,29 @@ namespace NanumCsvViewer.Agent
                 _modelList = set.ToList();
                 PostCatalog();
                 RefreshModelUsage();
+                NoticeIfNoModels();
             });
+
+        /// <summary>
+        /// 연결됐는데 쓸 수 있는 모델이 하나도 없으면(로그인 전·자격 증명 만료) 채팅에 알리고 AI 설정 도우미의 로그인 단계로 가는 버튼을 단다.
+        /// 모델이 생기면 다시 알릴 수 있게 표시를 지운다.
+        /// </summary>
+        private void NoticeIfNoModels()
+        {
+            if (_modelList.Count > 0) { _noModelsNoticed = false; return; }
+            if (_noModelsNoticed) return;
+            _noModelsNoticed = true;
+            _stream.Emit(ChatPageMessages.LinkNotice("warn", NoModelsNoticeText(Korean), T("Sign in…", "로그인…"), SetupLoginUrl));
+        }
+
+        private bool _noModelsNoticed;
+
+        /// <summary>채팅 알림의 버튼이 AI 설정 도우미(로그인 단계)를 열게 하는 앱 내부 주소.</summary>
+        internal const string SetupLoginUrl = "nanumcsv://setup/login";
+
+        internal static string NoModelsNoticeText(bool korean) => korean
+            ? "사용할 수 있는 AI 모델이 없습니다. 모델 제공자에 로그인하거나 API 키를 설정해야 합니다."
+            : "No AI model is available yet. Sign in to a model provider or set an API key.";
 
         private void RequestLevels() =>
             Ask("get_available_thinking_levels", null, data =>

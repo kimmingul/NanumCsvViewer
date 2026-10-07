@@ -71,7 +71,12 @@ namespace NanumCsvViewer
             ComposeMainMenu();      // Ui/Form1.MainMenu.cs — 10개 최상위 메뉴 조립
             ComposeToolbar();       // Ui/Form1.Toolbar.cs — 글리프 아이콘 툴바
             ApplyLocalization();
-            DpiChanged += (_, _) => RefreshToolbarIcons();
+            // 모니터를 옮겨 배율이 바뀌면(Per-Monitor V2) 글리프 크기·헤더 높이·행 머리글 폭을 새 배율로 다시 정한다. 폼의 배율 적용이 끝난 뒤 하도록 미룬다.
+            DpiChanged += (_, _) =>
+            {
+                RefreshToolbarIcons();
+                BeginInvoke(() => { ApplyGridFont(); UpdateRowHeaderWidth(); });
+            };
 
             // 셀 내 줄바꿈을 여러 줄로 표시
             grid.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
@@ -387,7 +392,7 @@ namespace NanumCsvViewer
             if (_doc is null || _userResizedRowHeader) return;
             // 행번호 자릿수에 맞춰 넉넉히(예: 100,000=6자리도 잘 보이게). 사용자는 경계를 끌어 조절 가능.
             int digits = Math.Max(3, _doc.DataRowsAvailable.ToString().Length);
-            int w = Math.Max(64, 22 + digits * 9);
+            int w = Math.Max(LogicalToDeviceUnits(64), LogicalToDeviceUnits(22) + digits * LogicalToDeviceUnits(9));
             if (grid.RowHeadersWidth != w)
             {
                 _settingRowHeaderWidth = true;

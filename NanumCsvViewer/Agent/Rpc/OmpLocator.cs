@@ -56,53 +56,20 @@ namespace NanumCsvViewer.Agent.Rpc
         }
     }
 
-    internal enum OmpStatus { Ok, NotFound, TooOld, UnknownVersion }
-
-    internal sealed record OmpProbeResult(OmpStatus Status, string? Path, OmpVersion? Version, string Message)
+    /// <summary>
+    /// 짧은 omp 실행의 결과. StartError가 있으면 프로세스를 시작하지 못했다(차단·형식 불일치·접근 거부 등: StartErrorCode는 Win32 오류 코드).
+    /// </summary>
+    internal sealed record OmpRunOutcome(string? Output, int? ExitCode, bool TimedOut, int? StartErrorCode, string? StartError)
     {
-        public bool IsOk => Status == OmpStatus.Ok;
+        public bool Started => StartError == null;
+
+        public static OmpRunOutcome Ran(string output, int exitCode = 0) => new(output, exitCode, false, null, null);
     }
 
-    /// <summary>omp 실행 파일 찾기와 버전 확인. 모델 호출 없음.</summary>
+    /// <summary>omp 짧은 실행(`--version`, `usage --json` 등). 모델 호출 없음. 찾기는 <see cref="OmpDiscovery"/>.</summary>
     internal static class OmpLocator
     {
         public const string ExeName = "omp.exe";
-
-        /// <summary>
-        /// 설정 경로(있고 파일이 존재하면) → PATH의 omp.exe → %LOCALAPPDATA%\omp\omp.exe.
-        /// getEnv/fileExists는 테스트용 주입점.
-        /// </summary>
-        public static string? FindExecutable(string? configured, Func<string, string?>? getEnv = null, Func<string, bool>? fileExists = null)
-        {
-            getEnv ??= Environment.GetEnvironmentVariable;
-            fileExists ??= File.Exists;
-
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                string path = configured.Trim().Trim('"');
-                if (fileExists(path)) return path;
-            }
-
-            string? pathVar = getEnv("PATH");
-            if (!string.IsNullOrEmpty(pathVar))
-            {
-                foreach (string dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    string candidate;
-                    try { candidate = Path.Combine(dir.Trim().Trim('"'), ExeName); }
-                    catch (ArgumentException) { continue; }
-                    if (fileExists(candidate)) return candidate;
-                }
-            }
-
-            string? local = getEnv("LOCALAPPDATA");
-            if (!string.IsNullOrEmpty(local))
-            {
-                string candidate = Path.Combine(local, "omp", ExeName);
-                if (fileExists(candidate)) return candidate;
-            }
-            return null;
-        }
 
         /// <summary>`omp --version`을 실행해 첫 줄을 돌려준다(실패·시간 초과는 null).</summary>
         public static async Task<string?> RunVersionAsync(string exePath, TimeSpan timeout, CancellationToken cancellation = default)
@@ -118,6 +85,18 @@ namespace NanumCsvViewer.Agent.Rpc
         public static async Task<string?> RunAsync(string exePath, IReadOnlyList<string> args, string? workingDirectory,
             TimeSpan timeout, bool requireSuccess = true, CancellationToken cancellation = default)
         {
+            var o = await RunDetailedAsync(exePath, args, workingDirectory, timeout, cancellation, throwIfCancelled: false).ConfigureAwait(false);
+            if (!o.Started || o.TimedOut || o.ExitCode == null) return null;
+            return requireSuccess && o.ExitCode != 0 ? null : o.Output;
+        }
+
+        /// <summary>`omp --version`의 자세한 결과(시작 실패와 시간 초과를 구분). 호출자가 취소하면 OperationCanceledException.</summary>
+        public static Task<OmpRunOutcome> RunVersionOutcomeAsync(string exePath, TimeSpan timeout, CancellationToken cancellation = default) =>
+            RunDetailedAsync(exePath, new[] { "--version" }, null, timeout, cancellation, throwIfCancelled: true);
+
+        private static async Task<OmpRunOutcome> RunDetailedAsync(string exePath, IReadOnlyList<string> args, string? workingDirectory,
+            TimeSpan timeout, CancellationToken cancellation, bool throwIfCancelled)
+        {
             var psi = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
@@ -129,52 +108,33 @@ namespace NanumCsvViewer.Agent.Rpc
             };
             foreach (string a in args) psi.ArgumentList.Add(a);
             if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory)) psi.WorkingDirectory = workingDirectory;
+            OmpPathEnvironment.Apply(psi);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             cts.CancelAfter(timeout);
             Process? p = null;
             try
             {
                 p = Process.Start(psi);
-                if (p == null) return null;
+                if (p == null) return new OmpRunOutcome(null, null, false, null, "process did not start");
                 p.StandardInput.Close();
                 Task<string> err = p.StandardError.ReadToEndAsync(cts.Token);
                 string output = await p.StandardOutput.ReadToEndAsync(cts.Token).ConfigureAwait(false);
                 await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
                 try { await err.ConfigureAwait(false); } catch { }
-                return requireSuccess && p.ExitCode != 0 ? null : output;
+                return new OmpRunOutcome(output, p.ExitCode, false, null, null);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (p == null)
+            {
+                return new OmpRunOutcome(null, null, false, ex.NativeErrorCode, ex.Message);
             }
             catch (Exception ex) when (ex is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
             {
                 try { if (p is { HasExited: false }) p.Kill(true); } catch { }
-                return null;
+                if (ex is OperationCanceledException && cancellation.IsCancellationRequested && throwIfCancelled) throw;
+                bool timedOut = ex is OperationCanceledException && !cancellation.IsCancellationRequested;
+                return new OmpRunOutcome(null, null, timedOut, null, timedOut ? null : ex.Message);
             }
             finally { p?.Dispose(); }
-        }
-
-        /// <summary>찾기 + 버전 확인(≥ 18.4.4). 앱 시작/패널 열기 때 한 번.</summary>
-        public static async Task<OmpProbeResult> ProbeAsync(string? configured, bool korean,
-            Func<string, CancellationToken, Task<string?>>? runVersion = null,
-            Func<string, string?>? getEnv = null, Func<string, bool>? fileExists = null,
-            CancellationToken cancellation = default)
-        {
-            string? exe = FindExecutable(configured, getEnv, fileExists);
-            if (exe == null)
-                return new OmpProbeResult(OmpStatus.NotFound, null, null,
-                    korean ? "omp(oh-my-pi)를 찾을 수 없습니다. PATH 또는 %LOCALAPPDATA%\\omp\\omp.exe에 설치하거나 설정에서 경로를 지정하세요."
-                           : "omp (oh-my-pi) was not found. Install it on PATH or at %LOCALAPPDATA%\\omp\\omp.exe, or set its path in the settings.");
-
-            runVersion ??= (p, ct) => RunVersionAsync(p, TimeSpan.FromSeconds(10), ct);
-            string? text = await runVersion(exe, cancellation).ConfigureAwait(false);
-            if (!OmpVersion.TryParse(text, out var version))
-                return new OmpProbeResult(OmpStatus.UnknownVersion, exe, null,
-                    korean ? $"omp 버전을 확인할 수 없습니다: {exe} ({text ?? "응답 없음"})" : $"Cannot determine the omp version of {exe} ({text ?? "no answer"}).");
-
-            if (version < OmpVersion.Minimum)
-                return new OmpProbeResult(OmpStatus.TooOld, exe, version,
-                    korean ? $"omp {version}은(는) 너무 오래되었습니다. {OmpVersion.Minimum} 이상이 필요합니다."
-                           : $"omp {version} is too old; {OmpVersion.Minimum} or newer is required.");
-
-            return new OmpProbeResult(OmpStatus.Ok, exe, version, $"omp {version}");
         }
     }
 }

@@ -19,10 +19,15 @@ namespace NanumCsvViewer.Agent
         public SynchronizationContext? Ui { get; init; }
         /// <summary>true면 250ms WinForms 타이머가 Tick()을 부른다. 테스트는 직접 Tick()을 부른다.</summary>
         public bool AutoTick { get; init; } = true;
-        public Func<string?, string?> LocateOmp { get; init; } = configured => OmpLocator.FindExecutable(configured);
-        public Func<string, CancellationToken, Task<string?>> RunVersion { get; init; } =
-            (path, ct) => OmpLocator.RunVersionAsync(path, TimeSpan.FromSeconds(10), ct);
-        public bool CheckVersion { get; init; } = true;
+        /// <summary>omp 찾기·검증: (설정 경로, 캐시된 검증 값, 취소) → 결과. 테스트는 가짜로 교체한다.</summary>
+        public Func<string?, string?, CancellationToken, Task<OmpDiscoveryResult>> DiscoverOmp { get; init; } =
+            (configured, cache, ct) => OmpDiscovery.DiscoverAsync(configured, cache, null, ct);
+        /// <summary>채팅 알림의 '이 파일로 설치': (원본, PATH 추가, 취소) → 결과.</summary>
+        public Func<string, bool, CancellationToken, Task<OmpInstallResult>> InstallOmpFromFile { get; init; } =
+            (src, addToPath, ct) => OmpInstaller.InstallFromFileAsync(src, addToPath, ct);
+        /// <summary>채팅 알림의 '다운로드하여 설치'.</summary>
+        public Func<IProgress<OmpDownloadProgress>, bool, CancellationToken, Task<OmpInstallResult>> DownloadOmp { get; init; } =
+            (progress, addToPath, ct) => OmpInstaller.DownloadAndInstallAsync(progress, ct, addToPath);
         public Func<string?> ReadGuide { get; init; } = OmpLaunch.ReadGuideResource;
         /// <summary>`omp usage --json` 같은 짧은 CLI 호출: (실행 파일, 인자, 작업 폴더) → 표준 출력, 실패는 null. 10초 제한. UI 스레드를 막지 않는다.</summary>
         public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> RunOmpCli { get; init; } =
@@ -38,6 +43,9 @@ namespace NanumCsvViewer.Agent
         /// <summary>omp 사용 기록(모델별 마지막 사용) 읽기. UI 스레드 밖에서 부른다. 테스트는 가짜로 교체한다.</summary>
         internal Func<string, OmpModelUsage.Result> ReadModelUsage { get; init; } = dir => OmpModelUsage.Read(dir);
     }
+
+    /// <summary>채팅이 첫 설정(마법사)을 필요로 하는 이유.</summary>
+    public enum AgentSetupReason { WebView, Omp, Login }
 
     /// <summary>
     /// omp 이벤트 → 채팅 페이지 메시지, 페이지 명령 → omp RPC. omp 자식 프로세스의 수명(시작·중지·강제 재시작·종료 복구)과
@@ -119,6 +127,18 @@ namespace NanumCsvViewer.Agent
         public event Action<string>? StatusChanged;
 
         /// <summary>
+        /// AI 설정이 필요할 때(UI 스레드): omp를 찾지 못했거나 실행할 수 없음(Omp), 모델 로그인이 없음(Login).
+        /// 두 번째 인자는 진단 설명(없으면 빈 문자열). 호스트가 설정 마법사를 열 수 있다.
+        /// </summary>
+        public event Action<AgentSetupReason, string>? SetupNeeded;
+
+        /// <summary>채팅 알림의 버튼이 omp 경로를 골랐을 때(UI 스레드): 호스트가 AgentOmpPath로 저장한다.</summary>
+        public event Action<string>? OmpPathPicked;
+
+        /// <summary>확인한 omp 경로·버전·파일 지문(UI 스레드): 호스트가 설정에 캐시해 다음 시작의 --version 실행을 줄인다.</summary>
+        public event Action<string>? OmpVerifiedChanged;
+
+        /// <summary>
         /// 컨트롤러가 처리하지 않는 페이지 메시지(settings, openFile, listColumns, setApproval …). 호스트(Form1)가 처리한다.
         /// </summary>
         public event Action<JsonElement>? PageMessageUnhandled;
@@ -148,7 +168,7 @@ namespace NanumCsvViewer.Agent
 
         // ---- 시작/중지 -----------------------------------------------------------------------------------------
 
-        /// <summary>omp를 찾고(PATH → %LOCALAPPDATA%\omp → 설정) 버전을 확인한 뒤 자식을 띄워 핸드셰이크한다. 실패는 예외 대신 상태 표시줄/알림으로 보고한다.</summary>
+        /// <summary>omp를 찾고(<see cref="OmpDiscovery"/>: 설정 → PATH → %LOCALAPPDATA%\omp) 버전을 확인한 뒤 자식을 띄워 핸드셰이크한다. 실패는 예외 대신 상태 표시줄/알림(찾아보기·설치·다운로드·다시 시도 버튼 포함)으로 보고한다.</summary>
         public Task StartAsync(string workingDirectory, CancellationToken cancellation = default) =>
             StartCoreAsync(workingDirectory, null, cancellation);
 
@@ -172,6 +192,7 @@ namespace NanumCsvViewer.Agent
             if (_disposed) return;
             try { _pythonCts?.Cancel(); } catch { }
             try { _attachCts?.Cancel(); } catch { }
+            try { _ompActionCts?.Cancel(); } catch { }
             TearDown(force: true);
             _disposed = true;
             _page.Received -= OnPageMessage;
@@ -197,31 +218,20 @@ namespace NanumCsvViewer.Agent
 
             try
             {
-                string? exe = _ompExe = _svc.LocateOmp(_options.OmpPath);
-                if (exe == null)
+                var found = await _svc.DiscoverOmp(_options.OmpPath, _options.OmpVerified, cancellation);
+                if (launch != _launchId || _disposed) return;
+                _lastDiscovery = found;
+                string? exe = _ompExe = found.ChosenExe;
+                if (!found.IsOk || exe == null)
                 {
-                    Fail(T("omp (oh-my-pi) was not found. Install it on PATH or at %LOCALAPPDATA%\\omp\\omp.exe, or set its path in the settings.",
-                           "omp(oh-my-pi)를 찾을 수 없습니다. PATH 또는 %LOCALAPPDATA%\\omp\\omp.exe에 설치하거나 설정에서 경로를 지정하세요."));
-                    _page.Post(ChatPageMessages.LinkNotice("info",
-                        T("The AI agent needs omp. The rest of the app works without it.", "AI 에이전트에는 omp가 필요합니다. 나머지 기능은 omp 없이도 그대로 동작합니다."),
-                        T("Install omp", "omp 설치 안내"), "https://github.com/can1357/oh-my-pi"));
+                    FailOmp(found);
                     return;
                 }
-                if (_svc.CheckVersion)
+                _ompVersion = found.Version;
+                if (found.VerifiedCache != null && found.VerifiedCache != _options.OmpVerified)
                 {
-                    string? text = await _svc.RunVersion(exe, cancellation);
-                    if (launch != _launchId || _disposed) return;
-                    if (!OmpVersion.TryParse(text, out var version))
-                    {
-                        Fail(T($"Cannot determine the omp version of {exe} ({text ?? "no answer"}).", $"omp 버전을 확인할 수 없습니다: {exe} ({text ?? "응답 없음"})"));
-                        return;
-                    }
-                    if (version < OmpVersion.Minimum)
-                    {
-                        Fail(T($"omp {version} is too old; {OmpVersion.Minimum} or newer is required.", $"omp {version}은(는) 너무 오래되었습니다. {OmpVersion.Minimum} 이상이 필요합니다."));
-                        return;
-                    }
-                    _ompVersion = version;
+                    _options = _options with { OmpVerified = found.VerifiedCache };
+                    OmpVerifiedChanged?.Invoke(found.VerifiedCache);
                 }
 
                 await PrepareSkillsAsync(exe, launch, cancellation);
@@ -309,14 +319,14 @@ namespace NanumCsvViewer.Agent
             RunPendingWorkspaceRestart();
         }
 
-        private void Fail(string message)
+        private void Fail(string message, string? noticeText = null)
         {
             _connected = false;
             _prewarming = false;
             DropPendingSubmit();
             TearDown(force: true);
             SetStatus(message, true);
-            _stream.Emit(ChatPageMessages.Notice("error", message));
+            _stream.Emit(ChatPageMessages.Notice("error", noticeText ?? message));
         }
 
         /// <summary>대기 중인 승인·도구를 정리하고 자식을 끈다(세대가 바뀌어 늦은 콜백은 버려진다).</summary>

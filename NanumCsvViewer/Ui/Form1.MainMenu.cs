@@ -141,13 +141,15 @@ namespace NanumCsvViewer
             // ---- 도구
             _settingsMenu = MakeCmd("tools.settings", (_, _) => ShowSettings());
             _pythonBundleMenu = MakeCmd("tools.exportPythonBundle", (_, _) => ExportPythonBundle());
-            Fill(_toolsMenu, _settingsMenu, Sep(), _pythonBundleMenu, Sep(), _perfMenu, _indexCacheMenu);
+            _aiSetupMenu = MakeItem("AI Setup Assistant…", "AI 환경 설정 도우미…", (_, _) => ShowAiSetupAssistant());
+            Fill(_toolsMenu, _settingsMenu, _aiSetupMenu, Sep(), _pythonBundleMenu, Sep(), _perfMenu, _indexCacheMenu);
 
             // ---- 도움말
             _usageMenu = MakeCmd("help.usage", OnUsageClick);
             _shortcutsMenu = MakeItem("Keyboard Shortcuts…", "단축키…", (_, _) => ShowSettings("shortcuts"));
             _aboutMenu = MakeItem("About", "정보", OnAboutClick);
-            Fill(_helpMenu, _usageMenu, _shortcutsMenu, Sep(), _aboutMenu);
+            _aiDiagMenu = MakeItem("Copy AI Diagnostics", "AI 환경 진단 정보 복사", (_, _) => _ = CopyAiDiagnosticsAsync());
+            Fill(_helpMenu, _usageMenu, _shortcutsMenu, _aiDiagMenu, Sep(), _aboutMenu);
 
             menuStrip1.Items.AddRange(new ToolStripItem[]
             {

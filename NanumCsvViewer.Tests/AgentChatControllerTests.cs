@@ -21,6 +21,15 @@ namespace NanumCsvViewer.Tests
         public string WorkDir { get; } = Path.GetTempPath();
         public string VersionText { get; set; } = "omp/18.4.4";
         public string? OmpPath { get; set; } = "C:\\fake\\omp.exe";
+        /// <summary>omp를 못 찾았을 때 알려 줄 후보(릴리스 원본 파일 등).</summary>
+        public List<OmpCandidate> Candidates { get; } = new();
+        public string? VerifiedCache { get; set; }
+        public int DiscoverCalls { get; private set; }
+        public List<(string Src, bool AddToPath)> Installed { get; } = new();
+        public Func<string, bool, CancellationToken, Task<OmpInstallResult>> InstallFile { get; set; } =
+            (_, _, _) => Task.FromResult(new OmpInstallResult(false, null, "not faked", OmpInstallError.Io));
+        public Func<IProgress<OmpDownloadProgress>, bool, CancellationToken, Task<OmpInstallResult>> Download { get; set; } =
+            (_, _, _) => Task.FromResult(new OmpInstallResult(false, null, "not faked", OmpInstallError.Io));
         public List<JsonElement> Unhandled { get; } = new();
         /// <summary>`omp usage` 같은 CLI 호출 가짜. 기본은 실패(null).</summary>
         public Func<string, IReadOnlyList<string>, string, CancellationToken, Task<string?>> Cli { get; set; } =
@@ -44,8 +53,9 @@ namespace NanumCsvViewer.Tests
                 Log = Log,
                 Ui = Ui,
                 AutoTick = false,
-                LocateOmp = _ => OmpPath,
-                RunVersion = (_, _) => Task.FromResult<string?>(VersionText),
+                DiscoverOmp = (_, _, _) => { DiscoverCalls++; return Task.FromResult(TestOmp.Result(OmpPath, VersionText) with { Candidates = Candidates.ToList(), VerifiedCache = VerifiedCache }); },
+                InstallOmpFromFile = (src, add, ct) => { Installed.Add((src, add)); return InstallFile(src, add, ct); },
+                DownloadOmp = (progress, add, ct) => Download(progress, add, ct),
                 ReadGuide = () => "# guide",
                 RunOmpCli = (exe, args, cwd, ct) => Cli(exe, args, cwd, ct),
                 LocalPython = python ?? new FakePythonSetup(),

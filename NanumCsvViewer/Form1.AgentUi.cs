@@ -141,6 +141,9 @@ namespace NanumCsvViewer
             _agentController.ApprovalNoticeShown += () => { _settings.AgentApprovalNoticeShown = true; _settings.Save(); };
             _agentController.PythonEnvNoticeShown += () => { _settings.AgentPythonEnvNoticeShown = true; _settings.Save(); };
             _agentController.ModelUsageAlertShown += version => { _settings.AgentModelUsageAlertVersion = version; _settings.Save(); };
+            _agentController.OmpPathPicked += path => { _settings.AgentOmpPath = path; _settings.Save(); };
+            _agentController.OmpVerifiedChanged += verified => { _settings.AgentOmpVerified = verified; _settings.Save(); };
+            WireAgentSetup();
             _agentController.SetWorkspaceContext(BuildAgentWorkspaceContext());
             // omp는 바로 시작하지 않는다: 패널이 보이는 채로 앱이 한가해지면 곧(KickAgentPrewarm) 메시지 없이 시작해 모델·생각·승인 선택이 첫 메시지 전에
             // 준비되고, 패널이 숨겨져 있으면 첫 메시지(또는 패널을 열 때)까지 미룬다. 작업 공간 파일이 열려 있으면 그 작업 공간의
@@ -405,6 +408,8 @@ namespace NanumCsvViewer
         // 종료(OnFormClosing)에서 호출.
         private void ShutdownAgent()
         {
+            UnwireAgentSetup();
+            _aiSetup?.Close();
             _agentPrewarmTimer?.Dispose();
             _agentPrewarmTimer = null;
             _agentController?.Dispose();

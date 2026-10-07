@@ -237,8 +237,7 @@ namespace NanumCsvViewer
                     _status.Text = ViewerSupport.LT("svg/webp need the WebView2 runtime.", "svg/webp는 WebView2 런타임이 필요합니다.");
                     return;
                 }
-                string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(local, "NanumCsvViewer", "WebView2"));
+                var env = await WebViewDiagnostics.CreateEnvironmentAsync();
                 if (IsDisposed) return;
                 var web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = _palette.Surface, AllowExternalDrop = false };
                 Controls.Add(web);

@@ -9,7 +9,12 @@ namespace NanumCsvViewer
     /// </summary>
     internal sealed class TabStrip : Control
     {
-        private const int MinTabWidth = 96, MaxTabWidth = 240, CloseSize = 14, ArrowWidth = 22;
+        // 논리 픽셀(96 DPI 기준). 그릴 때는 S()/아래 속성으로 현재 모니터 DPI에 맞춘다.
+        private int MinTabWidth => S(96);
+        private int MaxTabWidth => S(240);
+        private int CloseSize => S(14);
+        private int ArrowWidth => S(22);
+        private int S(int logical) => LogicalToDeviceUnits(logical);
 
         private readonly List<DocumentTab> _tabs = new();
         private readonly List<Rectangle> _bounds = new();   // 스크롤 적용 전 좌표
@@ -71,11 +76,11 @@ namespace NanumCsvViewer
         private void Relayout()
         {
             _bounds.Clear();
-            int x = 2;
+            int x = S(2);
             foreach (var tab in _tabs)
             {
-                int w = Math.Clamp(MeasureText(tab) + 12 + 10 + CloseSize + 12, MinTabWidth, MaxTabWidth);
-                _bounds.Add(new Rectangle(x, 3, w, ClientSize.Height - 3));
+                int w = Math.Clamp(MeasureText(tab) + S(12) + S(10) + CloseSize + S(12), MinTabWidth, MaxTabWidth);
+                _bounds.Add(new Rectangle(x, S(3), w, ClientSize.Height - S(3)));
                 x += w + 1;
             }
             _scroll = Math.Clamp(_scroll, 0, Math.Max(0, TotalWidth - ContentRight));
@@ -115,7 +120,14 @@ namespace NanumCsvViewer
         }
 
         private Rectangle Shown(int index) => new(_bounds[index].X - _scroll, _bounds[index].Y, _bounds[index].Width, _bounds[index].Height);
-        private static Rectangle CloseRect(Rectangle tab) => new(tab.Right - CloseSize - 7, tab.Top + (tab.Height - CloseSize) / 2 + 1, CloseSize, CloseSize);
+        private Rectangle CloseRect(Rectangle tab) => new(tab.Right - CloseSize - S(7), tab.Top + (tab.Height - CloseSize) / 2 + 1, CloseSize, CloseSize);
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            Relayout();
+            Invalidate();
+        }
 
         private int HitTest(Point p, out bool onClose)
         {
@@ -187,16 +199,17 @@ namespace NanumCsvViewer
                 g.FillRectangle(bridge, r.Left + 1, r.Bottom - 1, r.Width - 2, 1);   // 아래 구분선을 끊어 본문과 이어 보이게
             }
 
-            int textLeft = r.Left + 8;
+            int textLeft = r.Left + S(8);
             bool dirty = tab.HasUnsavedEdits;
             if (dirty)
             {
-                TextRenderer.DrawText(g, "●", Font, new Rectangle(textLeft, r.Top, 14, r.Height), Color.FromArgb(214, 140, 0),
+                int dot = S(14);
+                TextRenderer.DrawText(g, "●", Font, new Rectangle(textLeft, r.Top, dot, r.Height), Color.FromArgb(214, 140, 0),
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                textLeft += 14;
+                textLeft += dot;
             }
             var close = CloseRect(r);
-            var textRect = new Rectangle(textLeft, r.Top, Math.Max(10, close.Left - 4 - textLeft), r.Height);
+            var textRect = new Rectangle(textLeft, r.Top, Math.Max(S(10), close.Left - S(4) - textLeft), r.Height);
             using (var font = tab.IsReadOnly ? new Font(Font, FontStyle.Italic) : null)
                 TextRenderer.DrawText(g, Decorated(tab), font ?? Font, textRect, active ? _pal.Text : _pal.HeaderText,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
@@ -221,7 +234,7 @@ namespace NanumCsvViewer
                 var old = g.SmoothingMode;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(_pal.Text, 1.4f);
-                int pad = 4;
+                int pad = S(4);
                 g.DrawLine(pen, close.Left + pad, close.Top + pad, close.Right - pad - 1, close.Bottom - pad - 1);
                 g.DrawLine(pen, close.Right - pad - 1, close.Top + pad, close.Left + pad, close.Bottom - pad - 1);
                 g.SmoothingMode = old;

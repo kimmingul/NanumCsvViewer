@@ -98,6 +98,21 @@ namespace NanumCsvViewer.Agent.Chat
         public static string LinkNotice(string level, string text, string linkText, string url) =>
             Build("notice", o => { o["level"] = level; o["text"] = text; o["linkText"] = linkText; o["url"] = url; });
 
+        /// <summary>
+        /// 버튼(링크) 여러 개가 달린 알림. 각 action의 url은 openUrl로 호스트에 간다(앱 내부 주소 nanumcsv://…).
+        /// checkboxLabel이 있으면 체크 상자(기본 꺼짐)를 보이고, 켜 두면 CarriesPathOption인 버튼의 주소 끝에 "&amp;path=1"을 붙여 보낸다.
+        /// </summary>
+        public static string ActionNotice(string level, string text, IReadOnlyList<ChatNoticeAction> actions, string? checkboxLabel = null) =>
+            Build("notice", o =>
+            {
+                o["level"] = level; o["text"] = text;
+                var arr = new JsonArray();
+                foreach (var a in actions)
+                    arr.Add(new JsonObject { ["text"] = a.Text, ["url"] = a.Url, ["pathOption"] = a.CarriesPathOption });
+                o["actions"] = arr;
+                if (!string.IsNullOrEmpty(checkboxLabel)) o["checkbox"] = checkboxLabel;
+            });
+
         /// <summary>채팅 줄에 그림 썸네일 한 개. url은 결과 폴더 가상 호스트의 주소, path는 열 때 호스트로 돌려보내는 전체 경로.</summary>
         public static string Image(string url, string name, string path, string? caption) =>
             Build("image", o => { o["url"] = url; o["name"] = name; o["path"] = path; o["caption"] = caption ?? ""; });
@@ -259,6 +274,9 @@ namespace NanumCsvViewer.Agent.Chat
             return arr;
         }
     }
+
+    /// <summary><see cref="ChatPageMessages.ActionNotice"/>의 버튼 한 개.</summary>
+    internal sealed record ChatNoticeAction(string Text, string Url, bool CarriesPathOption = false);
 
     internal sealed record TodoItem(string Phase, string Content, string Status);
 

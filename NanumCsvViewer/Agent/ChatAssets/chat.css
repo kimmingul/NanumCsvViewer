@@ -282,6 +282,9 @@ details[open] > .tool-summary::before { transform: rotate(90deg); }
 /* Chat link */
 .chat-link { color: var(--link); text-decoration: underline; cursor: pointer; }
 .chat-link:hover { text-decoration: none; }
+.notice-actions { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.notice-actions label { cursor: pointer; flex-basis: 100%; }
+.notice-error { white-space: pre-line; }
 
 /* Floating scroll button */
 #scroll-bottom-btn {

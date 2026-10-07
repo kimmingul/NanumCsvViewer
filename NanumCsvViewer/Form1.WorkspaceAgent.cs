@@ -142,7 +142,8 @@ namespace NanumCsvViewer
             SkillsOff: _settings.AgentSkillsOff ?? "",
             UseManagedPython: _settings.AgentUseManagedPython,
             PythonEnvNoticePending: !_settings.AgentPythonEnvNoticeShown,
-            ModelUsageAlertedVersion: _settings.AgentModelUsageAlertVersion ?? "");
+            ModelUsageAlertedVersion: _settings.AgentModelUsageAlertVersion ?? "",
+            OmpVerified: _settings.AgentOmpVerified);
 
         /// <summary>설정 대화 상자가 보여 줄 값: 작업 공간 범위면 작업 공간에 적힌 값(없으면 앱 값), 앱 범위면 앱 값.</summary>
         internal (AgentApprovalMode Mode, AgentDataPolicy Policy, bool Python) ScopeBaseline(bool workspaceScope)
