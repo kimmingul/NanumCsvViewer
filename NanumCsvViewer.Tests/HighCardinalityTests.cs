@@ -17,7 +17,7 @@ public class HighCardinalityTests
     {
         var rows = new[] { new[] { "first" }, new[] { "last" } };
         Assert.Equal(rows, AnalysisSnapshot.Collect(rows, default).Rows);
-        Assert.Throws<AnalysisMemoryLimitException>(() => AnalysisSnapshot.Collect(rows, default, 100));
+        Assert.Throws<AnalysisMemoryLimitException>(() => AnalysisSnapshot.Collect(rows, default, memoryBudgetBytes: 100));
         Assert.Throws<IOException>(() => AnalysisSnapshot.Collect(new FailingRows(), default));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
@@ -400,7 +400,7 @@ public class HighCardinalityTests
     public void General_analysis_uses_worker_snapshot_and_preserves_source_rows() => OnSta(() =>
     {
         string path = Path.Combine(Path.GetTempPath(), $"nanum-analysis-{Guid.NewGuid():N}.csv");
-        File.WriteAllText(path, "value\nkeep1\nskip\nkeep2\n");
+        File.WriteAllText(path, "value,other\nkeep1,x\nskip,y\nkeep2,z\n");
         try
         {
             using var doc = VirtualCsvDocument.Open(path);
@@ -414,16 +414,18 @@ public class HighCardinalityTests
             int uiThread = Environment.CurrentManagedThreadId, workerThread = uiThread;
             long[]? sourceNumbers = null;
             string[]? values = null;
+            string?[]? unprojected = null;
             Action<AnalysisWork> compute = work =>
             {
                 workerThread = Environment.CurrentManagedThreadId;
                 sourceNumbers = work.SourceRows.Select(r => r.SourceRow).ToArray();
                 values = work.Rows.Select(r => r[0]).ToArray();
+                unprojected = work.Rows.Select(r => r[1]).ToArray();
                 entered.Set();
                 release.Task.GetAwaiter().GetResult();
                 work.Cancellation.ThrowIfCancellationRequested();
             };
-            var task = (Task)Invoke(form, "RunAnalysisAsync", compute, true)!;
+            var task = (Task)Invoke(form, "RunAnalysisAsync", new[] { 0 }, compute, true)!;
             try
             {
                 Assert.True(entered.Wait(TimeSpan.FromSeconds(3)));
@@ -443,6 +445,7 @@ public class HighCardinalityTests
                 Assert.NotEqual(uiThread, workerThread);
                 Assert.Equal(new long[] { 1, 3 }, sourceNumbers);
                 Assert.Equal(new[] { "keep1", "keep2" }, values);
+                Assert.Equal(new string?[] { null, null }, unprojected); // only column 0 was requested
                 Assert.False(Field<bool>(form, "_busy"));
             }
             finally { release.TrySetResult(); }

@@ -134,9 +134,10 @@ namespace NanumCsvViewer.Csv
 
         public static IReadOnlyList<DuplicateGroup> FindDuplicates(
             IReadOnlyList<(string[] Fields, long SourceRow)> rows, IReadOnlyList<int> columns,
-            CancellationToken cancellation = default, long memoryBudgetBytes = 128L * 1024 * 1024)
+            CancellationToken cancellation = default, long? memoryBudgetBytes = null)
         {
-            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            long budget = memoryBudgetBytes ?? AnalysisMemoryBudget.Current;
+            if (budget <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
             cancellation.ThrowIfCancellationRequested();
             long estimatedBytes = 0;
             var groups = new Dictionary<PivotCellKey, (List<string> Key, List<long> Rows)>();
@@ -148,12 +149,12 @@ namespace NanumCsvViewer.Csv
                 if (!groups.TryGetValue(composite, out var entry))
                 {
                     estimatedBytes += 256L + keyParts.Sum(v => 64L + v.Length * 2L);
-                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
                     entry = (keyParts, new List<long>());
                     groups[composite] = entry;
                 }
                 estimatedBytes += 16;
-                if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
                 entry.Rows.Add(row.SourceRow);
             }
 
@@ -172,9 +173,10 @@ namespace NanumCsvViewer.Csv
         public static GroupByResult GroupBy(
             IReadOnlyList<string[]> rows, IReadOnlyList<int> groupColumns, int valueColumn,
             IReadOnlyList<AggregationFunction> functions, CancellationToken cancellation = default,
-            long memoryBudgetBytes = 128L * 1024 * 1024)
+            long? memoryBudgetBytes = null)
         {
-            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            long budget = memoryBudgetBytes ?? AnalysisMemoryBudget.Current;
+            if (budget <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
             cancellation.ThrowIfCancellationRequested();
             var uniqueFunctions = functions.Distinct().ToArray();
             var groups = new Dictionary<PivotCellKey, PivotAccumulator[]>();
@@ -188,7 +190,7 @@ namespace NanumCsvViewer.Csv
                 if (!groups.TryGetValue(key, out var accumulators))
                 {
                     estimatedBytes += 256L + parts.Sum(v => 64L + v.Length * 2L) + uniqueFunctions.Length * 128L;
-                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
                     accumulators = uniqueFunctions.Select(f => new PivotAccumulator(f)).ToArray();
                     groups.Add(key, accumulators);
                 }
@@ -196,7 +198,7 @@ namespace NanumCsvViewer.Csv
                 foreach (var accumulator in accumulators)
                 {
                     estimatedBytes += accumulator.RetainedBytesFor(value);
-                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
                     accumulator.Add(value);
                 }
             }

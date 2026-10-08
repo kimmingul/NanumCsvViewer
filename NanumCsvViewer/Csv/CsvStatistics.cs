@@ -167,13 +167,14 @@ namespace NanumCsvViewer.Csv
         }
 
         public static ChiSquareResult ChiSquare(IReadOnlyList<(string Row, string Column)> rows,
-            CancellationToken cancellation = default, long memoryBudgetBytes = 128L * 1024 * 1024)
+            CancellationToken cancellation = default, long? memoryBudgetBytes = null)
         {
+            long budget = memoryBudgetBytes ?? AnalysisMemoryBudget.Current;
             cancellation.ThrowIfCancellationRequested();
             var rowLabels = rows.Select(r => r.Row).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             var columnLabels = rows.Select(r => r.Column).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
             long estimatedBytes = (rowLabels.Count + (long)columnLabels.Count) * 160L;
-            if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+            if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
             var rowIndexes = rowLabels.Select((label, index) => (label, index)).ToDictionary(x => x.label, x => x.index);
             var columnIndexes = columnLabels.Select((label, index) => (label, index)).ToDictionary(x => x.label, x => x.index);
             var observed = new Dictionary<int, double>?[rowLabels.Count];
@@ -188,7 +189,7 @@ namespace NanumCsvViewer.Csv
                 else
                 {
                     estimatedBytes += 96;
-                    if (estimatedBytes > memoryBudgetBytes) throw new AnalysisMemoryLimitException();
+                    if (estimatedBytes > budget) throw new AnalysisMemoryLimitException();
                     cells.Add(c, 1);
                 }
                 rowTotals[r]++;
