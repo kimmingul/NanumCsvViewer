@@ -36,7 +36,7 @@ namespace NanumCsvViewer.Stats
         public EvalScheme Scheme { get; init; } = EvalScheme.Holdout;
         public double TestFraction { get; init; } = 0.3;
         public int Folds { get; init; } = 5;
-        public long MemoryBudgetBytes { get; init; } = 1024L * 1024 * 1024;
+        public long MemoryBudgetBytes { get; init; } = AnalysisMemoryBudget.Current;
     }
 
     /// <summary>한 번 적합된 히스토그램 부스팅 모델. 예측은 학습에 쓴 분위 경계로 구간을 다시 매긴다.</summary>

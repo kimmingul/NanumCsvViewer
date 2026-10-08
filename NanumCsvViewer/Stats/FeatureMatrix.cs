@@ -9,7 +9,7 @@ namespace NanumCsvViewer.Stats
 
     public sealed record FeatureMatrixOptions
     {
-        public long MemoryBudgetBytes { get; init; } = 1024L * 1024 * 1024;
+        public long MemoryBudgetBytes { get; init; } = AnalysisMemoryBudget.Current;
         /// <summary>범주 특성 원-핫 전개와 범주 목표의 최대 수준 수.</summary>
         public int MaxLevels { get; init; } = 200;
     }
@@ -147,7 +147,7 @@ namespace NanumCsvViewer.Stats
                 for (int l = 0; l < sorted.Count; l++) { names.Add($"{h}={sorted[l]}"); sources.Add(featureColumns[k]); spec.Add((k, l)); }
             }
             int p = names.Count;
-            if ((long)n * p * 8L + (long)n * bytesPerRow > options.MemoryBudgetBytes) throw new AnalysisMemoryLimitException();
+            if ((long)n * p > AnalysisMemoryBudget.MaxArrayElements || (long)n * p * 8L + (long)n * bytesPerRow > options.MemoryBudgetBytes) throw new AnalysisMemoryLimitException();
 
             var x = new double[n, p];
             for (int i = 0; i < n; i++)

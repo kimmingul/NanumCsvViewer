@@ -354,6 +354,7 @@ namespace NanumCsvViewer.Tests
             RememberLastPanels = true, RememberWindow = false, ReopenLastWorkspace = true,
             ShowTypeBadges = false, MaxCellLines = 8, GridFontSize = 12f,
             DefaultEncoding = EncodingDetector.Cp949, DeleteIndexOnClose = true, RecentCount = 5,
+            AnalysisMemoryAuto = false, AnalysisMemoryManualGb = AnalysisMemoryBudget.MinimumManualGb,
         };
 
         [Fact]
@@ -390,6 +391,7 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal((d.RememberLastPanels, d.RememberWindow, d.ReopenLastWorkspace), (settings.RememberLastPanels, settings.RememberWindow, settings.ReopenLastWorkspace));
                 Assert.Equal((d.ShowTypeBadges, d.MaxCellLines, d.GridFontSize), (settings.ShowTypeBadges, settings.MaxCellLines, settings.GridFontSize));
                 Assert.Equal((d.DefaultEncoding, d.DeleteIndexOnClose, d.RecentCount), (settings.DefaultEncoding, settings.DeleteIndexOnClose, settings.RecentCount));
+                Assert.Equal((d.AnalysisMemoryAuto, d.AnalysisMemoryManualGb), (settings.AnalysisMemoryAuto, settings.AnalysisMemoryManualGb));
             });
         }
 
@@ -405,6 +407,44 @@ namespace NanumCsvViewer.Tests
                 Assert.True(dlg.ApplyAll());
                 Assert.Equal("auto", settings.DefaultEncoding);
                 Assert.Equal(12, settings.MaxCellLines);                             // 다른 쪽은 그대로
+            });
+        }
+
+        [Fact]
+        public void The_files_page_saves_auto_or_a_manual_cap_and_warns_when_the_cap_exceeds_available_memory()
+        {
+            var settings = new AppSettings();
+            OnForm(settings, form =>
+            {
+                using var dlg = new SettingsDialog(form, "files");
+                var page = dlg.CurrentPage!;
+                T Get<T>(string name) => (T)page.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(page)!;
+                var mode = Get<ComboBox>("_memMode");
+                var gb = Get<NumericUpDown>("_memGb");
+                var warn = Get<Label>("_memWarn");
+                var info = Get<Label>("_memInfo");
+
+                Assert.Equal(0, mode.SelectedIndex);                       // 기본은 자동이고 값 칸은 잠겨 있다
+                Assert.False(gb.Enabled);
+                Assert.Contains("GB", info.Text);
+
+                mode.SelectedIndex = 1;
+                Assert.True(gb.Enabled);
+                gb.Value = gb.Minimum;
+                Assert.True(dlg.ApplyAll());
+                Assert.False(settings.AnalysisMemoryAuto);
+                Assert.Equal(AnalysisMemoryBudget.MinimumManualGb, settings.AnalysisMemoryManualGb);
+
+                gb.Value = gb.Maximum;                                     // 물리 메모리 전부: 가용 메모리를 넘으니 경고하되 저장은 된다
+                Assert.NotEqual("", warn.Text);
+                Assert.True(dlg.ApplyAll());
+                Assert.Equal((double)gb.Maximum, settings.AnalysisMemoryManualGb);
+
+                mode.SelectedIndex = 0;
+                Assert.True(dlg.ApplyAll());
+                Assert.True(settings.AnalysisMemoryAuto);
+                Assert.Equal((double)gb.Maximum, settings.AnalysisMemoryManualGb);   // 마지막 직접 값은 기억한다
+                Assert.Equal(0, mode.SelectedIndex);
             });
         }
 

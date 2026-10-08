@@ -20,7 +20,7 @@ namespace NanumCsvViewer.Csv.DataQuality
         public bool? CaseInsensitiveColumnMatch { get; init; }
         public IReadOnlyList<string> RequiredColumns { get; init; } = Array.Empty<string>();
         public IReadOnlyList<ConformanceColumnSpec> Columns { get; init; } = Array.Empty<ConformanceColumnSpec>();
-        /// <summary>null = <see cref="ConformanceProfileJson.DefaultReferenceBudgetBytes"/>. 0 이하는 오류.</summary>
+        /// <summary>null = <see cref="ConformanceProfileJson.DefaultReferenceBudgetBytes"/>(공용 분석 메모리 예산). 0 이하는 오류.</summary>
         public long? ReferenceMemoryBudgetBytes { get; init; }
 
         public bool MatchColumnsIgnoreCase => CaseInsensitiveColumnMatch ?? true;
@@ -123,7 +123,8 @@ namespace NanumCsvViewer.Csv.DataQuality
     public static class ConformanceProfileJson
     {
         public const int SupportedSchemaVersion = 1;
-        public const long DefaultReferenceBudgetBytes = 256L * 1024 * 1024;
+        /// <summary>참조 키·코드 집합의 기본 예산: 설정의 공용 분석 메모리 예산(<see cref="AnalysisMemoryBudget.Current"/>).</summary>
+        public static long DefaultReferenceBudgetBytes => AnalysisMemoryBudget.Current;
 
         private static readonly JsonSerializerOptions Options = new()
         {

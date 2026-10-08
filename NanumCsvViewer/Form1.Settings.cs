@@ -6,17 +6,30 @@ namespace NanumCsvViewer
     // v3.2: 설정 대화 상자(Settings/SettingsDialog.cs)가 부르는 적용 지점. 설정 값은 AppSettings에 저장하고 화면에 즉시 반영한다.
     public partial class Form1
     {
-        /// <summary>설정 대화 상자를 연다. page: general · panels · grid · files · ai · shortcuts (null이면 마지막으로 본 쪽).</summary>
-        internal void ShowSettings(string? page = null)
+        /// <summary>설정 대화 상자를 연다. page: general · panels · grid · files · ai · shortcuts (null이면 마지막으로 본 쪽). owner: 모달 대화 상자 위에서 열 때 그 대화 상자(null이면 이 창).</summary>
+        internal void ShowSettings(string? page = null, IWin32Window? owner = null)
         {
             bool again;
             do
             {
                 using var dlg = new SettingsDialog(this, page);
-                dlg.ShowDialog(this);
+                dlg.ShowDialog(owner ?? this);
                 again = dlg.ReopenRequested;   // 테마를 바꿔 적용했다: 새 색으로 같은 쪽을 다시 연다
                 page = dlg.CurrentPage?.Id;
             } while (again && !IsDisposed);
+        }
+
+        /// <summary>
+        /// 분석 메모리 예산 초과 안내. 본문 뒤에 설정에서 상한을 올릴 수 있다는 문장을 붙이고, 예(Yes)를 누르면 설정의 '파일과 데이터' 쪽을 연다.
+        /// </summary>
+        internal void ShowMemoryBudgetExceeded(IWin32Window? owner, string message, string? caption = null)
+        {
+            if (IsDisposed || _closing) return;
+            string text = message + "\n\n" + LT(
+                "The analysis memory cap can be raised in Settings (Files & Data). Open Settings now?",
+                "설정에서 상한을 올릴 수 있습니다. 지금 설정(파일과 데이터)을 여시겠습니까?");
+            var answer = MessageBox.Show(owner ?? this, text, caption ?? Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (answer == DialogResult.Yes && !IsDisposed) ShowSettings("files", owner);
         }
 
         internal AppSettings AppSettingsRef => _settings;

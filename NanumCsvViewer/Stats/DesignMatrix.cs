@@ -28,8 +28,8 @@ namespace NanumCsvViewer.Stats
         public ResponseKind Response { get; init; } = ResponseKind.Numeric;
         /// <summary>이진 응답이 범주형일 때 1로 볼 수준. null이면 정렬상 두 번째 수준.</summary>
         public string? BinaryEventLevel { get; init; }
-        /// <summary>압축 보관 + 설계행렬의 보수적 예상 바이트. 초과 시 AnalysisMemoryLimitException(부분 결과 없음).</summary>
-        public long MemoryBudgetBytes { get; init; } = 1024L * 1024 * 1024;
+        /// <summary>압축 보관 + 설계행렬의 보수적 예상 바이트(기본: 설정의 공용 분석 메모리 예산). 초과 시 AnalysisMemoryLimitException(부분 결과 없음).</summary>
+        public long MemoryBudgetBytes { get; init; } = AnalysisMemoryBudget.Current;
         public int MaxLevelsPerFactor { get; init; } = 500;
         /// <summary>설계행렬 최대 열 수. XᵀX 누적(p²)과 역행렬 비용을 묶는다.</summary>
         public int MaxColumns { get; init; } = 1000;
@@ -308,7 +308,7 @@ namespace NanumCsvViewer.Stats
 
             int p = colNames.Count;
             if (p == 0) throw new DesignMatrixException("The model has no columns (no intercept and no terms).");
-            if ((long)n * p * 8L + (long)n * bytesPerRow > budget) throw new AnalysisMemoryLimitException();
+            if ((long)n * p > AnalysisMemoryBudget.MaxArrayElements || (long)n * p * 8L + (long)n * bytesPerRow > budget) throw new AnalysisMemoryLimitException();
 
             var x = new double[n, p];
             for (int i = 0; i < n; i++)

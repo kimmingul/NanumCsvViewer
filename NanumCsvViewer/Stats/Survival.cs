@@ -92,7 +92,7 @@ namespace NanumCsvViewer.Stats
         /// <summary>그림에 넣는 중도절단 표식 상한. 넘으면 시드 고정 저수지 표본이고 결과에 표시한다.</summary>
         public const int PlotCensorCap = 4000;
         public const int PlotStepCap = 4000;
-        public const long MemoryBudgetBytes = 1024L * 1024 * 1024;
+        public static long MemoryBudgetBytes => AnalysisMemoryBudget.Current;
 
         /// <summary>
         /// Kaplan–Meier(사건 시각만, statsmodels SurvfuncRight compress=True)와 로그순위·Gehan–Breslow.
@@ -541,7 +541,7 @@ namespace NanumCsvViewer.Stats
                     "No complete rows. Time must be numeric and >= 0. Leave the event level blank only for a 0/1 event column; otherwise enter the event level.");
 
             long bytes = (long)keep.Count * p * 8 + (long)keep.Count * 16;
-            if (bytes > 1024L * 1024 * 1024) throw new AnalysisMemoryLimitException();
+            if ((long)keep.Count * p > AnalysisMemoryBudget.MaxArrayElements || bytes > AnalysisMemoryBudget.Current) throw new AnalysisMemoryLimitException();
 
             // 절편을 빼고 사건·음수 시간으로 빠진 행만 남긴 압축 행렬. 예산 초과 시 부분 결과 없이 중단.
             var x = new double[keep.Count, p];

@@ -1,20 +1,5 @@
 namespace NanumCsvViewer.Csv;
 
-/// <summary>
-/// Memory budget for in-memory analysis data: 25% of the memory available to the process, but at least 512 MB and at most 4 GB.
-/// (A fixed 128 MB refused a 150k-row × 61-column file even when the analysis needed two columns.)
-/// </summary>
-internal static class AnalysisMemoryBudget
-{
-    public const long MinimumBytes = 512L * 1024 * 1024;
-    public const long MaximumBytes = 4L * 1024 * 1024 * 1024;
-
-    public static long ForAvailableMemory(long totalAvailableBytes)
-        => Math.Min(Math.Max(MinimumBytes, totalAvailableBytes / 4), MaximumBytes);
-
-    public static long Current => ForAvailableMemory(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
-}
-
 /// <summary>A detached, complete row snapshot for modeless analysis windows.</summary>
 internal sealed record AnalysisSnapshot(List<string[]> Rows)
 {
@@ -87,5 +72,5 @@ internal sealed record AnalysisSnapshot(List<string[]> Rows)
 
 public sealed class AnalysisMemoryLimitException : InvalidOperationException
 {
-    public AnalysisMemoryLimitException() : base("This analysis exceeds its memory budget. Filter the data or select fewer columns and try again.") { }
+    public AnalysisMemoryLimitException() : base("This analysis exceeds its memory budget. Filter the data or select fewer columns and try again. The limit can be raised in Settings.") { }
 }

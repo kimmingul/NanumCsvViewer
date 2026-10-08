@@ -34,8 +34,8 @@ namespace NanumCsvViewer.Csv.DataQuality
         public bool Trim { get; init; }
         public int MaxExamples { get; init; } = 20;
         public int DegreeOfParallelism { get; init; } = Math.Max(1, Environment.ProcessorCount - 1);
-        /// <summary>부모 키 집합의 보수적 예상 바이트. 초과 시 예외, 부분 결과 없음. 프로세스 RAM 하드 제한이 아니다.</summary>
-        public long ParentKeyMemoryBudgetBytes { get; init; } = 256L * 1024 * 1024;
+        /// <summary>부모 키 집합의 보수적 예상 바이트(기본: 설정의 공용 분석 메모리 예산). 초과 시 예외, 부분 결과 없음. 프로세스 RAM 하드 제한이 아니다.</summary>
+        public long ParentKeyMemoryBudgetBytes { get; init; } = AnalysisMemoryBudget.Current;
     }
 
     /// <summary>

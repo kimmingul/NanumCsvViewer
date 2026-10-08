@@ -60,6 +60,7 @@ public class HighCardinalityTests
     [InlineData(AggregationFunction.UniqueCount, 3)]
     public void Multi_measure_pivot_recovers_from_real_memory_budget_failure(AggregationFunction function, double expected) => OnSta(() =>
     {
+        using var budget = AnalysisMemoryBudget.Override(256L * 1024 * 1024);   // 이 시험은 피벗 예산이 256 MB일 때 100,000행에서 실제로 초과하는 것을 본다(기본 예산은 PC 메모리에 따라 훨씬 크다)
         var rows = new GeneratedRows();
         using var pivot = new PivotForm(new[] { "value" }, Array.Empty<ColumnSummary>(), rows, ThemePalette.Light, AppTheme.Light);
         for (int i = 0; i < 32; i++)

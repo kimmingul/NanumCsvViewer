@@ -202,18 +202,6 @@ public class AnalysisProjectionTests
         Assert.Throws<ArgumentOutOfRangeException>(() => AnalysisSnapshot.Collect(rows, default, new[] { -1 }));
     }
 
-    [Theory]
-    [InlineData(1L << 30, 512L << 20)]         // 1 GB machine → floor
-    [InlineData(8L << 30, 2L << 30)]           // 25 %
-    [InlineData(16L << 30, 4L << 30)]
-    [InlineData(128L << 30, 4L << 30)]         // ceiling
-    public void Budget_is_a_quarter_of_available_memory_between_512_MB_and_4_GB(long available, long expected)
-        => Assert.Equal(expected, AnalysisMemoryBudget.ForAvailableMemory(available));
-
-    [Fact]
-    public void Current_budget_is_within_bounds() =>
-        Assert.InRange(AnalysisMemoryBudget.Current, AnalysisMemoryBudget.MinimumBytes, AnalysisMemoryBudget.MaximumBytes);
-
     // ------------------------------------------------------------------ wide file (the reported failure)
 
     private sealed class WideRows(int count, int width) : IReadOnlyList<string[]>

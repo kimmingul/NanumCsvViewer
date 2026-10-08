@@ -71,8 +71,12 @@ namespace NanumCsvViewer
 
         private static string LT(string en, string ko) => Loc.CurrentLanguage == "ko" ? ko : en;
 
-        public PivotForm(string[] headers, ColumnSummary[] summaries, IReadOnlyList<string[]> rows, ThemePalette palette, AppTheme theme)
+        private readonly Form1? _host;
+
+        /// <param name="host">예산 초과 안내에서 설정 대화 상자를 열 때 쓰는 주 창(null이면 안내만).</param>
+        public PivotForm(string[] headers, ColumnSummary[] summaries, IReadOnlyList<string[]> rows, ThemePalette palette, AppTheme theme, Form1? host = null)
         {
+            _host = host;
             _headers = headers;
             _summaries = summaries;
             _rows = rows;
@@ -568,7 +572,7 @@ namespace NanumCsvViewer
             var filters = Filters();
             var groupings = DateGroupings();
             var rowNames = rowDims.Select(ColName).ToArray();
-            long memoryBudget = 256L * 1024 * 1024 / (measures.Length * 4L);
+            long memoryBudget = AnalysisMemoryBudget.Current / (measures.Length * 4L);
 
             Cursor = Cursors.WaitCursor;
             _operationStatus.Text = "";
@@ -616,8 +620,11 @@ namespace NanumCsvViewer
             catch (OperationCanceledException) { }
             catch (PivotMemoryLimitException)
             {
-                ShowOperationError(LT("This pivot exceeds the memory budget. Filter the rows, group dates, or reduce dimensions/measures. The previous result is preserved.",
-                    "피벗의 예상 메모리가 예산을 초과했습니다. 행 필터·날짜 그룹을 적용하거나 차원·측정값을 줄여 주세요. 이전 결과는 유지됩니다."));
+                string message = LT("This pivot exceeds the memory budget. Filter the rows, group dates, or reduce dimensions/measures. The previous result is preserved.",
+                    "피벗의 예상 메모리가 예산을 초과했습니다. 행 필터·날짜 그룹을 적용하거나 차원·측정값을 줄여 주세요. 이전 결과는 유지됩니다.");
+                ShowOperationError(message);
+                // 컨트롤을 다시 켠 뒤(finally 다음) 안내한다. 이 대화 상자 위에서 설정을 연다.
+                if (_host is not null && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) _host.ShowMemoryBudgetExceeded(this, message, Text); });
             }
             catch (Exception ex)
             {

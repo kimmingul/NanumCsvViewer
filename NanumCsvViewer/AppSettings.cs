@@ -22,6 +22,13 @@ namespace NanumCsvViewer
         /// <summary>CSV를 닫을 때(다른 파일 열기·종료) 해당 파일의 영속 인덱스 캐시를 삭제할지 여부.</summary>
         public bool DeleteIndexOnClose { get; set; } = false;
 
+        // ---- v3.4.2 분석 메모리 상한
+        /// <summary>true면 분석 메모리 예산을 이 PC 물리 메모리의 50%(최소 512 MB, 상한 없음)로 자동 정한다.</summary>
+        public bool AnalysisMemoryAuto { get; set; } = true;
+        /// <summary>수동 상한(GB). 0 = 아직 정하지 않음(설정 화면이 자동 값으로 채운다). 수동 모드에서도 물리 메모리를 넘는 값은 물리 메모리로 제한된다.</summary>
+        public double AnalysisMemoryManualGb { get; set; } = 0;
+        public const double MaxAnalysisMemoryGb = 1 << 20;
+
         // ---- v2 AI 에이전트
         /// <summary>omp 실행 파일 경로. 비우면 자동 탐색.</summary>
         public string? AgentOmpPath { get; set; }
@@ -159,6 +166,8 @@ namespace NanumCsvViewer
             MaxCellLines = Math.Clamp(MaxCellLines, 1, 20);
             GridFontSize = GridFontSize <= 0 || float.IsNaN(GridFontSize) ? 0f : Math.Clamp(GridFontSize, 7f, 24f);
             DefaultEncoding = DefaultEncoding is EncodingDetector.Utf8 or EncodingDetector.Cp949 ? DefaultEncoding : AutoEncoding;
+            AnalysisMemoryManualGb = double.IsNaN(AnalysisMemoryManualGb) || AnalysisMemoryManualGb <= 0 ? 0
+                : Math.Clamp(AnalysisMemoryManualGb, AnalysisMemoryBudget.MinimumManualGb, MaxAnalysisMemoryGb);
             RecentCount = Math.Clamp(RecentCount, 1, MaxRecentWorkspaces);
             RecentWorkspaces ??= new();
             TrimRecent();
@@ -191,6 +200,7 @@ namespace NanumCsvViewer
         {
             var d = new AppSettings();
             DefaultEncoding = d.DefaultEncoding; DeleteIndexOnClose = d.DeleteIndexOnClose; RecentCount = d.RecentCount;
+            AnalysisMemoryAuto = d.AnalysisMemoryAuto; AnalysisMemoryManualGb = d.AnalysisMemoryManualGb;
         }
 
         /// <summary>테스트가 사용자의 실제 설정 파일(%APPDATA%\NanumCsvViewer\settings.json)을 건드리지 않도록 설정 폴더를 바꾸는 이음매. 앱은 쓰지 않는다.</summary>

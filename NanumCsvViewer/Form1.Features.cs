@@ -608,10 +608,16 @@ namespace NanumCsvViewer
             catch (Exception ex)
             {
                 if (!_closing && !IsDisposed && !cancellation.IsCancellationRequested)
-                    MessageBox.Show(this, ex is AnalysisMemoryLimitException
-                        ? LT("The complete analysis data exceeds the memory budget. Filter the rows and retry. No partial result was produced.",
-                            "전체 분석 데이터가 메모리 예산을 초과했습니다. 행 필터를 적용한 뒤 다시 시도하세요. 일부 행만 분석한 결과는 생성하지 않았습니다.")
-                        : Stats.ErrorText.Localize(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                {
+                    if (ex is AnalysisMemoryLimitException)
+                    {
+                        // 바쁨 표시를 푼 뒤(finally 다음) 안내를 띄운다: 설정 대화 상자가 분석 중 상태에서 열리지 않게.
+                        BeginInvoke(() => ShowMemoryBudgetExceeded(this,
+                            LT("The complete analysis data exceeds the memory budget. Filter the rows and retry. No partial result was produced.",
+                                "전체 분석 데이터가 메모리 예산을 초과했습니다. 행 필터를 적용한 뒤 다시 시도하세요. 일부 행만 분석한 결과는 생성하지 않았습니다.")));
+                    }
+                    else MessageBox.Show(this, Stats.ErrorText.Localize(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return null;
             }
             finally
@@ -1983,6 +1989,7 @@ namespace NanumCsvViewer
                 Summaries = shareCtx?.Summaries ?? _columnSummaries,
                 Palette = _palette,
                 RefreshRowsAsync = () => GatherAnalysisSnapshotAsync(doc),
+                OpenMemorySettings = () => ShowSettings("files"),
             };
             ctx.OpenChart = (k, p) => OpenChartBuilder(k, p, ctx);
 
@@ -2026,7 +2033,7 @@ namespace NanumCsvViewer
         {
             if (_closing || _doc is null || !_doc.IndexingComplete || _busy) return;
             var rows = _doc.SnapshotViewRows();
-            using var form = new PivotForm(_doc.Header, _columnSummaries, rows, _palette, _theme);
+            using var form = new PivotForm(_doc.Header, _columnSummaries, rows, _palette, _theme, this);
             _pivotForm = form;
             if (chartTab) form.SelectChartTab();
             try { form.ShowDialog(this); }
@@ -2538,11 +2545,10 @@ namespace NanumCsvViewer
                 catch (ReferentialIntegrityBudgetException)
                 {
                     statusLabel.Text = LT("Referential check stopped", "참조 검사 중단");
-                    MessageBox.Show(this,
+                    BeginInvoke(() => ShowMemoryBudgetExceeded(this,
                         LT("The parent key set exceeds the memory budget. No partial result was kept. Narrow the parent table or key columns.",
                            "부모 키 집합이 메모리 예산을 초과했습니다. 부분 결과는 남기지 않았습니다. 부모 테이블이나 키 컬럼을 줄여 주세요."),
-                        LT("Referential Integrity", "참조 무결성 검사"),
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        LT("Referential Integrity", "참조 무결성 검사")));
                     return;
                 }
                 catch (Exception ex)
@@ -2796,11 +2802,10 @@ namespace NanumCsvViewer
             catch (ConformanceBudgetException)
             {
                 statusLabel.Text = LT("Conformance profile stopped", "적합성 프로파일 중단");
-                MessageBox.Show(this,
+                BeginInvoke(() => ShowMemoryBudgetExceeded(this,
                     LT("A reference key set exceeded the memory budget. No partial result was kept. Narrow the domain or the reference file.",
                        "참조 키 집합이 메모리 예산을 초과했습니다. 부분 결과는 남기지 않았습니다. 도메인이나 참조 파일을 줄여 주세요."),
-                    LT("Conformance Profile", "적합성 프로파일"),
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    LT("Conformance Profile", "적합성 프로파일")));
                 return;
             }
             catch (ConformanceSchemaException ex)

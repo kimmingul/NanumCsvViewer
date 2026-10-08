@@ -16,6 +16,8 @@ namespace NanumCsvViewer
         public Func<Task<AnalysisSnapshot?>>? RefreshRowsAsync { get; init; }
         /// <summary>새 차트 창 열기(드릴다운) — Form1이 생성·수명 관리. 자기참조 클로저라 생성 후 주입.</summary>
         public Action<ChartKind, int[]?>? OpenChart { get; set; }
+        /// <summary>예산 초과 안내에서 설정의 분석 메모리 상한 쪽을 연다(Form1이 주입).</summary>
+        public Action? OpenMemorySettings { get; init; }
     }
 
     /// <summary>
@@ -413,11 +415,19 @@ namespace NanumCsvViewer
                         if (IsDisposed || _pendingModel is not null) continue;
                         _plot.SetModel(null, _ctx.Palette);
                         RebuildBadges(null);
+                        bool overBudget = ex is AnalysisMemoryLimitException;
                         _badgeStrip.Controls.Add(new Label { AutoSize = true,
-                            Text = ex is AnalysisMemoryLimitException
-                                ? LT("This chart exceeds the calculation or display budget. Filter rows or select fewer columns (up to 128 for a heatmap).",
-                                    "차트의 계산·표시 예산을 초과했습니다. 행 필터를 적용하거나 컬럼 수를 줄이세요(히트맵 최대 128개).")
+                            Text = overBudget
+                                ? LT("This chart exceeds the calculation or display budget. Filter rows or select fewer columns (up to 128 for a heatmap). The limit can be raised in Settings.",
+                                    "차트의 계산·표시 예산을 초과했습니다. 행 필터를 적용하거나 컬럼 수를 줄이세요(히트맵 최대 128개). 설정에서 상한을 올릴 수 있습니다.")
                                 : ex.Message, ForeColor = _ctx.Palette.Text });
+                        if (overBudget && _ctx.OpenMemorySettings is { } openSettings)
+                        {
+                            var link = new LinkLabel { AutoSize = true, Text = LT("Open Settings", "설정 열기"),
+                                LinkColor = _ctx.Palette.Text, ActiveLinkColor = _ctx.Palette.Text };
+                            link.LinkClicked += (_, _) => openSettings();
+                            _badgeStrip.Controls.Add(link);
+                        }
                     }
                 }
             }

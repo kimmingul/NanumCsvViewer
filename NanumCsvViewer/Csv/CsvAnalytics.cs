@@ -293,9 +293,10 @@ namespace NanumCsvViewer.Csv
             IReadOnlyList<PivotFilter>? filters = null,
             IReadOnlyDictionary<int, DateBinPeriod>? dateGroupings = null,
             CancellationToken cancellation = default,
-            long memoryBudgetBytes = 256L * 1024 * 1024)
+            long? memoryBudgetBytes = null)
         {
-            if (memoryBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
+            long budget = memoryBudgetBytes ?? AnalysisMemoryBudget.Current;
+            if (budget <= 0) throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes));
             cancellation.ThrowIfCancellationRequested();
             long estimatedBytes = 0;
             dateGroupings ??= new Dictionary<int, DateBinPeriod>();
@@ -327,11 +328,11 @@ namespace NanumCsvViewer.Csv
                     // retained strings. Fail before expansion, never return partial totals.
                     estimatedBytes += 512L + (rowKey.Length + columnKey.Length) * 64L +
                         rowKey.Sum(v => 2L * v.Length) + columnKey.Sum(v => 2L * v.Length);
-                    if (estimatedBytes > memoryBudgetBytes) throw new PivotMemoryLimitException();
+                    if (estimatedBytes > budget) throw new PivotMemoryLimitException();
                     raw[cellKey] = accumulator = new PivotAccumulator(function);
                 }
                 estimatedBytes += accumulator.RetainedBytesFor(value);
-                if (estimatedBytes > memoryBudgetBytes) throw new PivotMemoryLimitException();
+                if (estimatedBytes > budget) throw new PivotMemoryLimitException();
                 accumulator.Add(value);
             }
 
