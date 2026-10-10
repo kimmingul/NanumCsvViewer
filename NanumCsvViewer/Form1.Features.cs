@@ -2458,7 +2458,8 @@ namespace NanumCsvViewer
 
                 int[] childCols;
                 int[] parentCols;
-                ReferentialIntegrityOptions options;
+                // 예산(AnalysisMemoryBudget.Current)은 읽을 때 예외를 던질 수 있어 UI 스레드에서 옵션을 만들지 않고 검사 작업 안에서 만든다.
+                bool skipBlankChildKeys, caseSensitive, trimKeys;
                 using (var dlg = new ParamDialog(LT("Referential Integrity", "참조 무결성 검사"), _palette))
                 {
                     dlg.AddNote(LT(
@@ -2496,12 +2497,9 @@ namespace NanumCsvViewer
                             LT("Child and parent column counts must match.", "자식·부모 컬럼 개수가 같아야 합니다."));
                         return;
                     }
-                    options = new ReferentialIntegrityOptions
-                    {
-                        SkipBlankChildKeys = blank.SelectedIndex == 0,
-                        CaseSensitive = cmp.SelectedIndex == 0,
-                        Trim = trim.SelectedIndex == 1,
-                    };
+                    skipBlankChildKeys = blank.SelectedIndex == 0;
+                    caseSensitive = cmp.SelectedIndex == 0;
+                    trimKeys = trim.SelectedIndex == 1;
                 }
 
                 if (!ReferenceEquals(_doc, doc) || _busy) return;
@@ -2536,13 +2534,19 @@ namespace NanumCsvViewer
                         RowCount = parentDoc.DataRowsAvailable,
                         Name = parentName,
                     };
+                    var options = new ReferentialIntegrityOptions
+                    {
+                        SkipBlankChildKeys = skipBlankChildKeys,
+                        CaseSensitive = caseSensitive,
+                        Trim = trimKeys,
+                    };
                     return ReferentialIntegrityScanner.Scan(
                         childSrc, childCols, parentSrc, parentCols, options, scanProgress, cts.Token);
                 }, cts.Token);
                 _qualityTask = task;
                 try { result = await task; }
                 catch (OperationCanceledException) { return; }
-                catch (ReferentialIntegrityBudgetException)
+                catch (Exception ex) when (ex is ReferentialIntegrityBudgetException or AnalysisMemoryLimitException)
                 {
                     statusLabel.Text = LT("Referential check stopped", "참조 검사 중단");
                     BeginInvoke(() => ShowMemoryBudgetExceeded(this,
@@ -2799,7 +2803,7 @@ namespace NanumCsvViewer
             _qualityTask = task;
             try { result = await task; }
             catch (OperationCanceledException) { return; }
-            catch (ConformanceBudgetException)
+            catch (Exception ex) when (ex is ConformanceBudgetException or AnalysisMemoryLimitException)
             {
                 statusLabel.Text = LT("Conformance profile stopped", "적합성 프로파일 중단");
                 BeginInvoke(() => ShowMemoryBudgetExceeded(this,

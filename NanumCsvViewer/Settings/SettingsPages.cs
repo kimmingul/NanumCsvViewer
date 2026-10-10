@@ -403,9 +403,10 @@ namespace NanumCsvViewer
         private readonly NumericUpDown _recent;
         private readonly ComboBox _memMode;
         private readonly NumericUpDown _memGb;
-        private readonly Label _memInfo, _memWarn;
+        private readonly Label _memInfo, _memBudget, _memWarn;
         private bool _memLoading;
         private double _lastManualGb;
+        private double _lastReserveGb;
 
         public override string Id => "files";
         public override string Title => LT("Files & Data", "파일과 데이터");
@@ -424,7 +425,7 @@ namespace NanumCsvViewer
             Heading(() => LT("Analysis memory", "분석 메모리"));
             _memMode = new ComboBox
             {
-                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Width = 190,
+                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Width = 190, DropDownWidth = 300,
                 BackColor = P.Surface, ForeColor = P.Text, Margin = new Padding(0, 0, 8, 0),
             };
             _memGb = new NumericUpDown
@@ -437,7 +438,7 @@ namespace NanumCsvViewer
             memRow.Controls.Add(_memMode);
             memRow.Controls.Add(_memGb);
             memRow.Controls.Add(unit);
-            LabeledRow(() => LT("Analysis memory cap", "분석 메모리 상한"), memRow);
+            LabeledRow(() => LT("Analysis memory policy", "분석 메모리 방식"), memRow);
             Relabel(() =>
             {
                 int index = _memMode.SelectedIndex;
@@ -445,19 +446,22 @@ namespace NanumCsvViewer
                 _memMode.Items.Clear();
                 _memMode.Items.Add(LT("Auto (50% of memory)", "자동 (메모리의 50%)"));
                 _memMode.Items.Add(LT("Manual", "직접 지정"));
+                _memMode.Items.Add(LT("Keep RAM free", "여유 RAM 확보"));
                 _memMode.EndUpdate();
                 SelectIndex(_memMode, index);
             });
             _memInfo = Note(MemoryInfoText);
+            _memBudget = Note(MemoryBudgetText);
             _memWarn = Note(MemoryWarningText);
             _memWarn.ForeColor = Color.FromArgb(205, 120, 20);
-            Note(() => LT("Applies to the in-memory analyses: basic statistics, charts, group-by, duplicates, chi-square, pivot, data-quality reference sets and the advanced statistics. Auto uses 50% of this PC's memory (at least 512 MB, no upper limit). DuckDB workspace queries have their own limit and are not affected.",
-                "메모리 안에서 계산하는 분석(기본 통계·차트·그룹별 집계·중복 찾기·카이제곱·피벗·품질 참조 집합·고급 통계)에 적용됩니다. 자동은 이 PC 메모리의 50%(최소 512 MB, 상한 없음)입니다. DuckDB 작업 공간 질의는 별도 상한을 쓰며 영향받지 않습니다."));
+            Note(() => LT("Applies to in-memory analyses: basic statistics, charts, group-by, duplicates, chi-square, pivot, data-quality reference sets and advanced statistics. Auto uses 50% of physical RAM (at least 512 MB); Manual sets an analysis cap. Keep RAM free sets the RAM to leave available: the budget is available RAM minus this value, with no minimum budget. If no room remains, analysis stops. Available RAM is sampled when an analysis obtains its budget; this is not a process-wide hard limit and cannot guarantee free RAM during concurrent work. DuckDB workspace queries have a separate limit.",
+                "메모리 안에서 계산하는 분석(기본 통계·차트·그룹 집계·중복·카이제곱·피벗·품질 참조 집합·고급 통계)에 적용합니다. 자동은 물리 RAM의 50%(최소 512 MB), 직접 지정은 분석 상한입니다. 여유 RAM 확보에서는 남겨 둘 RAM을 지정하고, 사용 가능한 RAM에서 그 값을 뺀 예산을 씁니다. 예산의 하한은 없으며 여유가 없으면 분석을 중단합니다. 예산을 얻을 때의 가용 RAM이 기준이며, 프로세스 전체의 강제 상한이나 동시 작업 중의 여유 RAM을 보장하지는 않습니다. DuckDB 작업 공간 질의는 별도 상한입니다."));
             _memMode.SelectedIndexChanged += (_, _) => { if (!Relocalizing && !_memLoading) SyncMemoryUi(); };
             _memGb.ValueChanged += (_, _) =>
             {
                 if (_memLoading) return;
                 if (_memMode.SelectedIndex == 1) _lastManualGb = (double)_memGb.Value;
+                if (_memMode.SelectedIndex == 2) _lastReserveGb = (double)_memGb.Value;
                 RefreshMemoryTexts();
             };
 
@@ -477,22 +481,40 @@ namespace NanumCsvViewer
 
         private static string Gb(long bytes) => (bytes / AnalysisMemoryBudget.BytesPerGb).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
-        /// <summary>지금 입력 칸이 뜻하는 상한(바이트).</summary>
+        /// <summary>선택한 방식과 입력값으로 현재 분석 예산을 미리 계산한다.</summary>
         private long EffectiveBytes()
         {
             long physical = AnalysisMemoryBudget.PhysicalBytes;
-            return _memMode.SelectedIndex == 1
-                ? AnalysisMemoryBudget.ForManual((double)_memGb.Value, physical)
-                : AnalysisMemoryBudget.ForPhysicalMemory(physical);
+            return _memMode.SelectedIndex switch
+            {
+                1 => AnalysisMemoryBudget.ForManual((double)_memGb.Value, physical),
+                2 => AnalysisMemoryBudget.ForReserve((double)_memGb.Value, AnalysisMemoryBudget.AvailableBytes),
+                _ => AnalysisMemoryBudget.ForPhysicalMemory(physical),
+            };
         }
 
         private string MemoryInfoText()
             => LT($"This PC's memory: {Gb(AnalysisMemoryBudget.PhysicalBytes)} GB, currently available: {Gb(AnalysisMemoryBudget.AvailableBytes)} GB",
                 $"이 PC 메모리: {Gb(AnalysisMemoryBudget.PhysicalBytes)} GB, 현재 사용 가능: {Gb(AnalysisMemoryBudget.AvailableBytes)} GB");
 
+        private string MemoryBudgetText()
+            => _memMode.SelectedIndex == 2
+                ? LT($"GB sets the RAM to leave free. Current analysis budget: {Gb(EffectiveBytes())} GB.",
+                    $"GB 값은 남겨 둘 RAM입니다. 현재 분석 예산: {Gb(EffectiveBytes())} GB.")
+                : LT($"GB sets the analysis cap. Current analysis budget: {Gb(EffectiveBytes())} GB.",
+                    $"GB 값은 분석 상한입니다. 현재 분석 예산: {Gb(EffectiveBytes())} GB.");
+
         private string MemoryWarningText()
         {
             long available = AnalysisMemoryBudget.AvailableBytes;
+            if (_memMode.SelectedIndex == 2)
+            {
+                if (available <= 0)
+                    return LT("Available RAM could not be read. Analyses using this policy will stop.",
+                        "사용 가능한 RAM을 확인하지 못했습니다. 이 방식의 분석은 중단됩니다.");
+                return EffectiveBytes() > 0 ? "" : LT("Available RAM is at or below the reserve. Analysis will stop; reduce the reserve or free memory.",
+                    "사용 가능한 RAM이 남겨 둘 여유 이하입니다. 분석이 중단됩니다. 여유 값을 줄이거나 메모리를 확보하세요.");
+            }
             if (available <= 0 || EffectiveBytes() <= available) return "";
             return LT($"This cap ({Gb(EffectiveBytes())} GB) is more than the memory available right now ({Gb(available)} GB). Large analyses may page to disk and slow down, or the app may crash. You can still save it.",
                 $"이 상한({Gb(EffectiveBytes())} GB)이 현재 사용 가능한 메모리({Gb(available)} GB)보다 큽니다. 큰 분석은 디스크 페이징으로 매우 느려지거나 앱이 중단될 수 있습니다. 그래도 저장할 수 있습니다.");
@@ -501,24 +523,28 @@ namespace NanumCsvViewer
         private void RefreshMemoryTexts()
         {
             _memInfo.Text = MemoryInfoText();
+            _memBudget.Text = MemoryBudgetText();
             string warning = MemoryWarningText();
             _memWarn.Text = warning;
             _memWarn.Visible = warning.Length > 0;
         }
 
-        /// <summary>자동이면 값 칸에 자동 값을 보이고 잠근다. 직접 지정이면 마지막으로 정한 값(없으면 자동 값)을 보이고 푼다.</summary>
+        /// <summary>자동 값은 잠그고, 직접 지정 상한과 여유 RAM 값은 각각 기억한다.</summary>
         private void SyncMemoryUi()
         {
             bool manual = _memMode.SelectedIndex == 1;
+            bool reserve = _memMode.SelectedIndex == 2;
             bool was = _memLoading;
             _memLoading = true;
             try
             {
-                _memGb.Enabled = manual;
-                _memGb.Value = manual && _lastManualGb > 0
-                    ? Math.Clamp((decimal)_lastManualGb, _memGb.Minimum, _memGb.Maximum)
+                _memGb.Enabled = manual || reserve;
+                double value = reserve ? _lastReserveGb : _lastManualGb;
+                _memGb.Value = (manual || reserve) && value > 0
+                    ? Math.Clamp((decimal)value, _memGb.Minimum, _memGb.Maximum)
                     : AutoGb();
                 if (manual) _lastManualGb = (double)_memGb.Value;
+                if (reserve) _lastReserveGb = (double)_memGb.Value;
             }
             finally { _memLoading = was; }
             RefreshMemoryTexts();
@@ -533,7 +559,8 @@ namespace NanumCsvViewer
             try
             {
                 _lastManualGb = S.AnalysisMemoryManualGb;
-                SelectIndex(_memMode, S.AnalysisMemoryAuto ? 0 : 1);
+                _lastReserveGb = S.AnalysisMemoryReserveGb;
+                SelectIndex(_memMode, S.AnalysisMemoryReserve ? 2 : S.AnalysisMemoryAuto ? 0 : 1);
             }
             finally { _memLoading = false; }
             SyncMemoryUi();
@@ -546,10 +573,14 @@ namespace NanumCsvViewer
             S.TrimRecent();
             if (_deleteIndex.Checked != S.DeleteIndexOnClose) Host.ApplyDeleteIndexOnClose(_deleteIndex.Checked);
             bool manual = _memMode.SelectedIndex == 1;
+            bool reserve = _memMode.SelectedIndex == 2;
             if (manual) _lastManualGb = (double)_memGb.Value;
-            S.AnalysisMemoryAuto = !manual;
+            if (reserve) _lastReserveGb = (double)_memGb.Value;
+            if (!reserve) S.AnalysisMemoryAuto = !manual;
+            S.AnalysisMemoryReserve = reserve;
             S.AnalysisMemoryManualGb = _lastManualGb;
-            AnalysisMemoryBudget.Configure(S.AnalysisMemoryAuto, S.AnalysisMemoryManualGb);
+            S.AnalysisMemoryReserveGb = _lastReserveGb;
+            AnalysisMemoryBudget.Configure(S.AnalysisMemoryAuto, S.AnalysisMemoryManualGb, reserve, S.AnalysisMemoryReserveGb);
             return true;
         }
 
@@ -560,6 +591,7 @@ namespace NanumCsvViewer
             _deleteIndex.Checked = d.DeleteIndexOnClose;
             _recent.Value = d.RecentCount;
             _lastManualGb = d.AnalysisMemoryManualGb;
+            _lastReserveGb = d.AnalysisMemoryReserveGb;
             SelectIndex(_memMode, d.AnalysisMemoryAuto ? 0 : 1);
             SyncMemoryUi();
         }

@@ -53,7 +53,8 @@ namespace NanumCsvViewer
         public Form1(AppSettings settings, string? startupPath = null)
         {
             _settings = settings;
-            AnalysisMemoryBudget.Configure(settings.AnalysisMemoryAuto, settings.AnalysisMemoryManualGb);
+            AnalysisMemoryBudget.Configure(settings.AnalysisMemoryAuto, settings.AnalysisMemoryManualGb,
+                settings.AnalysisMemoryReserve, settings.AnalysisMemoryReserveGb);
             _startupPath = startupPath;
             InitializeComponent();
             RestoreWindowGeometry();   // 저장된 창 위치·크기(모니터 구성이 바뀌었으면 보이는 곳으로)

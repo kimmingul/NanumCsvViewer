@@ -28,6 +28,10 @@ namespace NanumCsvViewer
         /// <summary>수동 상한(GB). 0 = 아직 정하지 않음(설정 화면이 자동 값으로 채운다). 수동 모드에서도 물리 메모리를 넘는 값은 물리 메모리로 제한된다.</summary>
         public double AnalysisMemoryManualGb { get; set; } = 0;
         public const double MaxAnalysisMemoryGb = 1 << 20;
+        /// <summary>true면 분석 메모리 예산을 "분석 시작 시점의 가용 메모리 − AnalysisMemoryReserveGb"로 정한다(자동·수동보다 우선). 기본 꺼짐.</summary>
+        public bool AnalysisMemoryReserve { get; set; } = false;
+        /// <summary>남길 메모리(GB). 기본 4, 정규화 범위 0.5 ~ MaxAnalysisMemoryGb. 자동·수동 값과 따로 저장된다.</summary>
+        public double AnalysisMemoryReserveGb { get; set; } = 4;
 
         // ---- v2 AI 에이전트
         /// <summary>omp 실행 파일 경로. 비우면 자동 탐색.</summary>
@@ -168,6 +172,8 @@ namespace NanumCsvViewer
             DefaultEncoding = DefaultEncoding is EncodingDetector.Utf8 or EncodingDetector.Cp949 ? DefaultEncoding : AutoEncoding;
             AnalysisMemoryManualGb = double.IsNaN(AnalysisMemoryManualGb) || AnalysisMemoryManualGb <= 0 ? 0
                 : Math.Clamp(AnalysisMemoryManualGb, AnalysisMemoryBudget.MinimumManualGb, MaxAnalysisMemoryGb);
+            AnalysisMemoryReserveGb = double.IsNaN(AnalysisMemoryReserveGb) ? 4
+                : Math.Clamp(AnalysisMemoryReserveGb, AnalysisMemoryBudget.MinimumManualGb, MaxAnalysisMemoryGb);
             RecentCount = Math.Clamp(RecentCount, 1, MaxRecentWorkspaces);
             RecentWorkspaces ??= new();
             TrimRecent();
@@ -201,6 +207,7 @@ namespace NanumCsvViewer
             var d = new AppSettings();
             DefaultEncoding = d.DefaultEncoding; DeleteIndexOnClose = d.DeleteIndexOnClose; RecentCount = d.RecentCount;
             AnalysisMemoryAuto = d.AnalysisMemoryAuto; AnalysisMemoryManualGb = d.AnalysisMemoryManualGb;
+            AnalysisMemoryReserve = d.AnalysisMemoryReserve; AnalysisMemoryReserveGb = d.AnalysisMemoryReserveGb;
         }
 
         /// <summary>테스트가 사용자의 실제 설정 파일(%APPDATA%\NanumCsvViewer\settings.json)을 건드리지 않도록 설정 폴더를 바꾸는 이음매. 앱은 쓰지 않는다.</summary>

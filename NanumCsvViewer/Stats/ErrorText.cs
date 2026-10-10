@@ -139,7 +139,7 @@ namespace NanumCsvViewer.Stats
             (@"Unrecognized model format '(.*)'\. Expected (.+)\.", "알 수 없는 모형 형식 '$1'입니다. $2 형식이어야 합니다."),
             (@"Unsupported model format version (\d+)\..*", "지원하지 않는 모형 형식 버전 $1입니다."),
             (@"Feature count (\d+) does not match the model \((\d+)\)\.", "특성 수 $1이(가) 모형($2)과 맞지 않습니다."),
-            (@"This analysis exceeds its memory budget\..*", "이 분석이 메모리 예산을 초과합니다. 행을 거르거나 컬럼을 줄여 다시 시도하세요. 설정에서 상한을 올릴 수 있습니다."),
+            (@"This analysis exceeds its memory budget\..*", "이 분석이 메모리 예산을 초과합니다. 행을 거르거나 컬럼을 줄여 다시 시도하세요. 설정에서 상한을 올리거나 남길 메모리를 줄일 수 있습니다."),
             (@"The original file is never overwritten\..*", "원본 파일은 덮어쓰지 않습니다. 다른 파일 이름을 고르세요."),
             (@"Indexing is not complete\.", "인덱싱이 아직 끝나지 않았습니다."),
             (@"Enter a formula.*", "식을 입력하세요. 예: y ~ x + C(group)"),

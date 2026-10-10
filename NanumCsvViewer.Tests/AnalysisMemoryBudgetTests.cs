@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json;
 using NanumCsvViewer.Charting;
 using NanumCsvViewer.Csv;
@@ -59,38 +58,101 @@ namespace NanumCsvViewer.Tests
             Assert.True(AnalysisMemoryBudget.AvailableBytes <= physical);
         }
 
+        [Theory]
+        [InlineData(32.0, 64 * GB, 32 * GB)]          // 여유가 충분
+        [InlineData(4.0, 4 * GB, 0L)]                 // 정확히 같으면 남는 양 0
+        [InlineData(4.0, 3 * GB, 0L)]                 // 가용 메모리보다 많이 남기면 0
+        [InlineData(4.0, 4 * GB + 100 * MB, 100 * MB)]   // 512 MB 하한으로 끌어올리지 않는다
+        [InlineData(0.5, 513 * MB, 1 * MB)]
+        [InlineData(4.0, 0L, 0L)]                     // 가용 메모리를 못 읽음
+        public void Reserve_is_available_memory_minus_the_reserved_amount_without_a_floor(double reserveGb, long available, long expected)
+            => Assert.Equal(expected, AnalysisMemoryBudget.ForReserve(reserveGb, available));
+
         [Fact]
         public void Current_follows_the_configured_mode()
         {
             long physical = AnalysisMemoryBudget.PhysicalBytes;
             try
             {
-                AnalysisMemoryBudget.Configure(true, 0);
+                AnalysisMemoryBudget.Configure(true, 0, false, 4);
                 Assert.Equal(AnalysisMemoryBudget.ForPhysicalMemory(physical), AnalysisMemoryBudget.Current);
-                AnalysisMemoryBudget.Configure(false, 1);
+                AnalysisMemoryBudget.Configure(false, 1, false, 4);
                 Assert.Equal(AnalysisMemoryBudget.ForManual(1, physical), AnalysisMemoryBudget.Current);
-                AnalysisMemoryBudget.Configure(false, 1_000_000);
+                AnalysisMemoryBudget.Configure(false, 1_000_000, false, 4);
                 Assert.Equal(physical, AnalysisMemoryBudget.Current);                     // 물리 메모리 이상은 못 준다
             }
-            finally { AnalysisMemoryBudget.Configure(true, 0); }
+            finally { AnalysisMemoryBudget.Configure(true, 0, false, 4); }
+        }
+
+        [Fact]
+        public void Consumer_stops_with_the_limit_exception_when_the_reserve_leaves_no_room()
+        {
+            var rows = new[] { new[] { "a" } };
+            double impossibleGb = AnalysisMemoryBudget.PhysicalBytes / AnalysisMemoryBudget.BytesPerGb + 1;
+            try
+            {
+                AnalysisMemoryBudget.Configure(true, 0, true, impossibleGb);
+                Assert.Throws<AnalysisMemoryLimitException>(() => AnalysisSnapshot.Collect(rows, default));
+            }
+            finally { AnalysisMemoryBudget.Configure(true, 0, false, 4); }
+            Assert.Equal("a", Assert.Single(AnalysisSnapshot.Collect(rows, default).Rows)[0]); // 정책을 되돌리면 원래 데이터로 다시 동작
+        }
+
+        [Fact]
+        public void Exhausted_reserve_stops_boosting_fit_but_not_saved_model_predictions()
+        {
+            var headers = new[] { "y", "x" };
+            var rows = Enumerable.Range(0, 24).Select(i => new[] { (i * 2).ToString(), i.ToString() }).ToList();
+            var options = new GradientBoostingOptions { MaxIterations = 4, MaxLeafNodes = 3, MinSamplesLeaf = 1, MaxBins = 4 };
+            FeatureMatrix matrix;
+            string saved;
+            double[] expected;
+            using (AnalysisMemoryBudget.Override(GB))
+            {
+                matrix = FeatureMatrixBuilder.Build(rows, headers, new[] { 1 }, _ => VariableKind.Numeric, 0, TargetKind.Numeric);
+                var fitted = GradientBoosting.Fit(matrix.X, matrix.NumericTarget!, options);
+                expected = fitted.PredictValues(matrix.X);
+                var bundle = ModelBundle.FromFeatures(ModelTypes.GradientBoosting, ModelTask.Regression, matrix,
+                    headers, _ => VariableKind.Numeric, "y", fitted, null, matrix.RowCount, "reserve");
+                saved = ModelStore.Serialize(bundle, "3.4.2", new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc));
+            }
+            try
+            {
+                AnalysisMemoryBudget.Configure(true, 0, true, AnalysisMemoryBudget.PhysicalBytes / AnalysisMemoryBudget.BytesPerGb + 1);
+                Assert.Throws<AnalysisMemoryLimitException>(() => GradientBoosting.Fit(matrix.X, matrix.NumericTarget!, options));
+                var loaded = ModelStore.Load(saved).Model;
+                Assert.Equal(expected, ModelStore.PredictEncoded(loaded, matrix.X).Value);
+            }
+            finally { AnalysisMemoryBudget.Configure(true, 0, false, 4); }
         }
 
         // ---------------------------------------------------------------- 설정 저장
 
         [Fact]
-        public void Settings_round_trip_and_default_to_auto()
+        public void Old_settings_files_keep_auto_and_leave_reserve_off()
         {
-            var d = new AppSettings();
-            Assert.True(d.AnalysisMemoryAuto);
-            Assert.Equal(0, d.AnalysisMemoryManualGb);
+            var old = JsonSerializer.Deserialize<AppSettings>("""{ "Theme": "Light" }""")!.Normalize();
+            Assert.True(old.AnalysisMemoryAuto);
+            Assert.False(old.AnalysisMemoryReserve);
 
-            var back = JsonSerializer.Deserialize<AppSettings>(
-                JsonSerializer.Serialize(new AppSettings { AnalysisMemoryAuto = false, AnalysisMemoryManualGb = 12.5 }))!.Normalize();
+            var manual = JsonSerializer.Deserialize<AppSettings>(
+                """{ "AnalysisMemoryAuto": false, "AnalysisMemoryManualGb": 12.5 }""")!.Normalize();
+            Assert.False(manual.AnalysisMemoryAuto);
+            Assert.Equal(12.5, manual.AnalysisMemoryManualGb);
+            Assert.False(manual.AnalysisMemoryReserve);
+        }
+
+        [Fact]
+        public void Manual_and_reserve_values_persist_independently()
+        {
+            var back = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings
+            {
+                AnalysisMemoryAuto = false, AnalysisMemoryManualGb = 12.5, AnalysisMemoryReserve = true, AnalysisMemoryReserveGb = 6.5,
+            }))!.Normalize();
             Assert.False(back.AnalysisMemoryAuto);
             Assert.Equal(12.5, back.AnalysisMemoryManualGb);
-
-            var old = JsonSerializer.Deserialize<AppSettings>("""{ "Theme": "Light" }""")!.Normalize();
-            Assert.True(old.AnalysisMemoryAuto);                                          // 옛 설정 파일은 자동
+            Assert.True(back.AnalysisMemoryReserve);
+            Assert.Equal(6.5, back.AnalysisMemoryReserveGb);
         }
 
         [Theory]
@@ -105,31 +167,35 @@ namespace NanumCsvViewer.Tests
             Assert.Equal(expected, s.AnalysisMemoryManualGb);
         }
 
-        [Fact]
-        public void Files_reset_restores_auto()
+        [Theory]
+        [InlineData(-3.0, AnalysisMemoryBudget.MinimumManualGb)]
+        [InlineData(0.0, AnalysisMemoryBudget.MinimumManualGb)]
+        [InlineData(0.01, AnalysisMemoryBudget.MinimumManualGb)]
+        [InlineData(2.0, 2.0)]
+        [InlineData(1e12, AppSettings.MaxAnalysisMemoryGb)]
+        [InlineData(double.NaN, 4.0)]
+        public void Hand_edited_reserve_values_are_pulled_into_range(double raw, double expected)
         {
-            var s = new AppSettings { AnalysisMemoryAuto = false, AnalysisMemoryManualGb = 9, DeleteIndexOnClose = true };
+            var s = new AppSettings { AnalysisMemoryReserve = true, AnalysisMemoryReserveGb = raw }.Normalize();
+            Assert.Equal(expected, s.AnalysisMemoryReserveGb);
+        }
+
+        [Fact]
+        public void Files_reset_restores_auto_and_turns_reserve_off()
+        {
+            var s = new AppSettings
+            {
+                AnalysisMemoryAuto = false, AnalysisMemoryManualGb = 9, AnalysisMemoryReserve = true, AnalysisMemoryReserveGb = 12,
+                DeleteIndexOnClose = true,
+            };
             s.ResetFiles();
             Assert.True(s.AnalysisMemoryAuto);
             Assert.Equal(0, s.AnalysisMemoryManualGb);
+            Assert.False(s.AnalysisMemoryReserve);
+            Assert.Equal(4, s.AnalysisMemoryReserveGb);
         }
 
         // ---------------------------------------------------------------- 소비자가 공급자를 쓴다
-
-        [Fact]
-        public void Option_defaults_of_every_consumer_come_from_the_provider()
-        {
-            using (AnalysisMemoryBudget.Override(7 * MB))
-            {
-                Assert.Equal(7 * MB, new DesignMatrixOptions().MemoryBudgetBytes);
-                Assert.Equal(7 * MB, new FeatureMatrixOptions().MemoryBudgetBytes);
-                Assert.Equal(7 * MB, new GradientBoostingOptions().MemoryBudgetBytes);
-                Assert.Equal(7 * MB, KaplanMeierAnalysis.MemoryBudgetBytes);
-                Assert.Equal(7 * MB, new ReferentialIntegrityOptions().ParentKeyMemoryBudgetBytes);
-                Assert.Equal(7 * MB, ConformanceProfileJson.DefaultReferenceBudgetBytes);
-            }
-            Assert.NotEqual(7 * MB, new DesignMatrixOptions().MemoryBudgetBytes);          // 범위를 벗어나면 원래대로
-        }
 
         [Fact]
         public void Basic_analysis_snapshot_uses_the_provider()
@@ -260,9 +326,5 @@ namespace NanumCsvViewer.Tests
                 Assert.Throws<AnalysisMemoryLimitException>(() => KaplanMeierAnalysis.FromRows(rows, 0, 1, null, null, default));
         }
 
-        // ---------------------------------------------------------------- 설정 화면
-
-        private static T Field<T>(object o, string name) =>
-            (T)o.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(o)!;
     }
 }

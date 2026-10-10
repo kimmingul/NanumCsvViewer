@@ -355,6 +355,7 @@ namespace NanumCsvViewer.Tests
             ShowTypeBadges = false, MaxCellLines = 8, GridFontSize = 12f,
             DefaultEncoding = EncodingDetector.Cp949, DeleteIndexOnClose = true, RecentCount = 5,
             AnalysisMemoryAuto = false, AnalysisMemoryManualGb = AnalysisMemoryBudget.MinimumManualGb,
+            AnalysisMemoryReserve = true, AnalysisMemoryReserveGb = 1.5,
         };
 
         [Fact]
@@ -392,6 +393,7 @@ namespace NanumCsvViewer.Tests
                 Assert.Equal((d.ShowTypeBadges, d.MaxCellLines, d.GridFontSize), (settings.ShowTypeBadges, settings.MaxCellLines, settings.GridFontSize));
                 Assert.Equal((d.DefaultEncoding, d.DeleteIndexOnClose, d.RecentCount), (settings.DefaultEncoding, settings.DeleteIndexOnClose, settings.RecentCount));
                 Assert.Equal((d.AnalysisMemoryAuto, d.AnalysisMemoryManualGb), (settings.AnalysisMemoryAuto, settings.AnalysisMemoryManualGb));
+                Assert.Equal((d.AnalysisMemoryReserve, d.AnalysisMemoryReserveGb), (settings.AnalysisMemoryReserve, settings.AnalysisMemoryReserveGb));
             });
         }
 
@@ -422,11 +424,9 @@ namespace NanumCsvViewer.Tests
                 var mode = Get<ComboBox>("_memMode");
                 var gb = Get<NumericUpDown>("_memGb");
                 var warn = Get<Label>("_memWarn");
-                var info = Get<Label>("_memInfo");
 
                 Assert.Equal(0, mode.SelectedIndex);                       // 기본은 자동이고 값 칸은 잠겨 있다
                 Assert.False(gb.Enabled);
-                Assert.Contains("GB", info.Text);
 
                 mode.SelectedIndex = 1;
                 Assert.True(gb.Enabled);

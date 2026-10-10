@@ -72,5 +72,5 @@ internal sealed record AnalysisSnapshot(List<string[]> Rows)
 
 public sealed class AnalysisMemoryLimitException : InvalidOperationException
 {
-    public AnalysisMemoryLimitException() : base("This analysis exceeds its memory budget. Filter the data or select fewer columns and try again. The limit can be raised in Settings.") { }
+    public AnalysisMemoryLimitException() : base("This analysis exceeds its memory budget. Filter the data or select fewer columns and try again. In Settings, raise the cap or reduce the memory to keep free.") { }
 }

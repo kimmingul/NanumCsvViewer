@@ -418,8 +418,8 @@ namespace NanumCsvViewer
                         bool overBudget = ex is AnalysisMemoryLimitException;
                         _badgeStrip.Controls.Add(new Label { AutoSize = true,
                             Text = overBudget
-                                ? LT("This chart exceeds the calculation or display budget. Filter rows or select fewer columns (up to 128 for a heatmap). The limit can be raised in Settings.",
-                                    "차트의 계산·표시 예산을 초과했습니다. 행 필터를 적용하거나 컬럼 수를 줄이세요(히트맵 최대 128개). 설정에서 상한을 올릴 수 있습니다.")
+                                ? LT("This chart exceeds the calculation or display budget. Filter rows or select fewer columns (up to 128 for a heatmap). In Settings, raise the cap or reduce the memory to keep free.",
+                                    "차트의 계산·표시 예산을 초과했습니다. 행 필터를 적용하거나 컬럼 수를 줄이세요(히트맵 최대 128개). 설정에서 상한을 올리거나 남길 메모리를 줄일 수 있습니다.")
                                 : ex.Message, ForeColor = _ctx.Palette.Text });
                         if (overBudget && _ctx.OpenMemorySettings is { } openSettings)
                         {

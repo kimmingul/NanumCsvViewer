@@ -36,7 +36,13 @@ namespace NanumCsvViewer.Stats
         public EvalScheme Scheme { get; init; } = EvalScheme.Holdout;
         public double TestFraction { get; init; } = 0.3;
         public int Folds { get; init; } = 5;
-        public long MemoryBudgetBytes { get; init; } = AnalysisMemoryBudget.Current;
+        private long? _memoryBudgetBytes;
+        /// <summary>명시하지 않으면 적합 시점의 공용 예산을 쓴다. 저장된 모형을 읽을 때는 예산이 필요하지 않다.</summary>
+        public long MemoryBudgetBytes
+        {
+            get => _memoryBudgetBytes ?? AnalysisMemoryBudget.Current;
+            init => _memoryBudgetBytes = value;
+        }
     }
 
     /// <summary>한 번 적합된 히스토그램 부스팅 모델. 예측은 학습에 쓴 분위 경계로 구간을 다시 매긴다.</summary>

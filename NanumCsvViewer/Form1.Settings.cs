@@ -20,14 +20,14 @@ namespace NanumCsvViewer
         }
 
         /// <summary>
-        /// 분석 메모리 예산 초과 안내. 본문 뒤에 설정에서 상한을 올릴 수 있다는 문장을 붙이고, 예(Yes)를 누르면 설정의 '파일과 데이터' 쪽을 연다.
+        /// 분석 메모리 예산 초과 안내. 본문 뒤에 설정에서 상한을 올리거나(남길 메모리 정책이면 남길 양을 줄여) 조정할 수 있다는 문장을 붙이고, 예(Yes)를 누르면 설정의 '파일과 데이터' 쪽을 연다.
         /// </summary>
         internal void ShowMemoryBudgetExceeded(IWin32Window? owner, string message, string? caption = null)
         {
             if (IsDisposed || _closing) return;
             string text = message + "\n\n" + LT(
-                "The analysis memory cap can be raised in Settings (Files & Data). Open Settings now?",
-                "설정에서 상한을 올릴 수 있습니다. 지금 설정(파일과 데이터)을 여시겠습니까?");
+                "The analysis memory limit can be changed in Settings (Files & Data): raise the cap, or reduce the memory to leave free if that policy is selected. Open Settings now?",
+                "설정(파일과 데이터)에서 상한을 올리거나, '남길 메모리' 정책이면 남길 양을 줄일 수 있습니다. 지금 설정을 여시겠습니까?");
             var answer = MessageBox.Show(owner ?? this, text, caption ?? Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (answer == DialogResult.Yes && !IsDisposed) ShowSettings("files", owner);
         }
