@@ -30,14 +30,10 @@ jobs:
           ditto -c -k --keepParent "$app" NanumCsvViewer-v3.4.3-macos-arm64.zip
       - name: Upload to existing release
         uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.4.3
+          files: NanumCsvViewer-v3.4.3-macos-arm64.zip
           fail_on_unmatched_files: true
           append_body: true
           body: |
             macOS arm64 추가 자산은 GitHub Actions macos-26 러너에서 만든 Eto CSV 뷰어입니다. Developer ID 서명과 공증은 없습니다. 최소 OS는 macOS 26이며, Windows 앱의 전체 기능은 포함하지 않습니다.
-          tag_name: v3.4.3
-          files: NanumCsvViewer-v3.4.3-macos-arm64.zip
-          fail_on_unmatched_files: true
-          body: |
-            macOS arm64 자산은 GitHub Actions `macos-26` 러너에서 만든 Eto CSV 뷰어입니다.
-            Apple Developer ID 서명과 공증은 하지 않았습니다. 다운로드한 앱은 Gatekeeper가 차단할 수 있습니다.
-            최소 OS는 macOS 26입니다. 통계·작업 공간·AI 등 Windows 앱의 전체 기능은 포함하지 않습니다.
