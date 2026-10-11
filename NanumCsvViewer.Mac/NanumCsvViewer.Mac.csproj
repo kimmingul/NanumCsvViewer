@@ -9,7 +9,8 @@
     <ApplicationId>kr.nanumspace.csvviewer</ApplicationId>
     <ApplicationTitle>Nanum CSV Viewer</ApplicationTitle>
     <SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
-    <PublishTrimmed>false</PublishTrimmed>
+    <PublishTrimmed>true</PublishTrimmed>
+    <LinkMode>None</LinkMode>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\NanumCsvViewer.Core\NanumCsvViewer.Core.csproj" />
