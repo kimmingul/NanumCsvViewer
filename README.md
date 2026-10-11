@@ -346,6 +346,8 @@
 | CSV 엔진 | 외부 라이브러리 없이 직접 구현(SIMD 바이트 스캐너 + span 파서) |
 | 인코딩 | `CodePagesEncodingProvider`로 CP949/EUC-KR(코드페이지 949) 지원 |
 
+개발 계획: [공통 C# 엔진 + macOS Eto.Forms](docs/MACOS_ETO_DEVELOPMENT_PLAN.md). Windows UI 유지, 엔진 분리, 대용량 그리드 검증, 기능 이식·서명 배포의 단계와 완료 기준을 정리했습니다. Windows에서 여는 Eto 뷰어는 `dotnet run --project NanumCsvViewer.Eto -c Release`입니다. macOS 빌드·서명 검증은 아직 진행하지 않았습니다.
+
 ## 🚀 빌드 & 실행
 
 요구 사항: [.NET 10 SDK](https://dotnet.microsoft.com/download), **ALGLIB Commercial for C#** 배포본(라이선스 보유자 전용)

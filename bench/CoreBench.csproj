@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>NanumCsvViewer.CoreBench</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="CoreBench.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NanumCsvViewer.Core\NanumCsvViewer.Core.csproj" />
+  </ItemGroup>
+</Project>

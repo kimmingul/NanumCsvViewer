@@ -42,6 +42,7 @@
   <ItemGroup>
     <!-- ALGLIB Commercial(순수 C#, 이슈 #27). 소스는 로컬 전용 ExternalLibs/ALGLIB — 단일 exe에 번들된다. -->
     <ProjectReference Include="..\NanumCsvViewer.Alglib\NanumCsvViewer.Alglib.csproj" />
+    <ProjectReference Include="..\NanumCsvViewer.Core\NanumCsvViewer.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

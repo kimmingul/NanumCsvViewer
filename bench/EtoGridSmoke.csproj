@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>false</UseWindowsForms>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="EtoGridSmoke.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NanumCsvViewer.Core\NanumCsvViewer.Core.csproj" />
+    <PackageReference Include="Eto.Forms" Version="2.12.0" />
+    <PackageReference Include="Eto.Platform.Windows" Version="2.12.0" />
+  </ItemGroup>
+</Project>
