@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>NanumCsvViewer</RootNamespace>
+    <!-- 그리드가 쓰는 CSV 엔진. WinForms·Eto·AppKit 참조 없음. -->
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="NanumCsvViewer" />
+    <InternalsVisibleTo Include="NanumCsvViewer.Tests" />
+    <InternalsVisibleTo Include="NanumCsvViewer.CoreBench" />
+  </ItemGroup>
+</Project>
