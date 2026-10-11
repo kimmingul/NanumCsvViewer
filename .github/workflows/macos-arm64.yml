@@ -20,7 +20,6 @@ jobs:
           xcodebuild -version
       - name: Install macOS workload
         run: dotnet workload install macos
-        run: dotnet workload install macos
       - name: Publish arm64 app
         run: dotnet publish NanumCsvViewer.Mac/NanumCsvViewer.Mac.csproj -c Release -r osx-arm64 --self-contained true
       - name: Package app
