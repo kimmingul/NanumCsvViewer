@@ -25,18 +25,25 @@ jobs:
         run: |
           python3 - <<'PY'
           import pathlib
-          files = list(pathlib.Path.home().glob(".dotnet/packs/Microsoft.macOS.Sdk.net10.0_26.0/*/targets/Xamarin.Shared.Sdk.targets"))
-          path = files[0]
-          text = path.read_text()
-          start = text.find("requires Xcode")
-          if start < 0:
+          root = pathlib.Path.home() / ".dotnet/packs"
+          hits = [p for p in root.rglob("*") if p.is_file() and b"requires Xcode" in p.read_bytes()]
+          print("hits", len(hits))
+          for path in hits:
+              text = path.read_text(errors="replace")
+              start = text.find("requires Xcode")
+              open_at = text.rfind("<Error", 0, start)
+              close_at = text.find("/>", start)
+              print(path, open_at, close_at)
+              if open_at >= 0 and close_at > start:
+                  path.write_text(text[:open_at] + text[close_at + 2:])
+                  print("removed", path)
+          targets = list(root.glob("Microsoft.macOS.Sdk.net10.0_26.0/*/targets/Xamarin.Shared.Sdk.targets"))
+          if targets:
+              lines = targets[0].read_text(errors="replace").splitlines()
+              for i in range(2370, min(len(lines), 2395)):
+                  print(f"{i+1}:{lines[i]}")
+          if not hits:
               raise SystemExit("version check text not found")
-          open_at = text.rfind("<Error", 0, start)
-          close_at = text.find("/>", start)
-          if open_at < 0 or close_at < 0:
-              raise SystemExit("Error element not found")
-          path.write_text(text[:open_at] + text[close_at + 2:])
-          print(f"removed Xcode version Error from {path}")
           PY
       - name: Publish arm64 app
         run: dotnet publish NanumCsvViewer.Mac/NanumCsvViewer.Mac.csproj -c Release -r osx-arm64 --self-contained true
