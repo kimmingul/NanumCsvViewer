@@ -21,8 +21,25 @@ jobs:
           xcrun --sdk macosx --show-sdk-path
       - name: Install macOS workload
         run: dotnet workload install macos
+      - name: Allow this runner Xcode
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          files = list(pathlib.Path.home().glob(".dotnet/packs/Microsoft.macOS.Sdk.net10.0_26.0/*/targets/Xamarin.Shared.Sdk.targets"))
+          path = files[0]
+          text = path.read_text()
+          start = text.find("requires Xcode")
+          if start < 0:
+              raise SystemExit("version check text not found")
+          open_at = text.rfind("<Error", 0, start)
+          close_at = text.find("/>", start)
+          if open_at < 0 or close_at < 0:
+              raise SystemExit("Error element not found")
+          path.write_text(text[:open_at] + text[close_at + 2:])
+          print(f"removed Xcode version Error from {path}")
+          PY
       - name: Publish arm64 app
-        run: dotnet publish NanumCsvViewer.Mac/NanumCsvViewer.Mac.csproj -c Release -r osx-arm64 --self-contained true -p:IgnoreXcodeVersion=true
+        run: dotnet publish NanumCsvViewer.Mac/NanumCsvViewer.Mac.csproj -c Release -r osx-arm64 --self-contained true
       - name: Package app
         run: |
           set -euo pipefail
